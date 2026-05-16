@@ -1,0 +1,51 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "hermes-fetch-ai"
+version = "0.1.0"
+description = "Thin policy-aware bridge between Hermes Agent tools and Fetch.ai uAgents"
+readme = "README.md"
+requires-python = ">=3.11,<3.13"
+license = {text = "MIT"}
+dependencies = [
+  "uagents==0.24.2",
+  "uagents-core==0.4.4",
+  "uagents-adapter[mcp]==0.6.2",
+  "mcp==1.27.1",
+  "pydantic>=2.8,<3",
+  "PyYAML>=6,<7",
+  "python-dotenv>=1.0,<2",
+  "jsonschema>=4.20,<5",
+  "httpx>=0.25,<1",
+]
+
+[project.optional-dependencies]
+dev = [
+  "pytest>=8,<9",
+  "pytest-asyncio>=0.23,<1",
+  "anyio>=4,<5",
+  "ruff>=0.5",
+  "mypy>=1.10",
+  "types-PyYAML",
+]
+
+[project.scripts]
+hermes-fetch-ai = "hermes_fetch_ai.cli:main"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+testpaths = ["tests"]
+pythonpath = ["src"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py311"
+
+[tool.mypy]
+python_version = "3.11"
+ignore_missing_imports = true

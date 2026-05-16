@@ -1,0 +1,28 @@
+version: 1
+agent:
+  name: hermes_fetch_hermes_local
+  port: 8002
+  network: testnet
+  mode: endpoint
+  publish_manifest: false
+  enable_agent_inspector: false
+  dev_random_seed: true
+hermes_mcp:
+  mode: in_process_hermes_tools
+policy:
+  public_tools:
+    - skills_list
+  denied_tools:
+    - skill_view
+    - web
+    - browser
+    - image
+    - tts
+    - kanban
+    - terminal
+    - patch
+    - write_file
+logging:
+  redaction: true
+chat:
+  enable_chat: false

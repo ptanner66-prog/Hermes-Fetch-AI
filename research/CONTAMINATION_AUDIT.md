@@ -1,79 +1,89 @@
 # Contamination Audit
 Date accessed: 2026-05-16
-Re-run after the adversarial hardening pass. Adds three new public-safe files (`HARDENING_AUDIT.md`, `HARDENED_ARCHITECTURE_DECISION.md`, `HARDENED_BUILD_PROMPT.md`) and an updated `OPEN_QUESTIONS.md`. Vendored evidence under `research/repos/`, `research/pkgs/`, `research/public/`, and any `*.log` remains git-ignored and is not in scope.
+Status: updated after the extreme hardening pass.
+
 ## Scope scanned
-- Every tracked file in `git ls-files`.
-- Every safe untracked file in `git ls-files --others --exclude-standard` (currently zero outside ignored caches).
-- New files added by this hardening pass:
-  - `research/HARDENING_AUDIT.md`
-  - `research/HARDENED_ARCHITECTURE_DECISION.md`
-  - `research/HARDENED_BUILD_PROMPT.md`
-  - This updated `research/CONTAMINATION_AUDIT.md`.
-Out-of-scope (intentionally ignored): `research/repos/`, `research/pkgs/`, `research/public/`, `*.log`, `.env`, virtualenvs, caches.
-## Terms searched
-- `MG`
-- `Motion Granted`
-- `citator`
-- `client`
-- `PACER`
-- `Clay`
-- `legal`
-- `Tannerize`
-- `private repo names`
-- `credentials`
-- `OpenClaw`
-## Counts over safe non-ignored files
-(Verified by `Grep` over the repository, excluding `research/pkgs/**`.)
-| Term | Files matched | Where |
-|---|---|---|
-| MG | 5 | operator prompts + guardrail audits |
-| Motion Granted | guardrail audits only |  |
-| citator | guardrail audits only |  |
-| client | many | engineering uses: MCP client, ClientSession, local client uAgent, stdio_client |
-| PACER | guardrail audits only |  |
-| Clay | guardrail audits only |  |
-| legal | guardrail audits only |  |
-| Tannerize | guardrail audits only |  |
-| private repo names | guardrail audits only |  |
-| credentials | several | security/secret-handling text only |
-| OpenClaw | guardrail audits only |  |
-## Disposition
-### Guardrail-only terms (`MG`, `Motion Granted`, `citator`, `PACER`, `Clay`, `Tannerize`, `private repo names`, `OpenClaw`)
-Appear only in operator prompts at the repo root and in audit/guardrail text that names the forbidden term to enforce its exclusion. They are NOT present in any architecture, source, build, security, or public-positioning deliverable. Safe for the current private-first workspace.
-Pre-publication action (before the repo goes public): remove the original operator prompt files (`HERMES_RESEARCH_PROMPT.md`, `AFTER_REPO_SETUP_PROMPT.md`) and replace any audit references with neutral wording that does not echo the keywords. `research/HARDENED_BUILD_PROMPT.md` and `research/HARDENING_AUDIT.md` already use the keywords only as forbidden-term lists; that pattern is acceptable in a private-first research workspace but should be sanitized to a neutral phrasing on first public release.
-### `legal`
-Appears only in:
-- operator prompts forbidding legal-tech / domain-specific content;
-- the build prompt's hard-exclusion list;
-- the contamination audit.
-No domain-specific legal content was added to any implementation-facing deliverable. The hardened build prompt (`research/HARDENED_BUILD_PROMPT.md`) is the new authoritative implementation prompt and contains the same forbidden-term list to ensure the autonomous build does not generate any.
-### `client`
-Engineering uses only:
-- MCP client shim (`HermesMCPClientShim`).
-- Local uAgent client example (`examples/local_client.py` in the build plan).
-- SDK client transports (`ClientSession`, `stdio_client`, `sse_client`, `streamablehttp_client`).
-- Adapter/client lifecycle discussion in research.
-Safe. No customer/client material appears.
-### `credentials`
-Security-only uses:
-- Do-not-commit-credentials warnings.
-- Agentverse / ASI / Hermes credential boundary descriptions.
-- Redaction and audit-log requirements.
-Safe. No actual credential values appear anywhere in tracked files. `.env.example` (to be created by the build prompt) is required to contain placeholders only.
+
+The final hardening pass considers the private-first repository safe to proceed to implementation, with public-release cleanup still required before making the repository public.
+
+Scope:
+
+- Every tracked file from `git ls-files`.
+- Safe untracked research deliverables created by this pass.
+- Public implementation targets that the build prompt will create: `src/`, `docs/`, `examples/`, `README.md`, `.env.example`, `pyproject.toml`, and `LICENSE`.
+
+Out of scope and intentionally ignored:
+
+- `research/repos/`
+- `research/pkgs/`
+- `research/public/`
+- `.env`, `.env.*`
+- virtualenvs, caches, logs, package dumps
+- secrets, keys, certificates
+
+## New final files included in this scan
+
+- `research/EXTREME_HARDENING_AUDIT.md`
+- `research/FINAL_ARCHITECTURE_DECISION.md`
+- `research/FINAL_BUILD_PROMPT.md`
+- `research/GO_NO_GO.md`
+- Updated `research/OPEN_QUESTIONS.md`
+- Updated `research/CONTAMINATION_AUDIT.md`
+
+These files are research/audit/control-plane material, not public implementation docs. They may name forbidden terms only to state exclusions and scan rules.
+
+## Terms searched / guarded
+
+Private/domain-specific guardrail terms remain barred from public implementation artifacts. The final build prompt requires `tests/test_contamination.py` to enforce this against:
+
+- `src/`
+- `docs/`
+- `examples/`
+- `README.md`
+- `.env.example`
+- `pyproject.toml`
+- `LICENSE`, with license-boilerplate carve-outs
+
+The guarded set includes the private/domain-specific terms listed in earlier audits, plus OpenClaw references. Engineering terms such as `client`, `credentials`, and MCP `ClientSession` are not contamination by themselves and must be treated contextually.
+
+## Findings
+
+1. No implementation code exists yet in this pass, so no implementation contamination was introduced.
+2. The new final research files use excluded terms only in hard-exclusion, contamination-scan, or audit contexts.
+3. `research/FINAL_ARCHITECTURE_DECISION.md` and `research/FINAL_BUILD_PROMPT.md` do not include private project examples, private workflows, OpenClaw architecture, payment/marketplace design, wallet UX, or legal-tech content.
+4. `research/FINAL_BUILD_PROMPT.md` explicitly tells the implementation agent not to place forbidden/private terms in public code/docs/examples/README.
+5. `LICENSE` scanning must avoid false positives for normal license/legal boilerplate. The contamination test should not fail merely because a license contains standard legal terms.
+
 ## Public/private boundary status
-- `.gitignore` excludes `.env`, `.env.*`, keys, certificates, caches, logs, virtualenvs, vendored research caches.
-- No `.env` or secret file is intended for commit.
-- The autonomous build is required (by `tests/test_contamination.py`) to fail CI if any forbidden term appears in `src/`, `docs/`, `examples/`, `README.md`, `.env.example`, `pyproject.toml`, or `LICENSE`. The carve-out for `research/`, the operator prompts, and the audit files is explicit and limited.
-- The hardening audit flagged one important public-boundary/security issue: unmodified `MCPServerAdapter.protocols` is sender-blind after handler dispatch and would be unsafe as the production security boundary. This is addressed by the hardened plan, which bans `adapter.protocols` from `uagent_app.py` and requires a bridge-owned policy-aware `Protocol(spec=mcp_protocol_spec, role="server")` with sender-filtered `ListTools` and policy-checked `CallTool` paths.
-## Verification of new hardening files
-I scanned the three new deliverables against the same forbidden-term list:
-- `research/HARDENING_AUDIT.md`: matches limited to (a) explicit forbidden-term lists, (b) the OpenClaw rule, (c) the word "credentials" in security context. No new contamination introduced.
-- `research/HARDENED_ARCHITECTURE_DECISION.md`: no forbidden terms outside the standard "out of scope" list (OpenClaw, legal-tech, payments). No domain-specific or private content.
-- `research/HARDENED_BUILD_PROMPT.md`: explicit forbidden-term list mirrors this audit; no inline contamination.
-## Remaining caution before publication
+
+Safe for autonomous implementation in a private-first workspace.
+
+Not safe for public release until the pre-publication cleanup below is done. This is not a P0/P1 blocker for implementation, but it is a release/publication gate.
+
+## Required implementation gate
+
+The autonomous build must create and pass `tests/test_contamination.py` with these rules:
+
+- Fail on forbidden private/domain-specific terms in public implementation artifacts.
+- Fail on OpenClaw references in public implementation artifacts.
+- Fail on payment/billing/marketplace/wallet UX content beyond explicit out-of-scope statements, if any.
+- Allow `research/`, root operator prompts, and audit/control-plane files to contain scan terms only for guardrail purposes.
+- Allow license/legal boilerplate in `LICENSE` only.
+- Treat `client` and `credentials` contextually as normal engineering/security words, not automatic failures.
+
+## Pre-publication cleanup required
+
 Before making the repository public:
-1. Remove the two operator prompt files (`HERMES_RESEARCH_PROMPT.md`, `AFTER_REPO_SETUP_PROMPT.md`) or replace them with neutral READMEs that do not echo private guardrail keywords.
-2. Trim `research/HARDENED_BUILD_PROMPT.md`, `research/HARDENING_AUDIT.md`, and this audit file to use a neutral phrasing for forbidden terms (e.g. "private-context terms" rather than listing them by name).
-3. Re-run the `Grep` scan; expected outcome is zero matches outside the (then-neutralized) audit text.
-4. Ensure the README/docs/positioning use only the language in `research/PUBLIC_POSITIONING.md`.
-These steps are not required before the autonomous build session begins; they are required before any public publication.
+
+1. Remove or neutralize root operator prompt files.
+2. Neutralize forbidden keyword lists in research/audit files so public readers do not see private guardrail terms repeated.
+3. Re-run the contamination scan over all tracked files.
+4. Confirm zero forbidden/private/domain-specific terms outside neutralized audit text and license boilerplate.
+5. Confirm README/docs use only general AI-infrastructure positioning from `research/PUBLIC_POSITIONING.md`.
+6. Confirm no secrets, `.env`, logs, package dumps, vendored research caches, or private files are tracked.
+
+## Final contamination status
+
+GO for autonomous implementation.
+
+Publication remains gated on the pre-publication cleanup above.
