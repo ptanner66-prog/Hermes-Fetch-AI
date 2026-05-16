@@ -9,6 +9,9 @@ C:\Users\ptann\OneDrive\Work\Hermes Fetch AI
 Mission:
 Harden the Hermes Fetch AI plan far beyond the current pass, then produce a GO/NO-GO decision for autonomous implementation. This is a high-stakes public open-source project intended to be credible to Hermes Agent and Fetch.ai engineers. Treat the existing hardened plan as strong but not sacred.
 
+Definition of perfect for the following autonomous build:
+Perfect means fully implemented and fully tested within the local/offline scope, with automated tests and local demos passing. Do not accept a plan that relies on hosted Fetch/Agentverse/FET setup for CI or core correctness. If hosted Fetch/Agentverse accounts, mailbox linking, wallet setup, or FET funding are needed for optional/manual demos, require a separate `research/FETCH_ACCOUNT_REQUIREMENTS.md` that tells the operator exactly what to create or fund and what remains manual.
+
 Core philosophy:
 This is a connection project, not a reinvention project. Fetch supplies agent identity, addressing, discovery, Agentverse/Almanac rails, mailbox/proxy/endpoint modes, and uAgent protocols. Hermes supplies local agent intelligence, tools, MCP, configuration, redaction, and execution boundaries. This repo supplies the thinnest policy-aware bridge.
 
@@ -149,6 +152,7 @@ Deliverables:
    - one-paragraph rationale
    - final build prompt path
    - remaining non-blocking risks
+   - whether a Fetch/Agentverse account, mailbox link, wallet, or FET funding is needed for manual hosted demos
 
    If NO-GO, include:
    - exact blockers

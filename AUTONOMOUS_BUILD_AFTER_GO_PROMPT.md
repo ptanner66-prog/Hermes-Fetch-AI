@@ -17,6 +17,9 @@ Authority:
 Mission:
 Build the standalone Hermes Fetch AI bridge to completion. Run for as long as needed. Work incrementally. Test after each step. Do not stop at partial green.
 
+Definition of perfect:
+Perfect means fully implemented and fully tested within the local/offline scope, with every automated test passing and every local demo passing. Do not stop at "mostly done", "research complete", "manual steps remain", or "good enough". If a hosted Fetch/Agentverse account, wallet, mailbox link, or FET funding is required only for the manual hosted demo, document the exact requirement in `research/FETCH_ACCOUNT_REQUIREMENTS.md` and continue completing all local/offline work.
+
 Core philosophy:
 This is a connection project, not a reinvention project. Fetch supplies identity, addressing, discovery, Agentverse/Almanac rails, mailbox/proxy/endpoint modes, and uAgent protocols. Hermes supplies local execution, tools, MCP, and safety boundaries. This repo supplies the thinnest policy-aware bridge.
 
@@ -45,6 +48,8 @@ Required final acceptance:
 - `python -m hermes_fetch_ai.cli demo local` passes and prints the expected round trip.
 - contamination tests pass.
 - README/docs are coherent.
+- all local/offline acceptance criteria in `research/FINAL_BUILD_PROMPT.md` are satisfied.
+- if hosted Fetch/Agentverse/FET setup is needed for non-CI demos, `research/FETCH_ACCOUNT_REQUIREMENTS.md` exists and gives exact account, key, wallet, mailbox, and funding steps without using real secrets.
 - no forbidden files are staged/committed.
 - final commit is pushed to `origin/main`.
 
