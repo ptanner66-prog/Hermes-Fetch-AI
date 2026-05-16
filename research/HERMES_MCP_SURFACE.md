@@ -1,5 +1,7 @@
 # Hermes MCP Surface
 
+> Hardened note (2026-05-16): For final v1 decisions, see `research/HARDENED_ARCHITECTURE_DECISION.md`, `research/HARDENED_BUILD_PROMPT.md`, and `research/HARDENING_AUDIT.md`. Where this file disagrees with the hardened deliverables, the hardened deliverables are authoritative.
+
 Date accessed: 2026-05-16
 
 Sources are public package artifacts from `hermes-agent==0.13.0` inspected under `research/pkgs/src/hermes_agent-0.13.0-py3-none-any/`.
@@ -7,7 +9,7 @@ Sources are public package artifacts from `hermes-agent==0.13.0` inspected under
 ## Package and dependency facts
 
 - PyPI live metadata: `hermes-agent==0.13.0`, Python `>=3.11`.
-- The inspected wheel metadata lists `mcp==1.26.0` under the `dev` extra, not as a base runtime dependency. Treat MCP server/client usage as an optional dependency path that must be explicitly installed in the bridge environment.
+- The inspected wheel metadata lists `mcp==1.26.0` under the `mcp`, `dev`, `computer-use`, `termux`, and `all` extras, not as a base runtime dependency. Treat MCP server/client usage as an optional dependency path that must be explicitly installed in the bridge environment. To exercise any Hermes MCP code path, install `hermes-agent[mcp]==0.13.0` rather than plain `hermes-agent==0.13.0`. See `research/HARDENED_ARCHITECTURE_DECISION.md` for the v1 default (fake MCP server in CI; `_build_server()` + `skills_list` for Hermes-backed demo; `hermes mcp serve` is spike-only).
 
 ## CLI surface
 

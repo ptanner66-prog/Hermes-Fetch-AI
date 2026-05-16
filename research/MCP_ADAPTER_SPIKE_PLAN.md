@@ -1,5 +1,7 @@
 # MCP Adapter Spike Plan
 
+> Hardened note (2026-05-16): For final v1 decisions, see `research/HARDENED_ARCHITECTURE_DECISION.md`, `research/HARDENED_BUILD_PROMPT.md`, and `research/HARDENING_AUDIT.md`. Where this file disagrees with the hardened deliverables, the hardened deliverables are authoritative.
+
 Date accessed: 2026-05-16
 
 ## Goal
@@ -171,7 +173,7 @@ The first build run should start with:
 python -m venv .venv
 . .venv/Scripts/activate 2>/dev/null || . .venv/bin/activate
 python -m pip install -U pip
-python -m pip install uagents==0.24.2 uagents-core==0.4.4 uagents-adapter==0.6.2 mcp==1.27.1 pytest pytest-asyncio pydantic python-dotenv
+python -m pip install "uagents==0.24.2" "uagents-core==0.4.4" "uagents-adapter[mcp]==0.6.2" "mcp>=1.27.1,<2.0" pytest pytest-asyncio pydantic python-dotenv jsonschema
 python - <<'PY'
 from uagents import Agent, Protocol
 from uagents_adapter.mcp import ListTools, CallTool

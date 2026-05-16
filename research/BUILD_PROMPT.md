@@ -1,5 +1,7 @@
 # Build Prompt
 
+> Hardened note (2026-05-16): For final v1 decisions, see `research/HARDENED_ARCHITECTURE_DECISION.md`, `research/HARDENED_BUILD_PROMPT.md`, and `research/HARDENING_AUDIT.md`. Where this file disagrees with the hardened deliverables, the hardened deliverables are authoritative.
+
 You are continuing in the Hermes Fetch AI repository.
 
 Working directory:

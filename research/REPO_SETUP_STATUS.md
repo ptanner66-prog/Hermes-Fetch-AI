@@ -4,6 +4,9 @@ Date accessed: 2026-05-16
 
 ## Verified local repository
 
+> Update (2026-05-16): the repo has since received commits `aaaa63c` (research workspace init) and `d3b586c` (research dossier docs). The "No commits yet on main" note below was accurate at the time of writing only.
+
+
 - Working directory: `C:/Users/ptann/OneDrive/Work/Hermes Fetch AI`
 - Git top-level: `C:/Users/ptann/OneDrive/Work/Hermes Fetch AI`
 - Current branch/status from `git status --short --branch`: `## No commits yet on main` plus untracked setup/research files.
