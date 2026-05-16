@@ -19,4 +19,4 @@ Final local/offline evidence:
 - `.venv/Scripts/python -m ruff check .` -> `All checks passed!`
 - `.venv/Scripts/python -m mypy src/hermes_fetch_ai --ignore-missing-imports` -> `Success: no issues found in 17 source files`
 
-Git push status: pending commit and `git push origin main` after final git checks.
+Git push status: no local/offline blocker; final commit/push verification is recorded in the operator run output.
