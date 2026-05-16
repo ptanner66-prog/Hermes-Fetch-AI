@@ -1,0 +1,45 @@
+# Secrets and local environment
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+*.p12
+*.pfx
+
+# Python
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.venv/
+venv/
+dist/
+build/
+*.egg-info/
+
+# JavaScript / TypeScript
+node_modules/
+.pnpm-store/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+
+# Local agent/cache outputs
+.hermes/
+.codex/
+.cache/
+*.log
+logs/
+
+# Research evidence caches / cloned public source dumps
+research/pkgs/
+research/repos/
+research/public/
+
+# OS/editor
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/
