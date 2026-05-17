@@ -71,10 +71,11 @@ async def local_dispatch_request(
     return response_model.parse_raw(response.message)
 
 
-async def run_local_roundtrip(cfg: BridgeConfig) -> tuple[str, int, str, int]:
+async def run_local_tool_roundtrip(
+    cfg: BridgeConfig, tool: str, args: dict[str, Any]
+) -> tuple[str, int, str, int]:
     audit_path = cfg.audit_path
     audit_path.unlink(missing_ok=True)
-    audit = AuditWriter(audit_path)
     async with HermesMCPClientShim(cfg) as shim:
         bridge = build_agent(cfg, shim)
         client_cfg = cfg.model_copy(deep=True)
@@ -83,12 +84,16 @@ async def run_local_roundtrip(cfg: BridgeConfig) -> tuple[str, int, str, int]:
         try:
             list_resp = await local_dispatch_request(bridge, client, ListTools(), ListToolsResponse)
             call_resp = await local_dispatch_request(
-                bridge, client, CallTool(tool="echo", args={"text": "hello"}), CallToolResponse
+                bridge, client, CallTool(tool=tool, args=args), CallToolResponse
             )
         finally:
             dispatcher.unregister(bridge.address, bridge)
             dispatcher.unregister(client.address, client)
-    return bridge.address, len(list_resp.tools or []), str(call_resp.result), audit.count()
+    return bridge.address, len(list_resp.tools or []), str(call_resp.result), AuditWriter(audit_path).count()
+
+
+async def run_local_roundtrip(cfg: BridgeConfig) -> tuple[str, int, str, int]:
+    return await run_local_tool_roundtrip(cfg, "echo", {"text": "hello"})
 
 
 async def run_bridge(cfg: BridgeConfig) -> None:

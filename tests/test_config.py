@@ -38,3 +38,26 @@ def test_secret_shaped_yaml_rejected(tmp_path):
     )
     with pytest.raises(ValueError):
         load_config(p)
+
+
+def test_stdio_command_expands_nonsecret_env_var(tmp_path, monkeypatch):
+    monkeypatch.setenv("HERMES_FETCH_HERMES_PYTHON", "python-from-env")
+    p = tmp_path / "c.yaml"
+    p.write_text(
+        "\n".join(
+            [
+                "version: 1",
+                "agent:",
+                "  dev_random_seed: true",
+                "hermes_mcp:",
+                "  mode: stdio",
+                "  command: ${HERMES_FETCH_HERMES_PYTHON}",
+                "  args:",
+                "    - -m",
+                "    - hermes_cli.main",
+            ]
+        ),
+        encoding="utf-8",
+    )
+    cfg = load_config(p)
+    assert cfg.hermes_mcp.command == "python-from-env"

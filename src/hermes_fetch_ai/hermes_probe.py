@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import importlib.util
+import sys
 import shutil
 import subprocess
 from importlib import metadata
@@ -19,8 +20,21 @@ def probe(cfg: BridgeConfig | None = None) -> dict[str, Any]:
         except metadata.PackageNotFoundError:
             info[pkg] = "not installed"
     info["hermes_console"] = shutil.which("hermes") or "not found"
-    spec = importlib.util.find_spec("agent.transports.hermes_tools_mcp_server")
+    try:
+        spec = importlib.util.find_spec("agent.transports.hermes_tools_mcp_server")
+    except ModuleNotFoundError:
+        spec = None
     info["hermes_build_server"] = "importable" if spec else "not importable"
+    try:
+        mcp_serve_spec = importlib.util.find_spec("mcp_serve")
+    except ModuleNotFoundError:
+        mcp_serve_spec = None
+    info["hermes_mcp_serve_module"] = "importable" if mcp_serve_spec else "not importable"
+    try:
+        cli_spec = importlib.util.find_spec("hermes_cli.main")
+    except ModuleNotFoundError:
+        cli_spec = None
+    info["hermes_cli_main"] = "importable" if cli_spec else "not importable"
     try:
         server = _build_fake_server()
         info["fake_tools"] = 2 if server else 0
@@ -35,6 +49,17 @@ def probe(cfg: BridgeConfig | None = None) -> dict[str, Any]:
             info["hermes_mcp_serve_help"] = f"exit={res.returncode}"
             if "mcp_serve" in (res.stderr + res.stdout):
                 info["hermes_mcp_serve_help"] += " ModuleNotFoundError: mcp_serve"
+        except Exception as e:
+            info["hermes_mcp_serve_help"] = type(e).__name__
+    elif cli_spec is not None:
+        try:
+            res = subprocess.run(
+                [sys.executable, "-m", "hermes_cli.main", "mcp", "serve", "--help"],
+                text=True,
+                capture_output=True,
+                timeout=5,
+            )
+            info["hermes_mcp_serve_help"] = f"python-module exit={res.returncode}"
         except Exception as e:
             info["hermes_mcp_serve_help"] = type(e).__name__
     else:

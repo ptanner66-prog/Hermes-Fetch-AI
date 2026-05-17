@@ -1,6 +1,6 @@
 version: 1
 agent:
-  name: hermes_fetch_hermes_local
+  name: hermes_fetch_hermes_stdio_env
   port: 8002
   network: testnet
   mode: endpoint
@@ -9,8 +9,10 @@ agent:
   dev_random_seed: true
 hermes_mcp:
   mode: stdio
-  command: hermes
+  command: ${HERMES_FETCH_HERMES_PYTHON}
   args:
+    - -m
+    - hermes_cli.main
     - mcp
     - serve
 policy:

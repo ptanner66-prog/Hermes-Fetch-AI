@@ -12,11 +12,18 @@ python -m hermes_fetch_ai.cli demo local
 
 Expected local demo output includes a bridge address, visible tool count, `echo result: hello`, and audit event count.
 
+To prove the real Hermes stdio MCP hookup after Hermes is installed on PATH:
+
+```bash
+python -m hermes_fetch_ai.cli doctor --config examples/hermes-stdio.yaml --probe-backend
+python -m hermes_fetch_ai.cli demo hermes --config examples/hermes-stdio.yaml
+```
+
 ## Security defaults
 
 - Default-deny tool calls.
 - Public demo config exposes only `echo`.
-- Hermes local config exposes only `skills_list` publicly.
+- Hermes stdio demo config exposes only low-risk read/poll tools publicly and denies side-effecting send/approval tools.
 - Sender identity is routing evidence, not authorization by itself.
 - Arguments are size-limited, schema-validated, and checked for local/private URL targets and shell metacharacters.
 - Outputs are size-limited with deterministic truncation.

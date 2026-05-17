@@ -126,6 +126,16 @@ def load_config(path: str | Path) -> BridgeConfig:
     with Path(path).open("r", encoding="utf-8") as f:
         data = yaml.safe_load(f) or {}
     _scan_secret_values(data)
+    hermes_mcp = data.get("hermes_mcp")
+    if isinstance(hermes_mcp, dict):
+        for key in ("command", "url"):
+            if isinstance(hermes_mcp.get(key), str):
+                hermes_mcp[key] = os.path.expandvars(hermes_mcp[key])
+        if isinstance(hermes_mcp.get("args"), list):
+            hermes_mcp["args"] = [
+                os.path.expandvars(v) if isinstance(v, str) else v
+                for v in hermes_mcp["args"]
+            ]
     return BridgeConfig.model_validate(data)
 
 

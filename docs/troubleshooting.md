@@ -1,8 +1,15 @@
 # Troubleshooting
 
-## ModuleNotFoundError: mcp_serve
+## Hermes MCP stdio unavailable
 
-`hermes mcp serve` may not be available in the installed Hermes version. Use fake mode for CI and `probe-hermes` to report local status.
+`hermes mcp serve` must be reachable for the Hermes-backed stdio demo. Use:
+
+```bash
+python -m hermes_fetch_ai.cli probe-hermes
+python -m hermes_fetch_ai.cli doctor --config examples/hermes-stdio.yaml --probe-backend
+```
+
+If the `hermes` console script is not on PATH but you have a Hermes source checkout, set `HERMES_FETCH_HERMES_PYTHON` to that checkout's venv Python and use `examples/hermes-stdio-env.yaml`.
 
 ## Address in use
 
@@ -22,4 +29,4 @@ Set `UAGENT_SEED` in the environment. Do not write it in YAML.
 
 ## Windows executable, environment, or stderr issues
 
-Use an absolute command path for stdio mode when needed. The bridge passes only a small environment allowlist to child processes and redirects stderr away from protocol stdout.
+Use an absolute command path for stdio mode when needed. The bridge passes only a small environment allowlist to child processes and redirects stderr away from protocol stdout. Prefer putting local paths in environment variables rather than committing machine-specific YAML.

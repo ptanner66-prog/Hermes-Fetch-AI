@@ -110,6 +110,10 @@ class HermesMCPClientShim:
         self.session = None
         self.server = None
 
+    @property
+    def startup_error(self) -> BaseException | None:
+        return self._startup_error
+
     async def __aenter__(self) -> "HermesMCPClientShim":
         return await self.start()
 
