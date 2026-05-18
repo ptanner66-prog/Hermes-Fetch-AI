@@ -1,0 +1,32 @@
+version: 1
+agent:
+  name: hermes_fetch_a2a
+  port: 8000
+  network: testnet
+  mode: endpoint
+  dev_random_seed: true
+  publish_manifest: false
+  enable_agent_inspector: false
+  description: A2A-first Hermes Fetch AI bridge with policy-gated local tools
+a2a:
+  enabled: true
+  host: 127.0.0.1
+  port: 8080
+  public_base_url: http://127.0.0.1:8080
+  rpc_path: /a2a
+  agent_card_path: /.well-known/agent-card.json
+  require_bearer_token: false
+hermes_mcp:
+  mode: fake
+policy:
+  public_tools:
+    - echo
+  max_args_bytes: 4096
+  max_output_bytes: 4096
+  max_list_tools_response_bytes: 4096
+logging:
+  audit_path: .cache/audit-a2a-local.jsonl
+chat:
+  enable_chat: false
+payment:
+  mode: disabled

@@ -34,6 +34,21 @@ class Shim:
         return NormalizedToolResult(args["text"], None, False, False, len(args["text"]))
 
 
+class ErrorShim(Shim):
+    async def call_tool(self, name, args):
+        self.calls += 1
+        from hermes_fetch_ai.result_normalizer import NormalizedToolResult
+
+        text = "backend failed with api_key=sk-secretsecretsecretsecret"
+        return NormalizedToolResult(text, None, True, False, len(text.encode()))
+
+
+class RaisingShim(Shim):
+    async def call_tool(self, name, args):
+        self.calls += 1
+        raise RuntimeError("backend failed with api_key=sk-secretsecretsecretsecret")
+
+
 class Ctx:
     def __init__(self, sender="agent1qabcdefghijklmnopqrstuvwxyz0123456789"):
         self.sender = sender
@@ -97,6 +112,17 @@ async def test_unknown_sender_list_tools_public_only(tmp_path):
 
 
 @pytest.mark.asyncio
+async def test_empty_visible_policy_list_tools_does_not_invoke_shim(tmp_path):
+    s = Shim()
+    resp = await handle_list_tools(
+        None, "sender", s, cfg(public_tools=[]), AuditWriter(tmp_path / "a.jsonl")
+    )
+    assert resp.tools == []
+    assert resp.error is None
+    assert s.list_calls == 0
+
+
+@pytest.mark.asyncio
 async def test_list_tools_response_size_cap(tmp_path):
     resp = await handle_list_tools(
         None,
@@ -131,6 +157,40 @@ async def test_audit_written_for_allowed_even_if_send_fails(tmp_path):
         audit,
     )
     assert resp.result == "ok" and audit.count() == 1
+
+
+@pytest.mark.asyncio
+async def test_backend_tool_error_is_generic_to_remote_and_redacted_in_audit(tmp_path):
+    audit = AuditWriter(tmp_path / "a.jsonl")
+    resp = await handle_call_tool(
+        None,
+        "sender",
+        CallTool(tool="echo", args={"text": "ok"}),
+        ErrorShim(),
+        cfg(public_tools=["echo"]),
+        audit,
+    )
+    assert resp.result is None
+    assert resp.error == "tool execution failed"
+    text = (tmp_path / "a.jsonl").read_text(encoding="utf-8")
+    assert "sk-secret" not in text
+
+
+@pytest.mark.asyncio
+async def test_backend_exception_is_generic_to_remote_and_redacted_in_audit(tmp_path):
+    audit = AuditWriter(tmp_path / "a.jsonl")
+    resp = await handle_call_tool(
+        None,
+        "sender",
+        CallTool(tool="echo", args={"text": "ok"}),
+        RaisingShim(),
+        cfg(public_tools=["echo"]),
+        audit,
+    )
+    assert resp.result is None
+    assert resp.error == "tool execution failed"
+    text = (tmp_path / "a.jsonl").read_text(encoding="utf-8")
+    assert "sk-secret" not in text
 
 
 @pytest.mark.asyncio

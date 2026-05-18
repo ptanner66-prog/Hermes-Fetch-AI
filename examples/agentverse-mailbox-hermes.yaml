@@ -1,0 +1,34 @@
+version: 1
+agent:
+  name: hermes_fetch_mailbox
+  port: 8003
+  network: testnet
+  mode: mailbox
+  publish_manifest: false
+  enable_agent_inspector: false
+  dev_random_seed: false
+  description: Hermes Fetch AI mailbox bridge to Hermes MCP
+hermes_mcp:
+  mode: stdio
+  command: $HERMES_FETCH_HERMES_PYTHON
+  args:
+    - -m
+    - hermes_cli.main
+    - mcp
+    - serve
+  timeout_seconds: 10
+policy:
+  # Hosted mailbox mode is remote-reachable. Do not expose Hermes conversation
+  # or message-reading tools to arbitrary uAgent senders. Add per-sender tools
+  # under allowed_senders only after operator review.
+  public_tools: []
+  allowed_senders: {}
+  denied_tools:
+    - messages_send
+    - permissions_respond
+  max_output_bytes: 65536
+  max_args_bytes: 65536
+logging:
+  redaction: true
+chat:
+  enable_chat: false

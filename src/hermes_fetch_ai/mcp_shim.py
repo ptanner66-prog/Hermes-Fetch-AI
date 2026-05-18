@@ -97,11 +97,15 @@ class HermesMCPClientShim:
             self.session = await self._exit_stack.enter_async_context(
                 ClientSession(read_stream, write_stream, read_timeout_seconds=timeout)
             )
+            if self.session is None:
+                raise RuntimeError("MCP client session did not initialize")
             await asyncio.wait_for(
                 self.session.initialize(), timeout=self.cfg.hermes_mcp.timeout_seconds
             )
         except BaseException as exc:
             self._startup_error = exc
+            await self.aclose()
+            return
 
     async def aclose(self) -> None:
         if self._exit_stack is not None:
@@ -109,6 +113,10 @@ class HermesMCPClientShim:
             self._exit_stack = None
         self.session = None
         self.server = None
+
+    @property
+    def startup_error(self) -> BaseException | None:
+        return self._startup_error
 
     async def __aenter__(self) -> "HermesMCPClientShim":
         return await self.start()
@@ -121,7 +129,7 @@ class HermesMCPClientShim:
             tools = await self.server.list_tools()
             return [_tool_to_dict(t) for t in tools]
         if self._startup_error is not None:
-            return []
+            raise RuntimeError(f"MCP stdio startup failed: {self._startup_error}")
         if self.session is not None:
             result = await asyncio.wait_for(
                 self.session.list_tools(), timeout=self.cfg.hermes_mcp.timeout_seconds
@@ -136,7 +144,10 @@ class HermesMCPClientShim:
                     await self.server.call_tool(name, args), self.cfg.policy.max_output_bytes
                 )
             if self._startup_error is not None:
-                if isinstance(self._startup_error, (TimeoutError, asyncio.TimeoutError)) or "timed out" in str(self._startup_error).lower():
+                if (
+                    isinstance(self._startup_error, (TimeoutError, asyncio.TimeoutError))
+                    or "timed out" in str(self._startup_error).lower()
+                ):
                     return NormalizedToolResult("timeout", None, True, False, 7)
                 return NormalizedToolResult(
                     "MCP stdio startup failed", None, True, False, len("MCP stdio startup failed")
@@ -149,6 +160,6 @@ class HermesMCPClientShim:
             raise RuntimeError("shim not started")
         except (TimeoutError, asyncio.TimeoutError):
             return NormalizedToolResult("timeout", None, True, False, 7)
-        except Exception as e:
-            text = str(e)
+        except Exception:
+            text = "tool execution failed"
             return NormalizedToolResult(text, None, True, False, len(text.encode()))
