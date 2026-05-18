@@ -29,7 +29,28 @@ python -m hermes_fetch_ai.cli demo hermes --config examples/hermes-stdio-env.yam
 
 Expected output includes the bridge address, visible tool count, a `conversations_list result`, and audit event count. With no active Hermes gateway sessions, the result can legitimately be `{"count": 0, "conversations": []}`.
 
-## Agentverse mailbox manual proof
+## A2A local proof
+
+```bash
+python -m hermes_fetch_ai.cli demo a2a --config examples/a2a-local.yaml
+```
+
+This proves the local A2A-facing surface can build an Agent Card and process a `message/send` JSON-RPC request through the policy-gated bridge. It does not require Agentverse credentials and does not claim hosted A2A registration.
+
+For a local HTTP A2A endpoint:
+
+```bash
+python -m hermes_fetch_ai.cli serve-a2a --config examples/a2a-local.yaml
+```
+
+The local endpoint serves:
+
+- `GET /.well-known/agent-card.json`
+- `POST /a2a`
+
+Hosted proof still requires the operator to choose **A2A Protocol** in Agentverse, provide any required public endpoint or agent-card URL, and capture sanitized registration/transcript evidence.
+
+## Supporting mailbox manual proof
 
 The real Hermes mailbox config intentionally fails without `UAGENT_SEED` and keeps manifest publication off by default for safe startup. Do not put seeds in YAML, docs, commits, or chat.
 
@@ -46,13 +67,13 @@ try {
 }
 ```
 
-First-time Agentverse mailbox linking uses the fake/Inspector config:
+Mailbox transport smoke uses the fake/Inspector config:
 
 ```powershell
 python -m hermes_fetch_ai.cli serve --config examples/agentverse-mailbox.yaml
 ```
 
-After the mailbox is linked, stop that process and start the real Hermes bridge:
+If mailbox transport is needed after the A2A setup, stop that process and start the real Hermes bridge:
 
 ```powershell
 $hermesRepo = "<path-to-hermes-agent-main>"
@@ -62,7 +83,7 @@ python -m hermes_fetch_ai.cli doctor --config examples/agentverse-mailbox-hermes
 python -m hermes_fetch_ai.cli serve --config examples/agentverse-mailbox-hermes.yaml
 ```
 
-`demo mailbox --duration-seconds 30` is only a startup smoke window. `serve` is the live mode for remote mailbox traffic. Expected output prints the bridge address and startup status only. It must not print the seed. Hosted remote proof still requires the operator to create/link the Agentverse mailbox and capture a sanitized remote transcript.
+`demo mailbox --duration-seconds 30` is only a startup smoke window. `serve` is the live mode for remote mailbox traffic. Expected output prints the bridge address and startup status only. It must not print the seed. Treat mailbox evidence as supporting transport evidence unless Agentverse requires it for the selected A2A path.
 
 ## Payment dry-run demo
 

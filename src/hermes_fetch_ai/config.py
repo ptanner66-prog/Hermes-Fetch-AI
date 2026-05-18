@@ -137,6 +137,33 @@ class ChatConfig(BaseModel):
         return v
 
 
+class A2AConfig(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    enabled: bool = False
+    host: str = "127.0.0.1"
+    port: int = 8080
+    public_base_url: str | None = None
+    rpc_path: str = "/a2a"
+    agent_card_path: str = "/.well-known/agent-card.json"
+    require_bearer_token: bool = False
+    bearer_token_env: str = "HERMES_FETCH_A2A_BEARER_TOKEN"
+
+    @field_validator("rpc_path", "agent_card_path")
+    @classmethod
+    def validate_http_path(cls, v: str) -> str:
+        if not v.startswith("/") or "://" in v or ".." in v:
+            raise ValueError("A2A paths must be absolute local URL paths")
+        return v
+
+    @field_validator("bearer_token_env")
+    @classmethod
+    def validate_bearer_token_env(cls, v: str) -> str:
+        if not re.fullmatch(r"[A-Za-z_][A-Za-z0-9_]*", v):
+            raise ValueError("bearer_token_env must be an environment variable name")
+        return v
+
+
 class PaymentFundsConfig(BaseModel):
     model_config = ConfigDict(extra="forbid")
     amount: str
@@ -196,6 +223,7 @@ class BridgeConfig(BaseModel):
     policy: PolicyConfig = Field(default_factory=PolicyConfig)
     logging: LoggingConfig = Field(default_factory=LoggingConfig)
     chat: ChatConfig = Field(default_factory=ChatConfig)
+    a2a: A2AConfig = Field(default_factory=A2AConfig)
     payment: PaymentConfig = Field(default_factory=PaymentConfig)
 
     @model_validator(mode="after")
@@ -209,6 +237,10 @@ class BridgeConfig(BaseModel):
             raise ValueError("hermes_mcp.command is required for stdio mode")
         if self.agent.mode in {"mailbox", "proxy"} and self.agent.dev_random_seed:
             raise ValueError("mailbox/proxy modes require a stable UAGENT_SEED")
+        if self.a2a.require_bearer_token and require_runtime_secrets:
+            token = os.environ.get(self.a2a.bearer_token_env)
+            if not token or not token.strip():
+                raise ValueError(f"{self.a2a.bearer_token_env} is required for A2A bearer auth")
         if self.agent.seed or self.agent.mailbox_key:
             raise ValueError(
                 "agent.seed and agent.mailbox_key are not supported in config; "

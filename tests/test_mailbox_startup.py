@@ -71,6 +71,28 @@ def test_demo_mailbox_validation_does_not_print_seed(monkeypatch, capsys):
     assert seed not in out
 
 
+def test_demo_mailbox_points_to_hermes_python_when_that_env_is_missing(monkeypatch, capsys):
+    monkeypatch.setenv("UAGENT_SEED", "operator-secret-seed-should-not-print")
+    monkeypatch.delenv("HERMES_FETCH_HERMES_PYTHON", raising=False)
+
+    rc = main(
+        [
+            "demo",
+            "mailbox",
+            "--config",
+            "examples/agentverse-mailbox-hermes.yaml",
+            "--duration-seconds",
+            "1",
+        ]
+    )
+
+    out = capsys.readouterr().out
+
+    assert rc == 1
+    assert "HERMES_FETCH_HERMES_PYTHON" in out
+    assert "operator-secret-seed-should-not-print" not in out
+
+
 def test_demo_hermes_fails_when_tool_call_errors(monkeypatch, capsys):
     async def fake_roundtrip(cfg, tool, args):
         return ("agent1fakebridge", 1, "", "tool execution failed", 1)

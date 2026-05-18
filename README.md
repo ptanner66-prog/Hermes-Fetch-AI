@@ -12,6 +12,8 @@ python -m hermes_fetch_ai.cli demo local
 
 Expected local demo output includes a bridge address, visible tool count, `echo result: hello`, and audit event count.
 
+Plain `doctor` validates the default local config. Use `--probe-backend` with a Hermes stdio config to exercise the configured Hermes MCP backend.
+
 To prove the real Hermes stdio MCP hookup after Hermes is installed on PATH:
 
 ```bash
@@ -19,11 +21,18 @@ python -m hermes_fetch_ai.cli doctor --config examples/hermes-stdio.yaml --probe
 python -m hermes_fetch_ai.cli demo hermes --config examples/hermes-stdio.yaml
 ```
 
+To prove the A2A-facing local path before hosted Agentverse registration:
+
+```bash
+python -m hermes_fetch_ai.cli demo a2a --config examples/a2a-local.yaml
+```
+
 ## Security defaults
 
 - Default-deny tool calls.
 - Public demo config exposes only `echo`.
 - Hermes stdio demo config exposes only low-risk read/poll tools publicly and denies side-effecting send/approval tools.
+- A2A proof starts from a minimal policy-gated surface; Agent Chat Protocol is not the target path.
 - Sender identity is routing evidence, not authorization by itself.
 - Arguments are size-limited, schema-validated, and checked for local/private URL targets and shell metacharacters.
 - Outputs are size-limited with deterministic truncation.
@@ -34,6 +43,8 @@ python -m hermes_fetch_ai.cli demo hermes --config examples/hermes-stdio.yaml
 ## Scope
 
 This package does not create a new agent framework. Payment protocol support is optional, disabled by default, and limited in this proof to source-backed dry-run negotiation. Testnet/sandbox and real-value settlement require separate operator approval and runbooks. This proof does not move real FET, custody wallet secrets, or build exchange features or broad marketplace sprawl.
+
+The hosted direction is A2A-first: choose A2A Protocol in Agentverse and attach hosted evidence only after operator login and sanitized proof capture.
 
 ## Docs
 

@@ -15,6 +15,8 @@ If the `hermes` console script is not on PATH but you have a Hermes source check
 
 Change `agent.port` in the selected YAML file.
 
+For the local A2A HTTP proof, change `a2a.port` in `examples/a2a-local.yaml`.
+
 ## Tool not allowed for sender
 
 Add the tool to `policy.public_tools` for a demo, or add the sender address to `policy.allowed_senders` with the exact tool names.
@@ -27,9 +29,19 @@ Check the tool input schema in ListTools and send an object matching required fi
 
 Set `UAGENT_SEED` in the environment. Do not write it in YAML.
 
+## Agentverse asks which stack to use
+
+Choose **A2A Protocol**. Agent Chat Protocol is not the target path for this bridge. The local A2A proof is:
+
+```bash
+python -m hermes_fetch_ai.cli demo a2a --config examples/a2a-local.yaml
+```
+
+If Agentverse asks for a public URL or agent card, use the A2A proof/runbook in `docs/agentverse-hosted-proof.md` and keep credentials out of repo files.
+
 ## Mailbox starts locally but hosted messages do not arrive
 
-Check the hosted proof boundaries in `docs/agentverse-hosted-proof.md`: account login, mailbox-capable agent entry, Inspector/mailbox linking, and the bridge address printed by the startup command. The local proof cannot complete the hosted link without operator account access.
+Check the hosted proof boundaries in `docs/agentverse-hosted-proof.md`: account login, A2A Protocol selection, endpoint or agent-card requirements, and the bridge address printed by the startup command. The local proof cannot complete hosted registration without operator account access. Mailbox evidence is supporting transport evidence unless Agentverse requires it for the selected A2A path.
 
 ## Payment dry-run works but real settlement is unavailable
 

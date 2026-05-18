@@ -6,7 +6,7 @@ Hermes is the agent runtime. Fetch/uAgents/Agentverse/Almanac are the rails.
 
 This is a bridge thesis, not a hype thesis.
 
-Hermes should not rebuild identity, registration, mailbox/proxy delivery, hosted-agent surfaces, adapters, discovery, quotas, or payment protocol primitives. Fetch already has those rails. Hermes should contribute the local runtime: MCP tools, operator approvals, policy, validation, audit, and redaction.
+Hermes should not rebuild identity, A2A registration/discovery, mailbox/proxy delivery where needed, hosted-agent surfaces, adapters, quotas, or payment protocol primitives. Fetch already has those rails. Hermes should contribute the local runtime: MCP tools, operator approvals, policy, validation, audit, and redaction.
 
 ## Why this matters
 
@@ -34,7 +34,8 @@ A safe agentic-economy bridge keeps those layers separate.
 
 Official source references:
 
-- Agentverse external uAgents / ACP registration: https://docs.agentverse.ai/documentation/launch-agents/external-agents/u-agents.md
+- Agentverse external uAgents registration: https://docs.agentverse.ai/documentation/launch-agents/external-agents/u-agents.md
+- A2A Protocol specification: https://a2a-protocol.org/latest/specification/
 - Agentverse adapters overview: https://docs.agentverse.ai/documentation/launch-agents/external-agents/adapters-overview.md
 - Agentverse hosted agents: https://docs.agentverse.ai/documentation/create-agents/hosted-agents.md
 - Agentverse register-agent API: https://docs.agentverse.ai/api-reference/agents/register-agent.md

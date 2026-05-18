@@ -6,6 +6,7 @@ import json
 from pathlib import Path
 
 from ._redaction import redact_text
+from .a2a_server import run_a2a_server, run_local_a2a_roundtrip
 from .audit import AuditWriter
 from .config import load_config, validate_config_file
 from .hermes_probe import probe
@@ -214,16 +215,44 @@ async def _demo_payment_dry_run(config_path: str | Path) -> int:
     return 0 if complete.__class__.__name__ == "CompletePayment" else 1
 
 
+async def _demo_a2a(config_path: str | Path) -> int:
+    cfg = load_config(config_path, require_runtime_secrets=False)
+    card, response = await run_local_a2a_roundtrip(cfg)
+    result = response.get("result") if isinstance(response, dict) else None
+    task_status = result.get("status", {}).get("state") if isinstance(result, dict) else None
+    print("a2a demo: agent card protocol: " + str(card.get("protocolVersion")))
+    print("a2a demo: preferred transport: " + str(card.get("preferredTransport")))
+    print("a2a demo: rpc url: " + str(card.get("url")))
+    print("a2a demo: message/send status: " + str(task_status))
+    print("a2a demo: chat protocol remains out of scope")
+    return 0 if task_status == "completed" else 1
+
+
+def _print_mailbox_config_hint(msg: str) -> None:
+    if "UAGENT_SEED" in msg:
+        print(
+            "mailbox demo: set UAGENT_SEED only in the operator shell and "
+            "see docs/agentverse-hosted-proof.md"
+        )
+    elif "HERMES_FETCH_HERMES_PYTHON" in msg:
+        print(
+            "mailbox demo: set HERMES_FETCH_HERMES_PYTHON to your Hermes venv Python; "
+            "do not commit machine-specific paths"
+        )
+    else:
+        print("mailbox demo: see docs/agentverse-hosted-proof.md")
+
+
 def demo(args: argparse.Namespace) -> int:
+    if args.kind == "a2a":
+        cfg_path = args.config or ROOT / "examples" / "a2a-local.yaml"
+        return asyncio.run(_demo_a2a(cfg_path))
     if args.kind == "mailbox":
         cfg_path = args.config or ROOT / "examples" / "agentverse-mailbox-hermes.yaml"
         ok, msg = validate_config_file(cfg_path)
         if not ok:
             print(f"mailbox demo: FAIL: {msg}")
-            print(
-                "mailbox demo: set UAGENT_SEED only in the operator shell and "
-                "see docs/agentverse-hosted-proof.md"
-            )
+            _print_mailbox_config_hint(msg)
             return 1
         return asyncio.run(_demo_mailbox(cfg_path, args.duration_seconds))
     if args.kind in {"payment", "payment-dry-run"}:
@@ -243,6 +272,22 @@ def serve(args: argparse.Namespace) -> int:
     return 0
 
 
+def serve_a2a(args: argparse.Namespace) -> int:
+    import os
+
+    cfg = load_config(args.config, require_runtime_secrets=False)
+    if not cfg.a2a.enabled:
+        print("a2a server: FAIL: config a2a.enabled must be true")
+        return 1
+    if cfg.a2a.require_bearer_token and not os.environ.get(cfg.a2a.bearer_token_env):
+        print(f"a2a server: FAIL: {cfg.a2a.bearer_token_env} is required for bearer auth")
+        return 1
+    print(f"a2a server: serving agent card at {cfg.a2a.agent_card_path}")
+    print(f"a2a server: serving JSON-RPC at {cfg.a2a.rpc_path}")
+    run_a2a_server(cfg)
+    return 0
+
+
 def build_parser() -> argparse.ArgumentParser:
     p = argparse.ArgumentParser(prog="hermes-fetch-ai")
     sub = p.add_subparsers(dest="cmd", required=True)
@@ -256,8 +301,13 @@ def build_parser() -> argparse.ArgumentParser:
     s = sub.add_parser("serve")
     s.add_argument("--config", required=True)
     s.set_defaults(func=serve)
+    sa = sub.add_parser("serve-a2a")
+    sa.add_argument("--config", default=str(ROOT / "examples" / "a2a-local.yaml"))
+    sa.set_defaults(func=serve_a2a)
     dm = sub.add_parser("demo")
-    dm.add_argument("kind", choices=["local", "hermes", "mailbox", "payment", "payment-dry-run"])
+    dm.add_argument(
+        "kind", choices=["local", "hermes", "mailbox", "payment", "payment-dry-run", "a2a"]
+    )
     dm.add_argument("--config", default=None)
     dm.add_argument("--tool", default="conversations_list")
     dm.add_argument("--args-json", default='{"limit": 1}')
