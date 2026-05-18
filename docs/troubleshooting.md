@@ -29,11 +29,11 @@ Set `UAGENT_SEED` in the environment. Do not write it in YAML.
 
 ## Mailbox starts locally but hosted messages do not arrive
 
-Check the operator-owned Agentverse steps in `research/HOSTED_DEMO_BLOCKER.md`: account login, mailbox-capable agent entry, Inspector/mailbox linking, and the bridge address printed by the startup command. The local proof cannot complete the hosted link without operator account access.
+Check the hosted proof boundaries in `docs/agentverse-hosted-proof.md`: account login, mailbox-capable agent entry, Inspector/mailbox linking, and the bridge address printed by the startup command. The local proof cannot complete the hosted link without operator account access.
 
 ## Payment dry-run works but real settlement is unavailable
 
-That is expected. `uagents_core.contrib.protocols.payment` supplies negotiation messages, not fund settlement. This repo only proves disabled-by-default dry-run rails. Testnet or production settlement requires operator setup documented in `research/PAYMENT_OPERATOR_ACTIONS.md` and must not be attempted by CI.
+That is expected. `uagents_core.contrib.protocols.payment` supplies negotiation messages, not fund settlement. This repo only proves disabled-by-default dry-run rails. Testnet or production settlement requires explicit operator setup and must not be attempted by CI.
 
 ## Windows executable, environment, or stderr issues
 

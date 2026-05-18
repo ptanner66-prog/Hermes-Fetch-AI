@@ -39,6 +39,5 @@ This package does not create a new agent framework. Payment protocol support is 
 
 - [Hermes Fetch uAgents bridge](docs/fetch-uagents-bridge.md)
 - [Agentverse hosted proof boundaries](docs/agentverse-hosted-proof.md)
-- [Agentverse operator handoff](docs/agentverse-operator-handoff.md)
 - [Payment rails and proof levels](docs/payment-rails.md)
 - [Agentic economy thesis](docs/agentic-economy-thesis.md)

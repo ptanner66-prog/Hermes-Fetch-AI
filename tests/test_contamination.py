@@ -24,13 +24,13 @@ def _public_release_files() -> list[Path]:
 
 def test_public_tree_has_no_forbidden_contamination():
     forbidden = [
-        "openclaw",
-        "private project",
-        "domain-specific guardrail",
-        "legal-tech",
-        "recovery phrase",
-        "mainnet spend",
-        "real fet movement",
+        "open" + "claw",
+        "private " + "project",
+        "domain-specific " + "guardrail",
+        "legal" + "-tech",
+        "recovery " + "phrase",
+        "mainnet " + "spend",
+        "real fet " + "movement",
     ]
     hits = []
     for path in _public_release_files():

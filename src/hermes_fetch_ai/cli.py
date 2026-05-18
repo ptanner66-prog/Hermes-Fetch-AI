@@ -222,7 +222,7 @@ def demo(args: argparse.Namespace) -> int:
             print(f"mailbox demo: FAIL: {msg}")
             print(
                 "mailbox demo: set UAGENT_SEED only in the operator shell and "
-                "see research/HOSTED_DEMO_BLOCKER.md"
+                "see docs/agentverse-hosted-proof.md"
             )
             return 1
         return asyncio.run(_demo_mailbox(cfg_path, args.duration_seconds))

@@ -4,7 +4,7 @@ This page describes what a hosted or Agentverse-facing proof would mean for Herm
 
 It does not claim that hosted proof has already completed.
 
-For the live operator sequence, use `docs/agentverse-operator-handoff.md`.
+For runnable local commands, use `docs/demo.md`. Keep any live Agentverse evidence outside public docs unless it has been sanitized.
 
 ## What is already locally provable
 
@@ -68,6 +68,19 @@ With no `UAGENT_SEED`, this should fail closed. That negative proof is part of t
 With operator-supplied seed material and Agentverse setup, `serve` is the live proof mode for remote mailbox traffic. Do not commit the seed or paste it into docs.
 
 Before running a positive hosted proof, keep `policy.public_tools` empty unless a specific remote sender and one low-risk tool have been reviewed. Remote identity is routing and attribution evidence, not authorization.
+
+## Evidence to record privately
+
+Hosted evidence should be captured in a private operator note first, then copied into public docs only after review. Record:
+
+- command names and exit codes;
+- bridge/uAgent address or redacted Agentverse identifier;
+- remote sender address if safe to publish;
+- sanitized request and response transcript;
+- proof that `policy.public_tools` stayed empty or minimal;
+- proof that denied tools stayed denied;
+- confirmation that missing `UAGENT_SEED` still fails closed;
+- confirmation that no seed, API, mailbox, wallet, or payment credential appeared in logs, docs, commits, or screenshots.
 
 ## External ACP/public endpoint proof
 
