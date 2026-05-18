@@ -33,4 +33,12 @@ python -m hermes_fetch_ai.cli demo hermes --config examples/hermes-stdio.yaml
 
 ## Scope
 
-This package does not create a new agent framework and does not implement commerce flows, exchange features, or wallet UX beyond seed/address identity needed by uAgents.
+This package does not create a new agent framework. Payment protocol support is optional, disabled by default, and limited in this proof to source-backed dry-run negotiation. Testnet/sandbox and real-value settlement require separate operator approval and runbooks. This proof does not move real FET, custody wallet secrets, or build exchange features or broad marketplace sprawl.
+
+## Docs
+
+- [Hermes Fetch uAgents bridge](docs/fetch-uagents-bridge.md)
+- [Agentverse hosted proof boundaries](docs/agentverse-hosted-proof.md)
+- [Agentverse operator handoff](docs/agentverse-operator-handoff.md)
+- [Payment rails and proof levels](docs/payment-rails.md)
+- [Agentic economy thesis](docs/agentic-economy-thesis.md)

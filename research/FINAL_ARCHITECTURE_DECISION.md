@@ -1,12 +1,13 @@
 # Final Architecture Decision
-Date accessed: 2026-05-16
-Status: supersedes `research/HARDENED_ARCHITECTURE_DECISION.md`.
+
+Date accessed: 2026-05-17
+Status: current after MOE hardening continuation. This file supersedes older notes that treated `hermes mcp serve` as spike-only.
 
 ## Final architecture
 
 Hermes Fetch AI v1 is a standalone Python package that exposes a narrow, policy-aware MCP-over-uAgents bridge.
 
-The bridge owns exactly one uAgent protocol for v1:
+The bridge owns exactly one core uAgents protocol for v1:
 
 - `Protocol(spec=mcp_protocol_spec, role="server")`
 - message models imported from `uagents_adapter.mcp.protocol`:
@@ -16,196 +17,164 @@ The bridge owns exactly one uAgent protocol for v1:
   - `CallToolResponse`
   - `mcp_protocol_spec`
 
-The bridge never publishes `MCPServerAdapter.protocols`, never publishes the adapter chat protocol, and never treats `MCPServerAdapter` as the security boundary. The adapter is source evidence and a provider of message-model/wire compatibility only.
+The bridge does not treat upstream adapter defaults or chat protocol wiring as the security boundary. It uses the official MCP protocol message models and applies its own policy, validation, and audit controls before calling Hermes.
 
-The runtime layers are:
+## Runtime layers
 
-1. Fetch/uAgents layer: identity, address, signed envelopes, dispatch, endpoint/mailbox/proxy modes, optional Almanac/Agentverse rails.
-2. Bridge layer: config, policy, sender-filtered inventory, arg validation, rate limits, result normalization, redacted audit logs, CLI/docs/tests.
-3. MCP/Hermes layer: fake MCP server for CI, `_build_server()` for a Hermes-backed local demo, stdio/SSE/HTTP MCP client transports for future/manual modes.
-4. Hermes local execution: Hermes owns tools, MCP, redaction conventions, config, and execution boundaries.
+1. Fetch/uAgents layer
+   - identity, addresses, signed envelopes, local dispatcher, endpoint/mailbox/proxy modes, optional Agentverse/Almanac rails, and protocol manifests.
+
+2. Bridge layer
+   - versioned config, sender/tool policy, filtered tool inventory, argument validation, rate limits, result normalization, redacted audit logs, demos, and tests.
+
+3. MCP/Hermes layer
+   - fake MCP server for CI, optional in-process compatibility path, and real stdio MCP client path to `hermes mcp serve`.
+
+4. Hermes local execution
+   - Hermes owns local tools, MCP server, plugins, config, logging, skills, and operator boundaries.
 
 ## Why existing rails are enough
 
 Fetch/uAgents already provide:
 
 - cryptographic agent identity and addresses;
-- signed envelope routing;
+- signed message routing;
 - in-process dispatcher for deterministic local two-agent tests;
 - endpoint, mailbox, and proxy modes;
 - optional Agentverse/Almanac discovery and manifests;
 - `Protocol(spec=..., role="server")` role binding;
-- published MCP protocol message models/spec via `uagents_adapter.mcp.protocol`.
+- published MCP protocol message models/spec through `uagents_adapter.mcp.protocol`.
 
 MCP already provides:
 
-- `ClientSession.list_tools()` returning `ListToolsResult`;
-- `ClientSession.call_tool()` returning `CallToolResult`;
-- stdio, SSE, and streamable HTTP client transports;
-- stable v1 `mcp.server.fastmcp.FastMCP` under the exact v1 pin.
+- `ClientSession.list_tools()` returning available tools;
+- `ClientSession.call_tool()` returning tool results;
+- stdio client transport used by this repo's Hermes proof;
+- stable result shapes under the pinned `mcp==1.27.1` environment.
 
 Hermes already provides:
 
 - local tool registry and dispatch;
-- optional MCP extras;
-- `agent.transports.hermes_tools_mcp_server._build_server()` for a local FastMCP-backed demo surface;
-- redaction/logging conventions;
-- MCP client subprocess hardening patterns.
+- `hermes mcp serve` as a stdio MCP server;
+- plugin/config/logging conventions;
+- local operator-controlled execution.
 
-Therefore this repo does not need a new agent framework, new marketplace, new identity system, new discovery layer, chat implementation, wallet UX, payment layer, or commercial skill manifest. It needs only the missing trust-boundary glue.
+Therefore this repo does not need a new agent framework, new identity system, new discovery layer, chat implementation, wallet UX, or marketplace. It adds only the missing trust-boundary glue plus optional, default-off payment negotiation rails that use uAgents message models without settlement.
 
 ## Exact thin layer this repo adds
 
 Package: `hermes-fetch-ai`.
 
-Modules:
+Key modules:
 
-- `config.py`: versioned YAML/env config; rejects unknown fields, secret-shaped YAML values, and `chat.enable_chat=true`; supports `dev_random_seed` for local demos.
-- `policy.py`: pure default-deny policy, sender/tool allowlists, denylist override, per-sender rate limits for `ListTools` and `CallTool`.
-- `arg_validator.py`: JSON schema validation and URL/SSRF guards before tool invocation.
-- `result_normalizer.py`: normalizes both client-side `mcp.types.CallToolResult` and server-side/in-process FastMCP result shapes into `NormalizedToolResult`.
-- `mcp_shim.py`: owns MCP lifecycle for fake, in-process Hermes tools, stdio, SSE, and HTTP modes; never passed to `MCPServerAdapter`.
-- `fake_mcp.py`: internal fake FastMCP builder for CI/local demo; examples import this, not vice versa.
-- `direct_protocol.py`: builds the bridge-owned signed-message protocol and handlers.
-- `uagent_app.py`: constructs `uagents.Agent`, includes only the bridge protocol, and applies CI-safe registration/manifest/inspector defaults.
+- `config.py`: versioned YAML/env config; rejects unknown fields, secret-shaped YAML values, `chat.enable_chat=true`, missing stdio command, and mailbox mode without a stable operator seed.
+- `policy.py`: default-deny policy, sender/tool allowlists, denylist override, and per-sender rate limits.
+- `arg_validator.py`: JSON schema validation and URL/SSRF/shell-metacharacter guards before invocation.
+- `result_normalizer.py`: normalizes MCP/FastMCP result shapes into `NormalizedToolResult`.
+- `mcp_shim.py`: owns MCP lifecycle for fake, in-process compatibility, and stdio modes; stdio uses `shell=False`, filtered env, timeout, and stderr separation.
+- `fake_mcp.py`: fake FastMCP builder for CI/local demo.
+- `direct_protocol.py`: bridge-owned signed-message protocol handlers.
+- `uagent_app.py`: constructs `uagents.Agent`, includes only bridge protocols, applies no-op registration for local configs, and hardens Windows child startup against the cosmpy/protobuf path collision.
 - `registration_policies.py`: `NoopRegistrationPolicy` for offline CI.
-- `_redaction.py`, `logging.py`, `audit.py`: redacted logs and JSONL audit without raw args/outputs/secrets.
-- `hermes_probe.py`: probes Hermes local availability and reports the `mcp_serve.py` packaging blocker distinctly.
-- `cli.py`: `doctor`, `probe-hermes`, `serve`, `demo local`, `demo mailbox`.
-- `version_pins.py`: exact version expectations.
+- `_redaction.py`, `audit.py`: redacted reduced audit without raw args, raw outputs, full sender addresses, or secrets.
+- `payment_policy.py`, `payment_protocol.py`, `payments.py`: default-off payment negotiation/dry-run support using official uAgents payment models.
+- `hermes_probe.py`: probes local Hermes/MCP availability.
+- `cli.py`: `doctor`, `probe-hermes`, `serve`, `demo local`, `demo hermes`, `demo mailbox`, `demo payment-dry-run`.
 
 ## Exact message flow
 
 ### Local CI flow
 
-1. Test/demo creates a bridge agent and client agent in the same Python process.
-2. Both agents use `network="testnet"`, `NoopRegistrationPolicy`, `enable_agent_inspector=False`, and `publish_manifest=False`.
-3. Both register with the module-level uAgents dispatcher on construction.
-4. Bridge starts `HermesMCPClientShim(mode="fake")`, backed by `src/hermes_fetch_ai/fake_mcp.py`.
-5. Bridge builds `direct_protocol.build_protocol(...)` and includes it on the bridge agent.
-6. Client sends `ListTools` to bridge address.
-7. uAgents routes through in-process dispatcher; no hosted service is required for the assertion path.
-8. Bridge signed handler receives `(ctx, sender, msg)`.
-9. Handler rate-limits sender, calls `shim.list_tools()`, filters with `policy.visible_tools(sender, tools, cfg.policy)`, caps serialized response size, audits, and sends `ListToolsResponse`.
-10. Client sends `CallTool(tool="echo", args={"text":"hello"})`.
-11. Bridge checks args byte size, rate limit, authorization, tool existence, JSON schema, SSRF guards, and only then calls shim.
-12. Shim returns `NormalizedToolResult`.
-13. Handler audits output bytes/truncation/error status and sends `CallToolResponse`.
+1. Demo/test creates bridge and client agents in one Python process.
+2. Both use testnet, no-op registration, no Agentverse inspector, and no manifest publication.
+3. Bridge starts `HermesMCPClientShim(mode="fake")`.
+4. Bridge includes `direct_protocol.build_protocol(...)`.
+5. Client sends `ListTools`; bridge filters the inventory by policy and returns `ListToolsResponse`.
+6. Client sends `CallTool(tool="echo", args={"text":"hello"})`.
+7. Bridge checks size, rate limit, authorization, schema, URL/SSRF, shell metacharacters, tool descriptor stability, and only then calls the shim.
+8. Bridge normalizes result, audits reduced metadata, and returns `CallToolResponse`.
 
-### Hermes-backed local demo flow
+### Hermes stdio local demo flow
 
-1. Operator installs Hermes with MCP extras and runs `python -m hermes_fetch_ai.cli probe-hermes`.
-2. Config uses `hermes_mcp.mode: in_process_hermes_tools`.
-3. Shim lazy-imports `agent.transports.hermes_tools_mcp_server._build_server()`.
-4. Policy sets demo public tools to `skills_list` only; all other known `EXPOSED_TOOLS` are denylisted.
-5. A local client calls `skills_list`; side-effecting tools return structured deny responses.
+1. Operator points `HERMES_FETCH_HERMES_PYTHON` at a local Hermes checkout Python or installs a `hermes` console script that can run `hermes mcp serve`.
+2. Config uses `hermes_mcp.mode: stdio`.
+3. Shim starts the Hermes MCP server through stdio with `shell=False`, filtered environment, timeout, and stderr separated from protocol stdout.
+4. Policy exposes only low-risk read/poll tools in the demo (`conversations_list`, `events_poll`) and denies side-effecting send/approval tools.
+5. The bridge demo calls `conversations_list` through the same uAgents/MCP protocol path used by the fake local demo.
 
-### Agentverse/manual demo flow
+### Agentverse/mailbox manual demo flow
 
 1. Operator sets `UAGENT_SEED` outside the repo.
-2. Operator runs `python -m hermes_fetch_ai.cli demo mailbox` or `serve --config examples/agentverse-mailbox.yaml`.
-3. Config uses testnet, mailbox mode, and explicit manifest/inspector opt-in.
+2. Operator runs `python -m hermes_fetch_ai.cli demo mailbox --config examples/agentverse-mailbox-hermes.yaml` or `serve --config examples/agentverse-mailbox-hermes.yaml`.
+3. Config uses testnet mailbox mode and keeps manifest publication/inspector off by default unless the operator explicitly opts in.
 4. Operator links mailbox in Agentverse UI.
 5. Remote uAgent sends `ListTools`/`CallTool` using the same MCP protocol messages.
 6. The exact same bridge policy path handles the request.
 
-## Exact trust boundaries
+### Payment dry-run flow
+
+1. Config keeps `payment.mode: disabled` by default.
+2. Dry-run config sets `payment.mode: dry_run` and priced tools.
+3. The demo creates a `RequestPayment`, commits a `dryrun-*` transaction id, and returns `CompletePayment`.
+4. Payment status does not override authorization; tool policy and argument validation remain mandatory.
+5. No wallet calls or settlement are performed.
+
+## Trust boundaries
 
 Boundary 1: remote uAgent to uAgents runtime.
 
-- uAgents verifies signed envelopes for signed handlers.
-- Sender address is authenticated routing identity only.
-- Sender address is never sufficient authorization.
+- uAgents signed message handling supplies routing identity.
+- Sender address is not sufficient authorization.
 
 Boundary 2: uAgents runtime to bridge policy handlers.
 
-- Only signed `on_message` handlers are used.
-- No `on_query` path for bridge protocol.
-- `ListTools` and `CallTool` are both authorization surfaces.
-- Unknown senders get only configured public tools or an empty list.
+- Only bridge-owned `ListTools` and `CallTool` handlers are in scope.
+- List and call surfaces are both authorization surfaces.
+- Unknown senders see only configured public tools or an empty list.
 
 Boundary 3: bridge policy to MCP shim.
 
 - Denied calls never invoke the shim.
 - Args are size-checked and schema-validated before shim call.
-- URL-like args are SSRF-checked before shim call.
+- URL-like args are checked before shim call.
 - Per-sender rate limits apply before expensive operations.
+- Tool descriptor fingerprint is rechecked before invocation.
 
 Boundary 4: MCP shim to Hermes/local subprocess.
 
-- Stdio uses `shell=False`, static command/args from config, filtered env, timeout, and stderr redirection.
-- Windows preserves required process env vars but no secrets by default.
-- Output is normalized and truncated before returning across uAgents.
+- Stdio uses static command/args from config, no shell, filtered env, timeout, and stderr separation.
+- Output is normalized and truncated before returning over uAgents.
 
 Boundary 5: logs/audit.
 
-- Audit records decisions, sizes, truncation, durations, and error classes.
-- Audit never records raw args, raw outputs, seeds, tokens, API keys, prompts, or full sender addresses.
+- Audit records decisions, sizes, truncation, durations, payment metadata, and error classes.
+- Audit does not record raw args, raw outputs, seeds, tokens, prompts, or full sender addresses.
 
-## Exact local CI path
+## Exact local verification status
 
-Commands:
-
-```text
-python -m venv .venv
-.\.venv\Scripts\Activate.ps1        # Windows PowerShell
-# . .venv/bin/activate              # POSIX
-python -m pip install -U pip
-python -m pip install -e ".[dev]"
-python -m hermes_fetch_ai.cli doctor
-python -m pytest -q
-python -m hermes_fetch_ai.cli demo local
-```
-
-CI requirements:
-
-- Python 3.11 or 3.12 only.
-- No Agentverse, Almanac, ASI key, hosted endpoint, real Hermes install, real mailbox token, or internet dependency for unit suite.
-- In-process two-agent dispatcher proves request/response behavior.
-- Baseline doctor validates local-direct config with `dev_random_seed=true`; it does not require `UAGENT_SEED`.
-- `tests/test_contamination.py` passes.
-
-## Exact Hermes-backed demo path
-
-Commands:
+Commands run in the MOE continuation:
 
 ```text
-python -m hermes_fetch_ai.cli probe-hermes
-python -m hermes_fetch_ai.cli serve --config examples/hermes-local.yaml
-python examples/local_client.py --bridge <bridge-address> --tool skills_list --args "{}"
+cmd //c ".\\.venv\\Scripts\\python.exe -m pytest -q"
+cmd //c ".\\.venv\\Scripts\\python.exe -m ruff check ."
+cmd //c ".\\.venv\\Scripts\\python.exe -m mypy src\\hermes_fetch_ai --ignore-missing-imports"
+cmd //c ".\\.venv\\Scripts\\python.exe -m hermes_fetch_ai.cli doctor --contamination-scan"
+cmd //c ".\\.venv\\Scripts\\python.exe -m hermes_fetch_ai.cli doctor --config examples\\hermes-stdio-env.yaml --probe-backend"
+cmd //c ".\\.venv\\Scripts\\python.exe -m hermes_fetch_ai.cli demo hermes --config examples\\hermes-stdio-env.yaml"
+cmd //c ".\\.venv\\Scripts\\python.exe -m hermes_fetch_ai.cli demo local"
+cmd //c ".\\.venv\\Scripts\\python.exe -m hermes_fetch_ai.cli demo payment-dry-run --config examples\\payment-dry-run.yaml"
 ```
 
-Expected behavior:
+Observed:
 
-- `_build_server()` path is reported as usable by `probe-hermes`, or the demo stops with actionable install/config hints.
-- `skills_list` returns local skill metadata if Hermes is available.
-- All other Hermes tools are denied unless explicitly configured.
-- `skill_view` is not demo-public by default because it can reveal private skill content.
-- Operators may set public tools to empty for maximum privacy.
-
-## Exact Agentverse/manual demo path
-
-Commands:
-
-```text
-$env:UAGENT_SEED = "..."             # PowerShell; do not commit
-python -m hermes_fetch_ai.cli demo mailbox
-```
-
-Or POSIX:
-
-```text
-export UAGENT_SEED="..."
-python -m hermes_fetch_ai.cli demo mailbox
-```
-
-Manual requirements:
-
-- Real seed in env, never in YAML or repo.
-- Testnet default unless operator explicitly opts into mainnet.
-- Mailbox/Inspector linking is manual and outside CI.
-- No chat protocol in v1.
-- No ASI key required.
+- `77 passed in 17.94s`
+- `All checks passed!`
+- `Success: no issues found in 20 source files`
+- `contamination: ok`; `doctor: ok`
+- Hermes stdio backend: `backend: ok: 10 tools`
+- Hermes stdio demo returned empty `conversations_list` through the bridge
+- local fake demo returned `echo result: hello`
+- payment dry-run returned `CompletePayment`
 
 ## Dependency pins
 
@@ -225,11 +194,11 @@ Final v1 reproducibility pins:
 ## Final confidence level
 
 - Local CI fake-MCP direct uAgent demo: green.
-- Hermes-backed local demo via `_build_server()` and `skills_list`: yellow-green.
-- Agentverse mailbox/manual demo: yellow.
-- `hermes mcp serve` stdio path: red until Hermes publishes a working `mcp_serve.py` path.
-- Upstream Hermes PR shape: yellow; CLI/plugin is recommended, platform adapter remains fallback only by maintainer request.
+- Real Hermes stdio MCP bridge: green locally against the source checkout venv.
+- Payment dry-run negotiation: green locally.
+- Agentverse mailbox/manual hosted proof: blocked on operator account/seed/linking.
+- Upstream Hermes PR shape: ready for maintainer direction; no PR opened in this run.
 
 ## Final decision
 
-Proceed with autonomous implementation using `research/FINAL_BUILD_PROMPT.md`. Stop immediately if implementation evidence contradicts these boundaries, if CI would require hosted services, if `MCPServerAdapter.protocols` or chat is needed to make progress, or if a safety test would need to be skipped.
+Proceed with a narrow upstream conversation around an optional Hermes plugin/CLI bridge. Do not add A2A, wallet settlement, hosted account automation, or broad marketplace UX to PR one unless maintainers request that scope.

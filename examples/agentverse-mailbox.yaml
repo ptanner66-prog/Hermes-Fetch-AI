@@ -7,9 +7,12 @@ agent:
   publish_manifest: true
   enable_agent_inspector: true
   dev_random_seed: false
+  description: First-linking mailbox stub for Agentverse Inspector; not a Hermes backend proof
 hermes_mcp:
   mode: fake
 policy:
+  # First-linking only. Keep the public surface empty; use
+  # agentverse-mailbox-hermes.yaml for the real Hermes bridge.
   public_tools: []
 logging:
   redaction: true

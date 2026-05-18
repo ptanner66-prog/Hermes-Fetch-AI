@@ -132,3 +132,20 @@ async def test_broken_subprocess_no_stderr_secret_leak():
     async with HermesMCPClientShim(c) as shim:
         out = await shim.call_tool("echo", {"text": "x"})
     assert "sk-secret" not in out.text
+
+
+@pytest.mark.asyncio
+async def test_backend_call_exception_returns_generic_error():
+    class BoomServer:
+        async def list_tools(self):
+            return [{"name": "echo", "inputSchema": None}]
+
+        async def call_tool(self, name, args):
+            raise RuntimeError("api_key=sk-secretsecretsecretsecret")
+
+    async with HermesMCPClientShim(cfg(hermes_mcp={"mode": "fake"})) as shim:
+        shim.server = BoomServer()
+        out = await shim.call_tool("echo", {"text": "x"})
+
+    assert out.is_error
+    assert out.text == "tool execution failed"

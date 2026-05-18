@@ -26,6 +26,13 @@ AUDIT_FIELDS = {
     "error_class",
     "mode",
     "send_status",
+    "payment_reference",
+    "payment_status",
+    "payment_method",
+    "payment_currency",
+    "payment_amount",
+    "payment_mode",
+    "transaction_id_short",
 }
 
 

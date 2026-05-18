@@ -16,9 +16,13 @@ from uagents_adapter.mcp.protocol import (
 )
 
 from .arg_validator import validate_args
+from ._redaction import redact_text
 from .audit import AuditWriter
 from .config import BridgeConfig
+from .payment_policy import accepted_funds_for_tool, is_payment_required
 from .policy import authorize, authorize_list_tools, normalize_tool_name, visible_tools
+
+REMOTE_TOOL_ERROR = "tool execution failed"
 
 
 def _sender(ctx: Any) -> str:
@@ -53,6 +57,13 @@ def _tool_fingerprint(tool: dict[str, Any]) -> str:
     return hashlib.sha256(raw).hexdigest()
 
 
+def _configured_visible_names(sender: str, cfg: BridgeConfig) -> set[str]:
+    denied = {normalize_tool_name(name) for name in cfg.policy.denied_tools}
+    public = {normalize_tool_name(name) for name in cfg.policy.public_tools}
+    allowed = {normalize_tool_name(name) for name in cfg.policy.allowed_senders.get(sender, [])}
+    return (public | allowed) - denied
+
+
 async def handle_list_tools(
     ctx: Any, sender: str, shim: Any, cfg: BridgeConfig, audit: AuditWriter
 ) -> ListToolsResponse:
@@ -73,6 +84,39 @@ async def handle_list_tools(
             mode=cfg.hermes_mcp.mode,
         )
         return ListToolsResponse(tools=[], error=reason)
+
+    try:
+        visible_names = _configured_visible_names(sender, cfg)
+    except ValueError as exc:
+        reason = str(exc)
+        audit.write(
+            trace_id=trace_id,
+            sender=sender,
+            protocol="mcp",
+            msg_type="list_tools",
+            decision="denied",
+            reason=reason,
+            duration_ms=int((time.perf_counter() - start) * 1000),
+            output_bytes=0,
+            truncated=False,
+            mode=cfg.hermes_mcp.mode,
+        )
+        return ListToolsResponse(tools=[], error=reason)
+
+    if not visible_names:
+        audit.write(
+            trace_id=trace_id,
+            sender=sender,
+            protocol="mcp",
+            msg_type="list_tools",
+            decision="allowed",
+            reason="no visible tools configured",
+            duration_ms=int((time.perf_counter() - start) * 1000),
+            output_bytes=2,
+            truncated=False,
+            mode=cfg.hermes_mcp.mode,
+        )
+        return ListToolsResponse(tools=[], error=None)
 
     tools = await shim.list_tools()
     filtered = [_tool_dict(t) for t in visible_tools(sender, tools, cfg.policy)]
@@ -126,22 +170,29 @@ async def handle_call_tool(
             return CallToolResponse(result=None, error=reason)
         before_fp = _tool_fingerprint(found)
         validate_args(found, msg.args, cfg)
-        # The descriptor/schema fingerprint is computed immediately before the
-        # call after the fresh inventory lookup. This makes validation and the
-        # invocation use the same checked descriptor rather than stale policy data.
-        if before_fp != _tool_fingerprint(found):
+        if is_payment_required(cfg, tool_name):
+            funds = accepted_funds_for_tool(cfg, tool_name)
+            quoted = ", ".join(
+                f"{f.amount} {f.currency} via {f.payment_method}" for f in funds
+            ) or "no accepted funds configured"
+            reason = f"payment required for {tool_name}: {quoted}"
+            return CallToolResponse(result=None, error=reason)
+        latest_tools = [_tool_dict(t) for t in await shim.list_tools()]
+        latest = next((t for t in latest_tools if t.get("name") == tool_name), None)
+        if not latest or before_fp != _tool_fingerprint(latest):
             reason = "tool descriptor changed before call"
             return CallToolResponse(result=None, error=reason)
         normalized = await shim.call_tool(tool_name, msg.args)
         decision = "error" if normalized.is_error else "allowed"
-        reason = "tool error" if normalized.is_error else "ok"
+        reason = f"tool error: {redact_text(normalized.text)}" if normalized.is_error else "ok"
         result = normalized.text
         return CallToolResponse(
-            result=normalized.text, error=normalized.text if normalized.is_error else None
+            result=None if normalized.is_error else normalized.text,
+            error=REMOTE_TOOL_ERROR if normalized.is_error else None,
         )
     except Exception as e:
-        reason = str(e)
-        return CallToolResponse(result=None, error=reason)
+        reason = redact_text(f"{e.__class__.__name__}: {e}")
+        return CallToolResponse(result=None, error=REMOTE_TOOL_ERROR)
     finally:
         audit.write(
             trace_id=trace_id,

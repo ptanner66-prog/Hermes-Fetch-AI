@@ -1,0 +1,36 @@
+version: 1
+agent:
+  name: hermes_fetch_payment_dry_run
+  port: 8004
+  network: testnet
+  mode: endpoint
+  publish_manifest: false
+  enable_agent_inspector: false
+  dev_random_seed: true
+hermes_mcp:
+  mode: fake
+policy:
+  public_tools:
+    - echo
+  denied_tools: []
+payment:
+  mode: dry_run
+  accepted_funds:
+    - amount: "0.01"
+      currency: FET
+      payment_method: fet_direct
+    - amount: "0.001"
+      currency: USDC
+      payment_method: skyfire
+  priced_tools:
+    echo:
+      accepted_funds:
+        - amount: "0.01"
+          currency: FET
+          payment_method: fet_direct
+      description: Dry-run quote for the fake echo tool.
+  deadline_seconds: 300
+logging:
+  redaction: true
+chat:
+  enable_chat: false

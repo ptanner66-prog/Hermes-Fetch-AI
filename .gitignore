@@ -38,6 +38,9 @@ logs/
 research/pkgs/
 research/repos/
 research/public/
+research/**/raw/
+research/**/*-runner.py
+research/**/run-state.txt
 
 # OS/editor
 .DS_Store
