@@ -19,3 +19,13 @@ Controls:
 - Outputs are normalized and truncated with a marker containing original byte count.
 - Audit and logs redact tokens, keys, seeds, and long secret-shaped values. Audit records never store raw arguments or raw outputs.
 - Stdio uses `shell=False`, a filtered environment, and separated stderr.
+
+Hermes surface boundary:
+
+- The bridge only ever targets the Hermes tools MCP server
+  (`agent.transports.hermes_tools_mcp_server`), preferably as an isolated stdio
+  subprocess.
+- The Hermes conversations MCP surface (`hermes mcp serve`: reading conversations,
+  sending messages, answering permission approvals) is structurally out of scope and
+  must never be bridged across an agent network.
+- `skill_view` is not demo-public because it can reveal private skill content.
