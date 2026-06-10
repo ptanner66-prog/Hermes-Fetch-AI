@@ -1,6 +1,20 @@
 # Hermes Fetch AI
 
+[![CI](https://github.com/ptanner66-prog/hermes-fetch-ai/actions/workflows/ci.yml/badge.svg)](https://github.com/ptanner66-prog/hermes-fetch-ai/actions/workflows/ci.yml)
+
 Hermes Fetch AI is a thin policy-aware bridge between Hermes Agent local tools and Fetch.ai uAgents. It is a connection project: Fetch supplies identity, addressing, discovery rails, envelopes, dispatcher, and uAgent protocols; Hermes supplies local execution, tool configuration, redaction, and safety boundaries.
+
+## Status
+
+The bridge runs an end-to-end uAgent round trip — a client uAgent sends `ListTools`/`CallTool` to the bridge uAgent over the signed MCP protocol, the bridge applies its default-deny policy, invokes the tool, and returns a bounded, audited response.
+
+| Tier | What it proves | State |
+|------|----------------|-------|
+| Local end-to-end | Client uAgent → bridge uAgent → MCP tool → response, through the real uAgents in-process dispatcher | Green — run automatically in CI on Python 3.11 and 3.12 |
+| Hermes-backed demo | Real Hermes tools via in-process `_build_server()`, `skills_list` only | Operator — needs a local Hermes install with MCP extras |
+| Agentverse mailbox | A remote uAgent reaches the bridge over Fetch rails | Operator — needs `UAGENT_SEED` and manual Agentverse mailbox linking |
+
+The local tier requires no secrets, hosted services, or network. Reproduce it with `python -m pytest -q` and `python -m hermes_fetch_ai.cli demo local`. The operator tiers require credentials supplied through the environment and are documented in [`docs/demo.md`](docs/demo.md).
 
 ## Quickstart
 
