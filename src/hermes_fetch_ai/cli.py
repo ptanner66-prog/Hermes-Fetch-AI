@@ -101,12 +101,15 @@ def serve(args: argparse.Namespace) -> int:
     from .uagent_app import run_bridge
 
     cfg = load_config(args.config)
-    asyncio.run(run_bridge(cfg))
+    run_bridge(cfg)
     return 0
 
 
 def build_parser() -> argparse.ArgumentParser:
+    from . import __version__
+
     p = argparse.ArgumentParser(prog="hermes-fetch-ai")
+    p.add_argument("--version", action="version", version=f"%(prog)s {__version__}")
     sub = p.add_subparsers(dest="cmd", required=True)
     d = sub.add_parser("doctor")
     d.add_argument("--config", default=None)
