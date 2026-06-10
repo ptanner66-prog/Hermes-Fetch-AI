@@ -47,6 +47,28 @@ def test_build_agent_wires_noop_registration_policy_when_not_publishing(monkeypa
     assert captured["include_publish_manifest"] is False
 
 
+def test_build_agent_keeps_ledger_registration_policy_when_publishing(monkeypatch):
+    captured = {}
+
+    class FakeAgent:
+        address = "agent1qfake"
+
+        def __init__(self, **kwargs):
+            captured.update(kwargs)
+
+        def include(self, protocol, publish_manifest=False):
+            captured["include_publish_manifest"] = publish_manifest
+
+    monkeypatch.setattr("hermes_fetch_ai.uagent_app.Agent", FakeAgent)
+    c = cfg()
+    c.agent.publish_manifest = True
+    build_agent(c, object())
+    # Hosted mode must leave registration to uAgents' default ledger-backed
+    # policy so a funded wallet can pay Almanac registration.
+    assert "registration_policy" not in captured
+    assert captured["include_publish_manifest"] is True
+
+
 def test_protocol_signed_handlers_and_no_adapter_or_chat():
     c = cfg()
     proto = build_protocol(object(), c, AuditWriter(c.audit_path))

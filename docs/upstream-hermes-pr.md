@@ -86,12 +86,16 @@ Title:
 feat(skills): add fetchai-bridge optional skill
 ```
 
-Contents: `optional-skills/integrations/fetchai-bridge/SKILL.md` (+
+The complete payload is materialized and validated in `upstream/hermes-pr/`
+(see `upstream/hermes-pr/SUBMIT.md` for exact submission steps; their pytest
+ran the skill test green and their windows-footguns checker passed).
+
+Contents: `optional-skills/autonomous-ai-agents/fetchai-bridge/SKILL.md` (+
 `tests/skills/test_fetchai_bridge_skill.py`), following the HARDLINE skill
 standards exactly:
 
-- `description:` <= 60 chars, one sentence, ends with a period. Use:
-  `Expose allowlisted Hermes tools to Fetch.ai uAgents.` (53 chars)
+- `description:` <= 60 chars, one sentence, ends with a period. Used:
+  `Expose allowlisted Hermes tools to Fetch.ai uAgents.` (52 chars)
 - Frontmatter `required_environment_variables` for `UAGENT_SEED` (hosted mode
   only), `prerequisites.commands: [hermes-fetch-ai]`.
 - Section order: When to Use / Prerequisites / How to Run / Quick Reference /
@@ -140,7 +144,7 @@ Fixes #<discussion/issue number from Step 1>
 
 ## Changes Made
 
-- `optional-skills/integrations/fetchai-bridge/SKILL.md` — skill instructions
+- `optional-skills/autonomous-ai-agents/fetchai-bridge/SKILL.md` — skill instructions
 - `tests/skills/test_fetchai_bridge_skill.py` — hermetic skill-format tests
 
 ## How to Test
