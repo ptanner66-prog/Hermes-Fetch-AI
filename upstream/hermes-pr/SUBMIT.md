@@ -18,10 +18,11 @@ frontmatter description passes the HARDLINE 60-char rule (52 chars).
   `git diff origin/main... | grep -iE "seed|secret|mnemonic"` should show
   nothing real.
 
-## One required edit
+## Author credit
 
-Their author rule credits the human first. In `SKILL.md`, change
-`author: ptanner66-prog` to `author: Your Real Name (ptanner66-prog)`.
+Already set per their rule (human first): `author: Porter Tanner (ptanner66-prog)`.
+The install instruction uses the git URL because the package is not on PyPI yet;
+if you publish `hermes-fetch-ai` to PyPI first, simplify that line.
 
 ## Submission steps
 

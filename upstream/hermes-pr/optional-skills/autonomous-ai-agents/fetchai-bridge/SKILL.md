@@ -2,7 +2,7 @@
 name: fetchai-bridge
 description: Expose allowlisted Hermes tools to Fetch.ai uAgents.
 version: 1.0.0
-author: ptanner66-prog
+author: Porter Tanner (ptanner66-prog)
 license: MIT
 prerequisites:
   commands: [hermes-fetch-ai]
@@ -33,7 +33,8 @@ approvals; only the Hermes tools MCP server surface, in a separate process.
 ## Prerequisites
 
 1. Install the plugin in the same environment as Hermes:
-   `pip install hermes-fetch-ai` (or `pip install -e <checkout>`).
+   `pip install git+https://github.com/ptanner66-prog/Hermes-Fetch-AI.git`
+   (PyPI name `hermes-fetch-ai` once published).
 2. Local demo needs nothing else: no seed, no account, no network services.
 3. Hosted mailbox mode needs `UAGENT_SEED` in `~/.hermes/.env` and an
    Agentverse account; first registration on a real network needs the agent's
