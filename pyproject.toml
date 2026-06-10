@@ -4,11 +4,22 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "hermes-fetch-ai"
-version = "0.1.0"
+version = "1.0.0"
 description = "Thin policy-aware bridge between Hermes Agent tools and Fetch.ai uAgents"
 readme = "README.md"
 requires-python = ">=3.11,<3.13"
 license = {text = "MIT"}
+authors = [{name = "Porter Tanner"}]
+classifiers = [
+  "Development Status :: 5 - Production/Stable",
+  "Intended Audience :: Developers",
+  "License :: OSI Approved :: MIT License",
+  "Operating System :: OS Independent",
+  "Programming Language :: Python :: 3.11",
+  "Programming Language :: Python :: 3.12",
+  "Topic :: System :: Distributed Computing",
+]
+
 dependencies = [
   "uagents==0.24.2",
   "uagents-core==0.4.4",
@@ -20,6 +31,11 @@ dependencies = [
   "jsonschema>=4.20,<5",
   "httpx>=0.25,<1",
 ]
+
+[project.urls]
+Homepage = "https://github.com/ptanner66-prog/Hermes-Fetch-AI"
+Repository = "https://github.com/ptanner66-prog/Hermes-Fetch-AI"
+Issues = "https://github.com/ptanner66-prog/Hermes-Fetch-AI/issues"
 
 [project.optional-dependencies]
 dev = [

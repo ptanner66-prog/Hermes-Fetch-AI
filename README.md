@@ -36,7 +36,7 @@ hermes fetchai demo local
 hermes fetchai serve --config examples/hermes-stdio.yaml
 ```
 
-The upstream contribution plan, matched to the Hermes maintainers' PR template and contribution rubric, is in [`docs/upstream-hermes-pr.md`](docs/upstream-hermes-pr.md).
+The upstream contribution plan, matched to the Hermes maintainers' PR template and contribution rubric, is in [`docs/upstream-hermes-pr.md`](docs/upstream-hermes-pr.md). Deployment guidance (systemd, secrets, egress, mainnet checklist) is in [`docs/production.md`](docs/production.md).
 
 ## Security defaults
 

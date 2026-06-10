@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import asyncio
+import contextlib
+import signal
 import uuid
 from typing import Any, TypeVar
 
@@ -91,7 +93,40 @@ async def run_local_roundtrip(cfg: BridgeConfig) -> tuple[str, int, str, int]:
     return bridge.address, len(list_resp.tools or []), str(call_resp.result), audit.count()
 
 
-async def run_bridge(cfg: BridgeConfig) -> None:
-    async with HermesMCPClientShim(cfg) as shim:
-        agent = build_agent(cfg, shim)
-        agent.run()
+def run_bridge(cfg: BridgeConfig) -> None:
+    """Run the bridge agent until it exits or SIGINT/SIGTERM arrives.
+
+    Cancelling into the agent's task tree recurses (its shutdown re-gathers
+    tasks its outer gather already owns), so on stop the agent tasks are
+    abandoned exactly like uagents' own Agent.run() does on KeyboardInterrupt.
+    The shim closes inside the same coroutine that opened it (anyio cancel
+    scopes are task-bound), and asyncio.run is avoided because its final
+    cancel-all sweep would trigger the same recursion.
+    """
+    loop = asyncio.new_event_loop()
+    asyncio.set_event_loop(loop)
+    stop = asyncio.Event()
+
+    async def _main() -> None:
+        running = asyncio.get_running_loop()
+        for sig in (signal.SIGINT, signal.SIGTERM):
+            with contextlib.suppress(NotImplementedError, ValueError):
+                running.add_signal_handler(sig, stop.set)
+        async with HermesMCPClientShim(cfg) as shim:
+            agent = build_agent(cfg, shim)
+            run_task = asyncio.ensure_future(agent.run_async())
+            stop_task = asyncio.ensure_future(stop.wait())
+            done, _ = await asyncio.wait(
+                {run_task, stop_task}, return_when=asyncio.FIRST_COMPLETED
+            )
+            stop_task.cancel()
+            if run_task in done:
+                with contextlib.suppress(BaseException):
+                    run_task.result()
+
+    try:
+        loop.run_until_complete(_main())
+    finally:
+        with contextlib.suppress(Exception):
+            loop.stop()
+            loop.close()
