@@ -19,4 +19,10 @@ Trust boundaries:
 
 Existing Fetch, Hermes, and MCP rails are sufficient for v1. The bridge only connects them with local policy and audit.
 
-`MCPServerAdapter.protocols` is not used as the v1 security boundary because it exposes protocol behavior before this package's policy checks. Chat is out of v1 scope to keep the surface narrow.
+`MCPServerAdapter.protocols` is not used as the v1 security boundary because it exposes protocol behavior before this package's policy checks (the adapter is chat-protocol based). Chat is out of v1 scope to keep the surface narrow.
+
+The production-preferred Hermes seam is the Hermes tools MCP server launched as a
+hardened stdio subprocess (`examples/hermes-stdio.yaml`); the in-process builder is a
+demo fallback. A2A exposure, if added later, goes through Fetch's official A2A
+inbound adapter in front of this same bridge agent, never a hand-rolled protocol
+server. See `research/PRODUCTION_DECISION.md`.

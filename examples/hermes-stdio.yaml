@@ -1,0 +1,52 @@
+# Production-preferred Hermes-backed config (see research/PRODUCTION_DECISION.md).
+# Launches the Hermes tools MCP server as an isolated stdio subprocess.
+# Run with the python interpreter of the environment where hermes-agent is installed.
+version: 1
+agent:
+  name: hermes_fetch_hermes_stdio
+  port: 8004
+  network: testnet
+  mode: endpoint
+  publish_manifest: false
+  enable_agent_inspector: false
+  dev_random_seed: true
+hermes_mcp:
+  mode: stdio
+  command: python
+  args: ["-m", "agent.transports.hermes_tools_mcp_server"]
+  timeout_seconds: 20
+policy:
+  public_tools:
+    - skills_list
+  # Explicit denylist of every other tool exposed by hermes-agent v0.16.0
+  # (denylist wins even if a sender allowlist is added later).
+  denied_tools:
+    - skill_view
+    - web_search
+    - web_extract
+    - browser_navigate
+    - browser_click
+    - browser_type
+    - browser_press
+    - browser_snapshot
+    - browser_scroll
+    - browser_back
+    - browser_get_images
+    - browser_console
+    - browser_vision
+    - vision_analyze
+    - image_generate
+    - text_to_speech
+    - kanban_complete
+    - kanban_block
+    - kanban_comment
+    - kanban_heartbeat
+    - kanban_show
+    - kanban_list
+    - kanban_create
+    - kanban_unblock
+    - kanban_link
+logging:
+  redaction: true
+chat:
+  enable_chat: false
