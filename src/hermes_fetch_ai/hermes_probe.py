@@ -19,7 +19,10 @@ def probe(cfg: BridgeConfig | None = None) -> dict[str, Any]:
         except metadata.PackageNotFoundError:
             info[pkg] = "not installed"
     info["hermes_console"] = shutil.which("hermes") or "not found"
-    spec = importlib.util.find_spec("agent.transports.hermes_tools_mcp_server")
+    try:
+        spec = importlib.util.find_spec("agent.transports.hermes_tools_mcp_server")
+    except ModuleNotFoundError:
+        spec = None
     info["hermes_build_server"] = "importable" if spec else "not importable"
     try:
         server = _build_fake_server()
