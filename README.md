@@ -26,6 +26,18 @@ python -m hermes_fetch_ai.cli demo local
 
 Expected local demo output includes a bridge address, visible tool count, `echo result: hello`, and audit event count.
 
+## Hermes plugin
+
+Installing this package into the same environment as `hermes-agent` registers a `hermes fetchai` subcommand through the `hermes_agent.plugins` entry-point group — no Hermes core changes:
+
+```bash
+pip install -e .          # alongside hermes-agent
+hermes fetchai demo local
+hermes fetchai serve --config examples/hermes-stdio.yaml
+```
+
+The upstream contribution plan, matched to the Hermes maintainers' PR template and contribution rubric, is in [`docs/upstream-hermes-pr.md`](docs/upstream-hermes-pr.md).
+
 ## Security defaults
 
 - Default-deny tool calls.

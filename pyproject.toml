@@ -34,6 +34,9 @@ dev = [
 [project.scripts]
 hermes-fetch-ai = "hermes_fetch_ai.cli:main"
 
+[project.entry-points."hermes_agent.plugins"]
+fetchai = "hermes_fetch_ai.hermes_plugin"
+
 [tool.setuptools.packages.find]
 where = ["src"]
 
