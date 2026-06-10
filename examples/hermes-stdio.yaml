@@ -1,6 +1,9 @@
 # Production-preferred Hermes-backed config (see research/PRODUCTION_DECISION.md).
 # Launches the Hermes tools MCP server as an isolated stdio subprocess.
-# Run with the python interpreter of the environment where hermes-agent is installed.
+# Set `command` to the python interpreter of the environment where hermes-agent
+# is installed. Field-tested against hermes-agent v0.16.x (docs/demo.md).
+# Note: the Hermes server wraps tool arguments in one required `kwargs` object,
+# so callers send args={"kwargs": {...}} per the served inputSchema.
 version: 1
 agent:
   name: hermes_fetch_hermes_stdio

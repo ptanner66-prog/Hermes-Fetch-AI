@@ -40,6 +40,9 @@ fetchai = "hermes_fetch_ai.hermes_plugin"
 [tool.setuptools.packages.find]
 where = ["src"]
 
+[tool.setuptools.package-data]
+hermes_fetch_ai = ["data/*.yaml"]
+
 [tool.pytest.ini_options]
 asyncio_mode = "auto"
 testpaths = ["tests"]
