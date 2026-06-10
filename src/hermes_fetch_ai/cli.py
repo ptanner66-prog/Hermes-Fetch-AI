@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import argparse
 import asyncio
+from importlib import resources
 from pathlib import Path
 
 from .config import load_config, validate_config_file
@@ -10,6 +11,19 @@ from .uagent_app import run_local_roundtrip
 from .version_pins import check_pins
 
 ROOT = Path(__file__).resolve().parents[2]
+
+
+def default_config_path() -> Path:
+    repo_example = ROOT / "examples" / "local-direct.yaml"
+    if repo_example.is_file():
+        return repo_example
+    packaged = Path(str(resources.files("hermes_fetch_ai").joinpath("data/local-direct.yaml")))
+    if packaged.is_file():
+        return packaged
+    raise FileNotFoundError(
+        "no default config found; pass --config explicitly "
+        f"(looked at {repo_example} and packaged data/local-direct.yaml)"
+    )
 
 
 def _contamination_scan() -> tuple[bool, str]:
@@ -36,7 +50,7 @@ def _contamination_scan() -> tuple[bool, str]:
 
 
 def doctor(args: argparse.Namespace) -> int:
-    ok, msg = validate_config_file(args.config)
+    ok, msg = validate_config_file(args.config or default_config_path())
     if not ok:
         print(f"config: FAIL: {msg}")
         return 1
@@ -60,7 +74,7 @@ def probe_hermes(args: argparse.Namespace) -> int:
 
 
 async def _demo_local() -> int:
-    cfg = load_config(ROOT / "examples" / "local-direct.yaml")
+    cfg = load_config(default_config_path())
     bridge_address, visible_count, echo_result, audit_count = await run_local_roundtrip(cfg)
     print(f"bridge address: {bridge_address}")
     print(f"visible tool count: {visible_count}")
@@ -95,7 +109,7 @@ def build_parser() -> argparse.ArgumentParser:
     p = argparse.ArgumentParser(prog="hermes-fetch-ai")
     sub = p.add_subparsers(dest="cmd", required=True)
     d = sub.add_parser("doctor")
-    d.add_argument("--config", default=str(ROOT / "examples" / "local-direct.yaml"))
+    d.add_argument("--config", default=None)
     d.add_argument("--contamination-scan", action="store_true")
     d.set_defaults(func=doctor)
     ph = sub.add_parser("probe-hermes")

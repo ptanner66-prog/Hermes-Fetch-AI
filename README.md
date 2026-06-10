@@ -11,7 +11,7 @@ The bridge runs an end-to-end uAgent round trip — a client uAgent sends `ListT
 | Tier | What it proves | State |
 |------|----------------|-------|
 | Local end-to-end | Client uAgent → bridge uAgent → MCP tool → response, through the real uAgents in-process dispatcher | Green — run automatically in CI on Python 3.11 and 3.12 |
-| Hermes-backed demo | Real Hermes tools via the Hermes tools MCP server as a hardened stdio subprocess (`examples/hermes-stdio.yaml`), `skills_list` only | Operator — needs a local `hermes-agent` install |
+| Hermes-backed demo | Real Hermes tools via the Hermes tools MCP server as a hardened stdio subprocess (`examples/hermes-stdio.yaml`), `skills_list` only | Green — field-tested against a real `hermes-agent` v0.16.x install (`tests/test_field_hermes_stdio.py`, gated; see `docs/demo.md`) |
 | Agentverse mailbox | A remote uAgent reaches the bridge over Fetch rails | Operator — needs `UAGENT_SEED` and manual Agentverse mailbox linking |
 
 The local tier requires no secrets, hosted services, or network. Reproduce it with `python -m pytest -q` and `python -m hermes_fetch_ai.cli demo local`. The operator tiers require credentials supplied through the environment and are documented in [`docs/demo.md`](docs/demo.md).

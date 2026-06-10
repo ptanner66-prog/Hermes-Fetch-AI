@@ -1,0 +1,19 @@
+version: 1
+agent:
+  name: hermes_fetch_local
+  port: 8001
+  network: testnet
+  mode: endpoint
+  publish_manifest: false
+  enable_agent_inspector: false
+  dev_random_seed: true
+hermes_mcp:
+  mode: fake
+policy:
+  public_tools:
+    - echo
+  denied_tools: []
+logging:
+  redaction: true
+chat:
+  enable_chat: false
