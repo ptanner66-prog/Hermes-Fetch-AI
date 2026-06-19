@@ -20,7 +20,15 @@ def _cap(text: str, max_bytes: int) -> tuple[str, bool, int]:
     if original <= max_bytes:
         return text, False, original
     marker = f"[…truncated; original_bytes={original}]"
-    keep = max(0, max_bytes - len(marker.encode("utf-8")))
+    marker_raw = marker.encode("utf-8")
+    if max_bytes <= 0:
+        return "", True, original
+    if len(marker_raw) > max_bytes:
+        short_marker = "…"
+        if len(short_marker.encode("utf-8")) <= max_bytes:
+            return short_marker, True, original
+        return "", True, original
+    keep = max_bytes - len(marker_raw)
     return raw[:keep].decode("utf-8", errors="ignore") + marker, True, original
 
 

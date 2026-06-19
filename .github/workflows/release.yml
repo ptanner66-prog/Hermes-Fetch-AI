@@ -6,30 +6,89 @@ on:
 
 permissions:
   contents: write
+  id-token: write
+  attestations: write
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
 
 jobs:
   build-and-release:
+    name: build and release
     runs-on: ubuntu-latest
+    environment: release
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
 
       - name: Set up Python
         uses: actions/setup-python@v5
         with:
-          python-version: "3.11"
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: pyproject.toml
 
-      - name: Install build tooling
-        run: python -m pip install -U pip build
+      - name: Validate tag matches pyproject version
+        run: |
+          python - <<'PY'
+          import os
+          import tomllib
+          from pathlib import Path
+
+          tag = os.environ["GITHUB_REF_NAME"]
+          version = tomllib.loads(Path("pyproject.toml").read_text(encoding="utf-8"))["project"]["version"]
+          expected = f"v{version}"
+          if tag != expected:
+              raise SystemExit(f"release tag {tag!r} does not match pyproject version {expected!r}")
+          PY
+
+      - name: Install package with dev extras
+        run: |
+          python -m pip install -U pip
+          python -m pip install -e ".[dev]"
 
       - name: Verify before release
         run: |
-          python -m pip install -e ".[dev]"
-          python -m pytest -q
+          python -m hermes_fetch_ai.cli doctor
           python -m hermes_fetch_ai.cli doctor --contamination-scan
+          python -m ruff check .
+          python -m mypy src tests
+          python -m pytest -q
+          python -m hermes_fetch_ai.cli demo local
+
+      - name: Dependency audit
+        run: |
+          # Temporary upstream exception: uagents -> cosmpy currently pins PyNaCl==1.6.0.
+          # Remove this ignore as soon as cosmpy/uagents permits PyNaCl>=1.6.2.
+          python -m pip_audit --skip-editable --ignore-vuln CVE-2025-69277
 
       - name: Build sdist and wheel
         run: python -m build
+
+      - name: Validate package metadata
+        run: python -m twine check dist/*
+
+      - name: Install built wheel in clean environment
+        shell: bash
+        run: |
+          python -m venv /tmp/hfa-release-smoke
+          source /tmp/hfa-release-smoke/bin/activate
+          python -m pip install -U pip
+          python -m pip install dist/*.whl
+          hermes-fetch-ai doctor
+          python - <<'PY'
+          import importlib.metadata
+          eps = importlib.metadata.entry_points().select(group='hermes_agent.plugins')
+          assert any(ep.name == 'fetchai' for ep in eps)
+          PY
+
+      - name: Attest build provenance
+        uses: actions/attest-build-provenance@v2
+        with:
+          subject-path: "dist/*"
 
       - name: Create GitHub release with artifacts
         uses: softprops/action-gh-release@v2

@@ -14,6 +14,7 @@ from .audit import default_audit_path
 SECRET_RE = re.compile(
     r"(?i)(bearer\s+|sk-|pk-|api[_-]?key|token|secret|seed\s*[:=]|password|[a-f0-9]{48,})"
 )
+SECRET_KEY_RE = re.compile(r"(?i)(seed|secret|token|api[_-]?key|password|mailbox[_-]?key)")
 
 
 class AgentConfig(BaseModel):
@@ -50,6 +51,13 @@ class PolicyConfig(BaseModel):
     max_list_tools_response_bytes: int = 65536
     max_calls_per_minute_per_sender: int = 30
     max_list_tools_per_minute_per_sender: int = 30
+    max_global_calls_per_minute: int = 300
+    max_global_list_tools_per_minute: int = 300
+    max_tracked_senders: int = 4096
+    require_replay_metadata: bool = True
+    replay_ttl_seconds: float = 300.0
+    max_replay_entries: int = 8192
+    max_replay_clock_skew_seconds: float = 60.0
     trusted_shell_tools: list[str] = Field(default_factory=list)
 
 
@@ -88,18 +96,18 @@ class BridgeConfig(BaseModel):
             raise ValueError("hermes_mcp.command is required for stdio mode")
         if self.agent.mode == "mailbox" and self.agent.dev_random_seed:
             raise ValueError("mailbox mode requires a stable UAGENT_SEED")
+        if self.agent.seed:
+            raise ValueError("agent.seed is not allowed in config; use UAGENT_SEED")
         if not self.agent.dev_random_seed:
-            seed = os.environ.get("UAGENT_SEED") or self.agent.seed
+            seed = os.environ.get("UAGENT_SEED")
             if not seed:
                 raise ValueError("UAGENT_SEED is required when agent.dev_random_seed=false")
-            if self.agent.seed and SECRET_RE.search(self.agent.seed):
-                raise ValueError("secret-shaped YAML values are not allowed; use UAGENT_SEED")
         return self
 
     def effective_seed(self) -> str:
         if self.agent.dev_random_seed:
             return "dev-ephemeral-" + secrets.token_urlsafe(32)
-        return os.environ["UAGENT_SEED"] if "UAGENT_SEED" in os.environ else (self.agent.seed or "")
+        return os.environ["UAGENT_SEED"]
 
     @property
     def audit_path(self) -> Path:
@@ -109,12 +117,7 @@ class BridgeConfig(BaseModel):
 def _scan_secret_values(obj: object) -> None:
     if isinstance(obj, dict):
         for k, v in obj.items():
-            if isinstance(v, str) and (
-                SECRET_RE.search(v)
-                or re.search(r"(?i)(seed|secret|token|api[_-]?key|password)", str(k))
-            ):
-                if str(k) == "seed" and v.startswith("dev-"):
-                    continue
+            if isinstance(v, str) and (SECRET_RE.search(v) or SECRET_KEY_RE.search(str(k))):
                 raise ValueError("secret-shaped YAML values are not allowed")
             _scan_secret_values(v)
     elif isinstance(obj, list):

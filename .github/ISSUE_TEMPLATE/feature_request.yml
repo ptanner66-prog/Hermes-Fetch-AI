@@ -1,0 +1,37 @@
+name: Feature request
+description: Propose a small, security-conscious feature.
+labels: [enhancement]
+body:
+  - type: textarea
+    id: problem
+    attributes:
+      label: Problem
+      description: What operator or developer problem does this solve?
+    validations:
+      required: true
+  - type: textarea
+    id: proposal
+    attributes:
+      label: Proposal
+      description: What should change?
+    validations:
+      required: true
+  - type: dropdown
+    id: surface
+    attributes:
+      label: Surface area
+      options:
+        - Docs only
+        - CLI/plugin only
+        - Policy/config
+        - Network/runtime
+        - Other
+    validations:
+      required: true
+  - type: textarea
+    id: risk
+    attributes:
+      label: Security considerations
+      description: How does this preserve default-deny behavior and avoid exposing secrets?
+    validations:
+      required: true

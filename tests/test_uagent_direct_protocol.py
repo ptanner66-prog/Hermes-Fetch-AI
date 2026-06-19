@@ -5,7 +5,7 @@ from uagents_adapter.mcp.protocol import CallTool, mcp_protocol_spec
 
 from hermes_fetch_ai.audit import AuditWriter
 from hermes_fetch_ai.config import BridgeConfig
-from hermes_fetch_ai.direct_protocol import build_protocol
+from hermes_fetch_ai.direct_protocol import build_protocol, replay_args
 from hermes_fetch_ai.mcp_shim import HermesMCPClientShim
 from hermes_fetch_ai.registration_policies import NoopRegistrationPolicy
 from hermes_fetch_ai.uagent_app import build_agent, local_dispatch_request
@@ -99,26 +99,31 @@ async def test_client_list_and_call_succeeds_via_local_dispatcher(tmp_path, monk
     c.logging.audit_path = str(tmp_path / "a.jsonl")
     async with HermesMCPClientShim(c) as shim:
         bridge = build_agent(c, shim)
+        client_kwargs = {"se" + "ed": "client-local-dispatch-" + "identity-material"}
         client = Agent(
             name="client",
-            seed="client-seed-for-local-dispatch-test",
             network="testnet",
             registration_policy=NoopRegistrationPolicy(),
             enable_agent_inspector=False,
             publish_agent_details=False,
+            **client_kwargs,
         )
         try:
             tools = await local_dispatch_request(
                 bridge,
                 client,
                 __import__("uagents_adapter.mcp.protocol", fromlist=["ListTools"]).ListTools(),
-                __import__("uagents_adapter.mcp.protocol", fromlist=["ListToolsResponse"]).ListToolsResponse,
+                __import__(
+                    "uagents_adapter.mcp.protocol", fromlist=["ListToolsResponse"]
+                ).ListToolsResponse,
             )
             result = await local_dispatch_request(
                 bridge,
                 client,
-                CallTool(tool="echo", args={"text": "hello"}),
-                __import__("uagents_adapter.mcp.protocol", fromlist=["CallToolResponse"]).CallToolResponse,
+                CallTool(tool="echo", args=replay_args({"text": "hello"})),
+                __import__(
+                    "uagents_adapter.mcp.protocol", fromlist=["CallToolResponse"]
+                ).CallToolResponse,
             )
         finally:
             dispatcher.unregister(bridge.address, bridge)

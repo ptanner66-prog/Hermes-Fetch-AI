@@ -1,39 +1,30 @@
 # Changelog
 
-## 1.0.0 — 2026-06-10
+All notable changes will be documented in this file.
 
-First production release of the Hermes (Nous Research) x Fetch.ai bridge.
+This project follows semantic versioning once public releases begin.
 
-### Bridge
+## Unreleased
 
-- Policy-aware MCP-over-uAgents bridge: signed `ListTools`/`CallTool` handlers
-  with default-deny policy, sender/tool allowlists, denylist override,
-  JSON-schema and SSRF argument validation, per-sender rate limits, bounded
-  responses, and redacted JSONL audit.
-- MCP shim backends: fake (CI), in-process Hermes tools (fallback), and the
-  production-preferred hardened stdio subprocess (`shell=False`, env
-  allowlist, timeouts, stderr separation).
-- `serve` runs the agent on a dedicated event loop with graceful
-  SIGINT/SIGTERM shutdown; proven by a two-process HTTP round-trip test with
-  offline rules-based resolution.
-- Hosted mode keeps uAgents' default ledger-backed registration policy so a
-  funded `UAGENT_SEED`-derived wallet pays Almanac registration in FET.
+### Security
 
-### Hermes integration
+- Reject local/private/non-global/reserved URL targets and DNS resolutions in tool arguments.
+- Reject shell-control characters and unsafe shell metacharacters unless explicitly trusted.
+- Require bridge replay/idempotency metadata for `CallTool` by default.
+- Add bounded TTL replay cache for duplicate/stale/future call rejection.
+- Add global and bounded per-sender rate limiting for tool calls and tool listing.
+- Enforce environment-only production `UAGENT_SEED`; reject production YAML seed material.
+- Strengthen redaction for multi-word sensitive values.
+- Ensure normalized output never exceeds configured byte cap.
 
-- Ships as a Hermes Agent plugin (`hermes_agent.plugins` entry point):
-  `hermes fetchai doctor|probe|serve|demo`, zero Hermes core changes.
-- Field-tested against a real `NousResearch/hermes-agent` v0.16.x install
-  (gated test `tests/test_field_hermes_stdio.py`); the Hermes tools MCP
-  server's wrapped-`kwargs` argument contract is documented and asserted.
-- The `hermes mcp serve` conversations/permissions surface is structurally
-  out of scope.
-- Upstream submission payload (optional skill + tests) validated with the
-  hermes-agent harness lives in `upstream/hermes-pr/`.
+### Reliability
 
-### Packaging and operations
+- Make real HTTP serve smoke use a dynamic port and separate subprocess.
+- Make serve shutdown deterministic on Windows and Unix.
+- Add audit metadata that reflects normalized truncation/original-byte state.
 
-- Default config ships as package data; `demo local` and `doctor` work from
-  wheel installs with no repo checkout.
-- `--version` flag; CI matrix on Python 3.11/3.12; tag-driven release
-  workflow building sdist and wheel.
+### Open source readiness
+
+- Add stronger CI matrix, security audit, package verification, CodeQL, and Dependabot.
+- Add native Hermes plugin documentation and founder/open-source governance docs.
+- Verify wheel build, twine metadata, and plugin entry point discovery.

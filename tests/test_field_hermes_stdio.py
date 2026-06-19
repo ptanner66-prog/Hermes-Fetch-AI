@@ -28,6 +28,7 @@ from uagents_adapter.mcp.protocol import (
 )
 
 from hermes_fetch_ai.config import load_config
+from hermes_fetch_ai.direct_protocol import replay_args
 from hermes_fetch_ai.mcp_shim import HermesMCPClientShim
 from hermes_fetch_ai.uagent_app import build_agent, local_dispatch_request
 
@@ -73,7 +74,7 @@ async def test_real_hermes_roundtrip_policy_and_skills_list(tmp_path):
             call = await local_dispatch_request(
                 bridge,
                 client,
-                CallTool(tool="skills_list", args={"kwargs": {}}),
+                CallTool(tool="skills_list", args=replay_args({"kwargs": {}})),
                 CallToolResponse,
                 timeout=60,
             )
@@ -83,7 +84,7 @@ async def test_real_hermes_roundtrip_policy_and_skills_list(tmp_path):
             denied = await local_dispatch_request(
                 bridge,
                 client,
-                CallTool(tool="web_search", args={"kwargs": {"query": "x"}}),
+                CallTool(tool="web_search", args=replay_args({"kwargs": {"query": "x"}})),
                 CallToolResponse,
                 timeout=30,
             )

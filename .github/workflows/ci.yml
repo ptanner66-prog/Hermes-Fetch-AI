@@ -2,7 +2,7 @@ name: CI
 
 on:
   push:
-    branches: [main, "claude/**"]
+    branches: [main, "claude/**", "hardening/**"]
   pull_request:
     branches: [main]
   workflow_dispatch:
@@ -16,11 +16,12 @@ concurrency:
 
 jobs:
   verify:
-    name: verify (py${{ matrix.python-version }})
-    runs-on: ubuntu-latest
+    name: verify (${{ matrix.os }}, py${{ matrix.python-version }})
+    runs-on: ${{ matrix.os }}
     strategy:
       fail-fast: false
       matrix:
+        os: [ubuntu-latest, windows-latest, macos-latest]
         python-version: ["3.11", "3.12"]
     steps:
       - name: Checkout
@@ -48,10 +49,67 @@ jobs:
         run: python -m ruff check .
 
       - name: Type check (mypy)
-        run: python -m mypy src/hermes_fetch_ai --ignore-missing-imports
+        run: python -m mypy src tests
 
-      - name: Unit tests (pytest)
+      - name: Unit and production smoke tests (pytest)
         run: python -m pytest -q
 
       - name: Local end-to-end demo (in-process uAgent round trip)
         run: python -m hermes_fetch_ai.cli demo local
+
+  package:
+    name: package smoke
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: pyproject.toml
+
+      - name: Build and inspect artifacts
+        run: |
+          python -m pip install -U pip build twine
+          python -m build
+          python -m twine check dist/*
+
+      - name: Install built wheel and run native plugin smoke
+        shell: bash
+        run: |
+          python -m venv /tmp/hfa-wheel-smoke
+          source /tmp/hfa-wheel-smoke/bin/activate
+          python -m pip install -U pip
+          python -m pip install dist/*.whl
+          hermes-fetch-ai doctor
+          python - <<'PY'
+          import importlib.metadata
+          eps = importlib.metadata.entry_points().select(group='hermes_agent.plugins')
+          names = {ep.name for ep in eps}
+          assert 'fetchai' in names, names
+          PY
+
+  dependency-audit:
+    name: dependency audit
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: pyproject.toml
+
+      - name: Audit dependencies
+        run: |
+          python -m pip install -U pip
+          python -m pip install -e ".[dev]"
+          # Temporary upstream exception: uagents -> cosmpy currently pins PyNaCl==1.6.0.
+          # Remove this ignore as soon as cosmpy/uagents permits PyNaCl>=1.6.2.
+          python -m pip_audit --skip-editable --ignore-vuln CVE-2025-69277
