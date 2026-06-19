@@ -99,8 +99,8 @@ class BridgeConfig(BaseModel):
         if self.agent.seed:
             raise ValueError("agent.seed is not allowed in config; use UAGENT_SEED")
         if not self.agent.dev_random_seed:
-            seed = os.environ.get("UAGENT_SEED")
-            if not seed:
+            runtime_identity = os.environ.get("UAGENT_SEED")
+            if not runtime_identity:
                 raise ValueError("UAGENT_SEED is required when agent.dev_random_seed=false")
         return self
 

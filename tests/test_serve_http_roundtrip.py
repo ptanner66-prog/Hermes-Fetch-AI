@@ -49,7 +49,9 @@ def _request_graceful_stop(proc: subprocess.Popen[str], timeout: float = 30.0) -
     """
 
     deadline = time.monotonic() + timeout
-    signal_to_send = signal.CTRL_BREAK_EVENT if os.name == "nt" else signal.SIGTERM
+    signal_to_send = (
+        getattr(signal, "CTRL_BREAK_EVENT", signal.SIGTERM) if os.name == "nt" else signal.SIGTERM
+    )
     while proc.poll() is None and time.monotonic() < deadline:
         proc.send_signal(signal_to_send)
         remaining = max(0.1, min(5.0, deadline - time.monotonic()))
@@ -88,7 +90,7 @@ def bridge_proc(tmp_path: Path, unused_tcp_port: int):
     )
     env = dict(os.environ)
     env["UAGENT_" + "SEED"] = LOCAL_IDENTITY_TEXT
-    creationflags = subprocess.CREATE_NEW_PROCESS_GROUP if os.name == "nt" else 0
+    creationflags = getattr(subprocess, "CREATE_NEW_PROCESS_GROUP", 0) if os.name == "nt" else 0
     proc = subprocess.Popen(
         [sys.executable, "-m", "hermes_fetch_ai.cli", "serve", "--config", str(cfg)],
         env=env,

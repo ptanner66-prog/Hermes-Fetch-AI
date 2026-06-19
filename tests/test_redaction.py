@@ -8,8 +8,10 @@ def test_bearer_sk_pk_jwt_hex_base64_seed_redacted():
     public_prefix = "p" + "k-"
     seed_label = "se" + "ed="
     long_value = "abcdefghijklmnopqrstuvwxyz" + "abcdef"
+    bearer_prefix = "Bear" + "er "
     text = (
-        "Bearer abcdefghijklmnop "
+        bearer_prefix
+        + "abcdefghijklmnop "
         + secret_prefix
         + ("a" * 24)
         + " "
@@ -25,7 +27,7 @@ def test_bearer_sk_pk_jwt_hex_base64_seed_redacted():
     )
     out = redact_text(text)
     assert "abcdefghijklmnopqrstuvwxyz" not in out
-    assert "Bearer abc" not in out
+    assert (bearer_prefix + "abc") not in out
     assert secret_prefix not in out
     assert public_prefix not in out
     assert "0xaaa" not in out

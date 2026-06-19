@@ -72,7 +72,9 @@ def test_url_bypass_forms_rejected(url):
         validate_args({"name": "t"}, {"url": url}, cfg())
 
 
-@pytest.mark.parametrize("url", ["file:///etc/passwd", "data:text/plain,hello", "ftp://example.com/x"])
+@pytest.mark.parametrize(
+    "url", ["file:///etc/passwd", "data:text/plain,hello", "ftp://example.com/x"]
+)
 def test_non_http_url_schemes_rejected(url):
     with pytest.raises(ValueError):
         validate_args({"name": "t"}, {"url": url}, cfg())

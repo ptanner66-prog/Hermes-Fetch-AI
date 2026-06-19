@@ -83,7 +83,9 @@ def test_tool_name_confusables_and_controls_rejected():
             pass
         else:  # pragma: no cover
             raise AssertionError(f"unsafe name accepted: {name!r}")
-    assert not authorize("s", "ｅcho", {}, "mcp", PolicyConfig(public_tools=["echo"]), TokenBuckets())[0]
+    assert not authorize(
+        "s", "ｅcho", {}, "mcp", PolicyConfig(public_tools=["echo"]), TokenBuckets()
+    )[0]
 
 
 def test_replay_cache_blocks_duplicates_and_bounds_entries():

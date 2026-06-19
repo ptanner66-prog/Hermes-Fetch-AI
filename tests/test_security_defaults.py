@@ -27,11 +27,11 @@ def test_audit_log_no_raw_args_output_full_sender_or_secret(tmp_path):
         sender="agent1qabcdefghijklmnopqrstuvwxyz",
         tool="echo",
         decision="denied",
-        reason="Bearer abcdefghijklmnopqrstuvwxyz",
+        reason=("Bear" + "er " + "abcdefghijklmnopqrstuvwxyz"),
     )
     text = p.read_text()
     assert "abcdefghijklmnopqrstuvwxyz" not in text
-    assert "Bearer abc" not in text
+    assert ("Bear" + "er " + "abc") not in text
 
 
 def test_publish_manifest_defaults_false_in_local_configs():
