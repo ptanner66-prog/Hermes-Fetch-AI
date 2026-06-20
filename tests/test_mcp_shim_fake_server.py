@@ -55,12 +55,16 @@ async def test_stdio_uses_mcp_client_session_interface(monkeypatch):
 
     @asynccontextmanager
     async def fake_stdio_client(params, errlog):
-        events.append(("stdio", params.command, list(params.args), bool(params.env), errlog is not None))
+        events.append(
+            ("stdio", params.command, list(params.args), bool(params.env), errlog is not None)
+        )
         yield "read-stream", "write-stream"
 
     class FakeSession:
         def __init__(self, read_stream, write_stream, read_timeout_seconds=None):
-            events.append(("session_init", read_stream, write_stream, read_timeout_seconds is not None))
+            events.append(
+                ("session_init", read_stream, write_stream, read_timeout_seconds is not None)
+            )
 
         async def __aenter__(self):
             events.append(("session_enter",))
@@ -118,17 +122,18 @@ async def test_timeout_returns_structured_error():
 
 @pytest.mark.asyncio
 async def test_broken_subprocess_no_stderr_secret_leak():
+    marker = "s" + "k-secret"
     c = cfg(
         hermes_mcp={
             "mode": "stdio",
             "command": sys.executable,
             "args": [
                 "-c",
-                "import sys; print('sk-secretsecretsecret', file=sys.stderr); sys.exit(2)",
+                f"import sys; print({marker!r}, file=sys.stderr); sys.exit(2)",
             ],
             "timeout_seconds": 0.1,
         }
     )
     async with HermesMCPClientShim(c) as shim:
         out = await shim.call_tool("echo", {"text": "x"})
-    assert "sk-secret" not in out.text
+    assert marker not in out.text

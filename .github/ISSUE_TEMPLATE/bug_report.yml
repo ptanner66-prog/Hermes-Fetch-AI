@@ -1,0 +1,36 @@
+name: Bug report
+description: Report a reproducible bug that is not a private security issue.
+labels: [bug]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Do not include seeds, tokens, mailbox keys, API keys, private endpoints, or exploit details for unresolved vulnerabilities.
+  - type: textarea
+    id: summary
+    attributes:
+      label: Summary
+      description: What happened?
+    validations:
+      required: true
+  - type: textarea
+    id: reproduce
+    attributes:
+      label: Reproduction
+      description: Commands/config needed to reproduce. Redact secrets as [REDACTED].
+      render: shell
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: Expected behavior
+    validations:
+      required: true
+  - type: textarea
+    id: environment
+    attributes:
+      label: Environment
+      description: OS, Python, hermes-fetch-ai version, Hermes Agent version if relevant.
+    validations:
+      required: true

@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import re
 import time
 import uuid
 from typing import Any
@@ -18,7 +19,19 @@ from uagents_adapter.mcp.protocol import (
 from .arg_validator import validate_args
 from .audit import AuditWriter
 from .config import BridgeConfig
-from .policy import authorize, authorize_list_tools, normalize_tool_name, visible_tools
+from .policy import (
+    REPLAYS,
+    ReplayCache,
+    authorize,
+    authorize_list_tools,
+    consume_call_rate,
+    normalize_tool_name,
+    visible_tools,
+)
+
+_REPLAY_META_KEY = "_hermes_fetch_ai"
+_REQUEST_ID_RE = re.compile(r"^[A-Za-z0-9_.:-]{8,128}$")
+_ALLOWED_REPLAY_META_KEYS = {"request_id", "issued_at_ms"}
 
 
 def _sender(ctx: Any) -> str:
@@ -51,6 +64,65 @@ def _tool_fingerprint(tool: dict[str, Any]) -> str:
     }
     raw = json.dumps(material, sort_keys=True, separators=(",", ":")).encode("utf-8")
     return hashlib.sha256(raw).hexdigest()
+
+
+def replay_args(args: dict[str, Any], request_id: str | None = None) -> dict[str, Any]:
+    """Return tool args with bridge-level replay/idempotency metadata attached.
+
+    The uAgents MCP `CallTool` model has only `tool` and `args`, so v1 carries
+    bridge metadata under a reserved args key. The bridge strips this key before
+    JSON-schema validation and before invoking the Hermes tool.
+    """
+
+    return {
+        **args,
+        _REPLAY_META_KEY: {
+            "request_id": request_id or str(uuid.uuid4()),
+            "issued_at_ms": int(time.time() * 1000),
+        },
+    }
+
+
+def _clean_args_and_replay_fingerprint(
+    sender: str, tool_name: str, args: dict[str, Any], cfg: BridgeConfig
+) -> tuple[dict[str, Any], str]:
+    if not isinstance(args, dict):
+        raise ValueError("tool args must be an object")
+
+    clean_args = dict(args)
+    meta = clean_args.pop(_REPLAY_META_KEY, None)
+    request_id: str | None = None
+
+    if meta is None:
+        if cfg.policy.require_replay_metadata:
+            raise ValueError("missing replay metadata")
+    else:
+        if not isinstance(meta, dict):
+            raise ValueError("invalid replay metadata")
+        if set(meta) - _ALLOWED_REPLAY_META_KEYS:
+            raise ValueError("invalid replay metadata")
+        raw_request_id = meta.get("request_id")
+        if not isinstance(raw_request_id, str) or not _REQUEST_ID_RE.fullmatch(raw_request_id):
+            raise ValueError("invalid replay metadata")
+        request_id = raw_request_id
+        raw_issued_at_ms = meta.get("issued_at_ms")
+        if isinstance(raw_issued_at_ms, bool) or not isinstance(raw_issued_at_ms, int | float):
+            raise ValueError("invalid replay metadata")
+        issued_at_ms = int(raw_issued_at_ms)
+        now_ms = int(time.time() * 1000)
+        age_ms = now_ms - issued_at_ms
+        if age_ms > int(cfg.policy.replay_ttl_seconds * 1000):
+            raise ValueError("stale replay metadata")
+        if -age_ms > int(cfg.policy.max_replay_clock_skew_seconds * 1000):
+            raise ValueError("future replay metadata")
+
+    material: dict[str, Any]
+    if request_id is not None:
+        material = {"sender": sender, "request_id": request_id}
+    else:
+        material = {"sender": sender, "tool": tool_name, "args": clean_args}
+    raw = json.dumps(material, sort_keys=True, separators=(",", ":")).encode("utf-8")
+    return clean_args, hashlib.sha256(raw).hexdigest()
 
 
 async def handle_list_tools(
@@ -99,15 +171,26 @@ async def handle_list_tools(
 
 
 async def handle_call_tool(
-    ctx: Any, sender: str, msg: CallTool, shim: Any, cfg: BridgeConfig, audit: AuditWriter
+    ctx: Any,
+    sender: str,
+    msg: CallTool,
+    shim: Any,
+    cfg: BridgeConfig,
+    audit: AuditWriter,
+    *,
+    replay_cache: ReplayCache = REPLAYS,
 ) -> CallToolResponse:
     trace_id = str(uuid.uuid4())
     start = time.perf_counter()
     args_bytes = len(json.dumps(msg.args, sort_keys=True).encode("utf-8"))
     decision = "denied"
     reason = ""
-    result = None
+    output_bytes = 0
+    truncated = False
     try:
+        ok, reason = consume_call_rate(sender, cfg.policy)
+        if not ok:
+            return CallToolResponse(result=None, error=reason)
         try:
             tool_name = normalize_tool_name(msg.tool)
         except ValueError as exc:
@@ -116,8 +199,15 @@ async def handle_call_tool(
         if args_bytes > cfg.policy.max_args_bytes:
             reason = "args exceed max_args_bytes"
             return CallToolResponse(result=None, error=reason)
-        ok, reason = authorize(sender, tool_name, msg.args, "mcp", cfg.policy)
+        ok, reason = authorize(sender, tool_name, msg.args, "mcp", cfg.policy, consume_rate=False)
         if not ok:
+            return CallToolResponse(result=None, error=reason)
+        try:
+            clean_args, replay_fingerprint = _clean_args_and_replay_fingerprint(
+                sender, tool_name, msg.args, cfg
+            )
+        except ValueError as exc:
+            reason = str(exc)
             return CallToolResponse(result=None, error=reason)
         tools = [_tool_dict(t) for t in await shim.list_tools()]
         found = next((t for t in tools if t.get("name") == tool_name), None)
@@ -125,22 +215,32 @@ async def handle_call_tool(
             reason = "unknown tool"
             return CallToolResponse(result=None, error=reason)
         before_fp = _tool_fingerprint(found)
-        validate_args(found, msg.args, cfg)
+        try:
+            validate_args(found, clean_args, cfg)
+        except ValueError as exc:
+            reason = str(exc)
+            return CallToolResponse(result=None, error=reason)
+        ok, reason = replay_cache.allow(
+            replay_fingerprint, cfg.policy.replay_ttl_seconds, cfg.policy.max_replay_entries
+        )
+        if not ok:
+            return CallToolResponse(result=None, error=reason)
         # The descriptor/schema fingerprint is computed immediately before the
         # call after the fresh inventory lookup. This makes validation and the
         # invocation use the same checked descriptor rather than stale policy data.
         if before_fp != _tool_fingerprint(found):
             reason = "tool descriptor changed before call"
             return CallToolResponse(result=None, error=reason)
-        normalized = await shim.call_tool(tool_name, msg.args)
+        normalized = await shim.call_tool(tool_name, clean_args)
         decision = "error" if normalized.is_error else "allowed"
         reason = "tool error" if normalized.is_error else "ok"
-        result = normalized.text
+        output_bytes = normalized.output_bytes
+        truncated = normalized.truncated
         return CallToolResponse(
             result=normalized.text, error=normalized.text if normalized.is_error else None
         )
-    except Exception as e:
-        reason = str(e)
+    except Exception:
+        reason = "internal bridge error"
         return CallToolResponse(result=None, error=reason)
     finally:
         audit.write(
@@ -153,8 +253,8 @@ async def handle_call_tool(
             reason=reason,
             duration_ms=int((time.perf_counter() - start) * 1000),
             args_bytes=args_bytes,
-            output_bytes=len((result or "").encode()),
-            truncated=False,
+            output_bytes=output_bytes,
+            truncated=truncated,
             mode=cfg.hermes_mcp.mode,
             send_status="before_send",
         )
@@ -181,7 +281,7 @@ async def _send_with_audit(
             msg_type=msg_type,
             tool=tool,
             decision="send",
-            reason=str(exc),
+            reason="send failed",
             duration_ms=int((time.perf_counter() - start) * 1000),
             error_class=exc.__class__.__name__,
             mode=cfg.hermes_mcp.mode,

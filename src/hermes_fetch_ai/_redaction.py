@@ -5,11 +5,14 @@ import re
 from typing import Any
 
 REDACTED = "[REDACTED]"
+_SENSITIVE_KV = re.compile(
+    r"(?i)\b(seed|secret|token|api[_-]?key|password)(\s*[:=]\s*)"
+    r"(\"[^\"]*\"|'[^']*'|[^,'\";}\]\r\n]+)"
+)
 _PATTERNS = [
     re.compile(r"Bearer\s+[A-Za-z0-9._~+/=-]+", re.I),
     re.compile(r"\b[sp]k-[A-Za-z0-9_-]{12,}\b"),
     re.compile(r"\beyJ[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\b"),
-    re.compile(r"(?i)(seed|secret|token|api[_-]?key|password)\s*[:=]\s*['\"]?[^'\"\s,}]+"),
     re.compile(r"\b0x[a-fA-F0-9]{32,}\b"),
     re.compile(r"\b[a-fA-F0-9]{48,}\b"),
     re.compile(r"\b[A-Za-z0-9+/]{40,}={0,2}\b"),
@@ -18,11 +21,9 @@ _PATTERNS = [
 
 def redact_text(s: str) -> str:
     out = str(s)
+    out = _SENSITIVE_KV.sub(lambda m: f"{m.group(1)}{m.group(2)}{REDACTED}", out)
     for pat in _PATTERNS:
-        if "seed" in pat.pattern or "secret" in pat.pattern:
-            out = pat.sub(lambda m: m.group(0).split("=")[0].split(":")[0] + "=" + REDACTED, out)
-        else:
-            out = pat.sub(REDACTED, out)
+        out = pat.sub(REDACTED, out)
     return out
 
 

@@ -1,0 +1,28 @@
+version: 2
+updates:
+  - package-ecosystem: pip
+    directory: "/"
+    schedule:
+      interval: weekly
+    open-pull-requests-limit: 5
+    groups:
+      python-runtime:
+        patterns:
+          - "uagents*"
+          - "mcp"
+          - "pydantic"
+          - "httpx"
+      python-dev:
+        patterns:
+          - "pytest*"
+          - "ruff"
+          - "mypy"
+          - "pip-audit"
+          - "build"
+          - "twine"
+
+  - package-ecosystem: github-actions
+    directory: "/"
+    schedule:
+      interval: weekly
+    open-pull-requests-limit: 5

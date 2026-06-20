@@ -7,7 +7,7 @@ python -m hermes_fetch_ai.cli doctor
 python -m hermes_fetch_ai.cli demo local
 ```
 
-This uses fake MCP tools and an in-process direct call path. It must not require Agentverse, Almanac, ASI, mailbox setup, hosted accounts, or a real Hermes install.
+This uses fake MCP tools and an in-process direct call path. It must not require Agentverse, Almanac, ASI, mailbox setup, hosted accounts, or a real Hermes install. The local demo sends replay metadata and exercises the same policy path as production calls.
 
 ## Hermes-backed local demo
 
@@ -18,9 +18,7 @@ python -m hermes_fetch_ai.cli doctor --config examples/hermes-stdio.yaml
 python -m hermes_fetch_ai.cli serve --config examples/hermes-stdio.yaml
 ```
 
-The `command` in `examples/hermes-stdio.yaml` must be the Python interpreter of the
-environment where `hermes-agent` is installed, so that
-`python -m agent.transports.hermes_tools_mcp_server` resolves.
+The `command` in `examples/hermes-stdio.yaml` must be the Python interpreter of the environment where `hermes-agent` is installed, so that `python -m agent.transports.hermes_tools_mcp_server` resolves.
 
 Fallback path (in-process private server builder):
 
@@ -31,10 +29,28 @@ python -m hermes_fetch_ai.cli serve --config examples/hermes-local.yaml
 
 If Hermes changes that private seam, run `python -m hermes_fetch_ai.cli probe-hermes` and use the output for upstream integration planning.
 
-Note: `hermes mcp serve` exposes the Hermes conversations/messaging surface, not the
-tools registry. The bridge never uses it; see `docs/security.md`.
+Note: `hermes mcp serve` exposes the Hermes conversations/messaging surface, not the tools registry. The bridge never uses it; see `docs/security.md`.
 
-## Field test against a real hermes-agent install (verified 2026-06-10)
+## Client call shape
+
+`CallTool` clients must attach bridge replay/idempotency metadata under reserved args key `_hermes_fetch_ai`:
+
+```json
+{
+  "tool": "echo",
+  "args": {
+    "text": "hello",
+    "_hermes_fetch_ai": {
+      "request_id": "client-generated-unique-id",
+      "issued_at_ms": 1780000000000
+    }
+  }
+}
+```
+
+The bridge removes `_hermes_fetch_ai` before validating and invoking the tool. Reuse of the same request ID by the same sender inside the TTL returns `replay detected` and does not invoke the tool again.
+
+## Field test against a real hermes-agent install
 
 One-time setup:
 
@@ -53,22 +69,13 @@ HERMES_FETCH_HERMES_PYTHON=/tmp/hermes-venv/bin/python \
 python -m pytest tests/test_field_hermes_stdio.py -q
 ```
 
-Observed against hermes-agent v0.16.x: the keyless server lists only the tools
-whose `check_fn` prerequisites are met (`skills_list`, `skill_view`,
-`text_to_speech`); the bridge shows an unknown sender `skills_list` only;
-`web_search` is denied by policy before any server call; `skills_list` returns
-real skill metadata.
+Observed behavior: the keyless server lists only tools whose prerequisites are met; the bridge shows an unknown sender `skills_list` only; `web_search` is denied by policy before any server call; `skills_list` returns real skill metadata.
 
 Pitfalls:
 
-- The Hermes tools MCP server wraps every tool's arguments in one required
-  `kwargs` object (its handlers take `**kwargs`). Follow the served
-  inputSchema: send `args={"kwargs": {...}}`, e.g. `{"kwargs": {}}` for
-  `skills_list`. Schema-following uAgent clients get this right automatically;
-  hand-written callers must wrap.
-- `hermes_mcp.command` must be the Python interpreter of the environment where
-  `hermes-agent` is installed. `HERMES_HOME` is forwarded to the subprocess by
-  the bridge's environment allowlist.
+- The Hermes tools MCP server wraps every tool's arguments in one required `kwargs` object (its handlers take `**kwargs`). Follow the served inputSchema: send `args={"kwargs": {...}}`, e.g. `{"kwargs": {}}` for `skills_list`. Schema-following uAgent clients get this right automatically; hand-written callers must wrap.
+- Replay metadata is in addition to the served schema and is stripped by the bridge before the schema check.
+- `hermes_mcp.command` must be the Python interpreter of the environment where `hermes-agent` is installed. `HERMES_HOME` is forwarded to the subprocess by the bridge's environment allowlist.
 
 ## Agentverse mailbox manual demo
 

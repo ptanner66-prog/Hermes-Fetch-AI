@@ -136,7 +136,10 @@ class HermesMCPClientShim:
                     await self.server.call_tool(name, args), self.cfg.policy.max_output_bytes
                 )
             if self._startup_error is not None:
-                if isinstance(self._startup_error, (TimeoutError, asyncio.TimeoutError)) or "timed out" in str(self._startup_error).lower():
+                if (
+                    isinstance(self._startup_error, (TimeoutError, asyncio.TimeoutError))
+                    or "timed out" in str(self._startup_error).lower()
+                ):
                     return NormalizedToolResult("timeout", None, True, False, 7)
                 return NormalizedToolResult(
                     "MCP stdio startup failed", None, True, False, len("MCP stdio startup failed")
