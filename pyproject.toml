@@ -20,10 +20,10 @@ classifiers = [
 ]
 
 dependencies = [
-  "uagents==0.24.2",
-  "uagents-core==0.4.4",
+  "uagents==0.25.2",
+  "uagents-core==0.4.7",
   "uagents-adapter[mcp]==0.6.2",
-  "mcp==1.27.1",
+  "mcp==1.28.0",
   "pydantic>=2.8,<3",
   "PyYAML>=6,<7",
   "python-dotenv>=1.0,<2",
