@@ -5,10 +5,11 @@ Skipped unless both env vars are set:
   HERMES_FETCH_FIELD_TEST=1
   HERMES_FETCH_HERMES_PYTHON=/path/to/hermes-venv/bin/python
 
-Operator setup (one time):
+Operator setup (one time). Current hermes-agent needs Python 3.14; on older
+interpreters its dependencies are skipped and the tools server fails to start:
 
-  python -m venv /tmp/hermes-venv
-  /tmp/hermes-venv/bin/pip install -e "<hermes-agent checkout>[mcp]"
+  uv venv -p 3.14 /tmp/hermes-venv
+  uv pip install --python /tmp/hermes-venv/bin/python -e "<hermes-agent checkout>[mcp]"
   mkdir -p $HERMES_HOME/skills && copy at least one bundled skill there
 
 Callers must follow the served inputSchema. hermes-agent v0.16.x wrapped

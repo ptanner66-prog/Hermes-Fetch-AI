@@ -56,11 +56,13 @@ The bridge removes `_hermes_fetch_ai` before validating and invoking the tool. R
 One-time setup:
 
 ```bash
-python -m venv /tmp/hermes-venv
-/tmp/hermes-venv/bin/pip install -e "<hermes-agent checkout>[mcp]"
+uv venv -p 3.14 /tmp/hermes-venv   # current hermes-agent needs Python 3.14
+uv pip install --python /tmp/hermes-venv/bin/python -e "<hermes-agent checkout>[mcp]"
 export HERMES_HOME=/tmp/hermes-home
 mkdir -p "$HERMES_HOME/skills"   # copy at least one bundled skill in
 ```
+
+On Python 3.13 or older the install appears to succeed but skips Hermes' dependencies, and `serve` then fails with `hermes backend: FAIL` (the server exits with `No module named 'ruamel'`).
 
 Run the gated integration test:
 
@@ -71,6 +73,8 @@ python -m pytest tests/test_field_hermes_stdio.py -q
 ```
 
 Observed behavior: the keyless server lists only tools whose prerequisites are met; the bridge shows an unknown sender `skills_list` only; `web_search` is denied by policy before any server call; `skills_list` returns real skill metadata.
+
+Last run on 2026-10-05 against hermes-agent `main` (`bb236287`, Python 3.14.8, mcp 2.0.0): `1 passed`. The bridge's mcp 1.28.1 client negotiates MCP protocol `2025-11-25`, which the mcp 2.0 server still accepts. Without credentials the server exposed `web_search`, `web_extract`, `skill_view`, `skills_list`, and `text_to_speech`.
 
 Pitfalls:
 

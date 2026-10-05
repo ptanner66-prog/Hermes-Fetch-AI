@@ -1,7 +1,8 @@
 # Production-preferred Hermes-backed config (see docs/architecture.md).
 # Launches the Hermes tools MCP server as an isolated stdio subprocess.
 # Set `command` to the python interpreter of the environment where hermes-agent
-# is installed. Field-tested against hermes-agent v0.16.x (docs/demo.md).
+# is installed (Python 3.14 for current hermes-agent). Field-tested against
+# hermes-agent v0.16.x and main bb236287 (2026-10-05); see docs/demo.md.
 # The bridge identity comes from UAGENT_SEED (at least 32 characters); this
 # config refuses to start without it so the agent address stays stable.
 # Callers must follow the served inputSchema: hermes-agent v0.16.x wrapped tool
@@ -23,7 +24,8 @@ hermes_mcp:
 policy:
   public_tools:
     - skills_list
-  # Explicit denylist of every other tool exposed by hermes-agent v0.16.0
+  # Explicit denylist of every other tool the Hermes tools server can expose
+  # (EXPOSED_TOOLS as of hermes-agent main bb236287, 2026-10-05)
   # (denylist wins even if a sender allowlist is added later).
   denied_tools:
     - skill_view
@@ -44,6 +46,9 @@ policy:
     - text_to_speech
     - kanban_complete
     - kanban_block
+    - kanban_schedule
+    - kanban_request_review
+    - kanban_request_changes
     - kanban_comment
     - kanban_heartbeat
     - kanban_show

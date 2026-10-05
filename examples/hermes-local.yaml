@@ -31,6 +31,9 @@ policy:
     - text_to_speech
     - kanban_complete
     - kanban_block
+    - kanban_schedule
+    - kanban_request_review
+    - kanban_request_changes
     - kanban_comment
     - kanban_heartbeat
     - kanban_show

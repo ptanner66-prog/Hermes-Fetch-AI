@@ -64,8 +64,8 @@ The upstream contribution plan is intentionally small: keep this repo standalone
 
 ## Hermes compatibility
 
-- Field-tested against hermes-agent v0.16.x, where the tools server wrapped tool arguments in one `kwargs` object.
-- Current hermes-agent `main` develops on Python 3.14, pins `mcp==2.0.0` in its `[mcp]` extra, and serves flat tool arguments. This package pins `mcp==1.28.1` (via uAgents) and Python 3.11/3.12, so it cannot be installed into a current Hermes environment, which also rules out the in-process mode and the `hermes fetchai` plugin there. Run it from its own environment in stdio mode with `hermes_mcp.command` pointing at Hermes' Python.
+- **stdio mode works with current Hermes.** The gated field test passed on 2026-10-05 against hermes-agent `main` (`bb236287`, Python 3.14, mcp 2.0.0): this package's mcp 1.28.1 client negotiates MCP protocol `2025-11-25`, and the tools server's flat arguments are handled. It also passed against hermes-agent v0.16.x, whose tools server wrapped arguments in one `kwargs` object.
+- **Same-environment installs do not.** Current hermes-agent needs Python 3.14 and pins `mcp==2.0.0` in its `[mcp]` extra, while this package supports Python 3.11/3.12 and pins `mcp==1.28.1` via uAgents. They cannot share one environment, which rules out the in-process mode and the `hermes fetchai` plugin on current Hermes. Run the bridge from its own environment with `hermes_mcp.command` pointing at Hermes' Python.
 
 ## Security defaults
 

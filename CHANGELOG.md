@@ -17,7 +17,8 @@ Set the date and push the `v1.0.0` tag to release.
 - `doctor` reads the tested dependency pins from package metadata, so they can no longer drift from `pyproject.toml`.
 - `demo mailbox` works from an installed wheel (the mailbox example config is packaged); `doctor --contamination-scan` reports `SKIP` outside a source checkout instead of passing vacuously.
 - Argument validation no longer treats text such as `Note: hello` as a URL.
-- `hermes-local.yaml` denylists exact tool names (the old `web`/`browser`/`kanban` entries never matched anything) and matches `hermes-stdio.yaml`.
+- `hermes-local.yaml` denylists exact tool names (the old `web`/`browser`/`kanban` entries never matched anything) and matches `hermes-stdio.yaml`; both now also deny `kanban_schedule`, `kanban_request_review`, and `kanban_request_changes`, which current Hermes exposes.
+- Verified stdio mode against current hermes-agent `main` (Python 3.14, mcp 2.0); the field test follows the served schema and its setup notes ask for a Python 3.14 Hermes environment.
 - Removed a tool-descriptor fingerprint check that compared a value with itself and could never fire.
 - Docs: replaced references to deleted `research/` notes with `docs/agentverse-mailbox.md` and a design-decisions section in `docs/architecture.md`; corrected the version-specific `kwargs` argument guidance.
 
