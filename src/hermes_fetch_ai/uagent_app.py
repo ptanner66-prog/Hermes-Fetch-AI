@@ -1,36 +1,21 @@
 from __future__ import annotations
 
-
 import asyncio
-
 import contextlib
-
 import signal
-
 import uuid
-
 from collections.abc import Coroutine
-
 from typing import Any, TypeVar
 
-
 from uagents import Agent, Model
-
 from uagents.dispatch import dispatcher
-
 from uagents_adapter.mcp.protocol import CallTool, CallToolResponse, ListTools, ListToolsResponse
 
-
 from .audit import AuditWriter
-
 from .config import BridgeConfig
-
 from .direct_protocol import build_protocol, replay_args
-
 from .mcp_shim import HermesMCPClientShim
-
 from .registration_policies import NoopRegistrationPolicy
-
 
 T = TypeVar("T", bound=Model)
 
@@ -252,15 +237,15 @@ async def _run_agent_until_stop(agent: Agent, stop: asyncio.Event) -> None:
                 timeout=agent._shutdown_timeout,  # type: ignore[attr-defined]
             )
 
-        except asyncio.TimeoutError:
+        except TimeoutError:
             if logger is not None:
                 logger.warning(
                     f"Shutdown did not complete within {agent._shutdown_timeout}s timeout"  # type: ignore[attr-defined]
                 )
 
-        except Exception as exc:
+        except Exception:
             if logger is not None:
-                logger.exception(f"Error during shutdown: {exc}")
+                logger.exception("Error during shutdown")
 
             else:
                 raise

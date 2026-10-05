@@ -110,6 +110,7 @@ jobs:
         run: |
           python -m pip install -U pip
           python -m pip install -e ".[dev]"
-          # Temporary upstream exception: uagents -> cosmpy currently pins PyNaCl==1.6.0.
-          # Remove this ignore as soon as cosmpy/uagents permits PyNaCl>=1.6.2.
-          python -m pip_audit --skip-editable --ignore-vuln CVE-2025-69277
+          # Upstream exceptions, documented in docs/security.md:
+          # - CVE-2025-69277: uagents -> cosmpy pins PyNaCl==1.6.0; remove once PyNaCl>=1.6.2 is allowed.
+          # - PYSEC-2026-1325: ecdsa (via uagents-core/cosmpy) Minerva timing side channel; no fix exists.
+          python -m pip_audit --skip-editable --ignore-vuln CVE-2025-69277 --ignore-vuln PYSEC-2026-1325

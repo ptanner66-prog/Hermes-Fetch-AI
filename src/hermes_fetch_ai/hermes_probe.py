@@ -24,21 +24,21 @@ def probe(cfg: BridgeConfig | None = None) -> dict[str, Any]:
     except ModuleNotFoundError:
         spec = None
     info["hermes_build_server"] = "importable" if spec else "not importable"
-    try:
-        server = _build_fake_server()
-        info["fake_tools"] = 2 if server else 0
-    except Exception as e:
-        info["fake_mode"] = f"failed: {e}"
+    info["fake_tools"] = len(_build_fake_server().tools)
     hermes = info["hermes_console"]
     if hermes != "not found":
         try:
             res = subprocess.run(
-                [hermes, "mcp", "serve", "--help"], text=True, capture_output=True, timeout=5
+                [hermes, "mcp", "serve", "--help"],
+                text=True,
+                capture_output=True,
+                timeout=5,
+                check=False,
             )
             info["hermes_mcp_serve_help"] = f"exit={res.returncode}"
             if "mcp_serve" in (res.stderr + res.stdout):
                 info["hermes_mcp_serve_help"] += " ModuleNotFoundError: mcp_serve"
-        except Exception as e:
+        except (OSError, subprocess.SubprocessError) as e:
             info["hermes_mcp_serve_help"] = type(e).__name__
     else:
         info["hermes_mcp_serve_help"] = "not checked"

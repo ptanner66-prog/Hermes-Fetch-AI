@@ -395,3 +395,56 @@ async def test_direct_protocol_audit_redacts_long_sender(tmp_path):
     text = (tmp_path / "a.jsonl").read_text(encoding="utf-8")
     assert sender not in text
     assert "…" in text
+
+
+class DeadBackendShim(Shim):
+    async def list_tools(self):
+        self.list_calls += 1
+        raise ConnectionError("hermes child exited")
+
+
+class ExplodingShim(Shim):
+    async def call_tool(self, name, args):
+        raise RuntimeError("boom at /internal/path")
+
+
+@pytest.mark.asyncio
+async def test_list_tools_reports_backend_unavailable(tmp_path):
+    audit = AuditWriter(tmp_path / "a.jsonl")
+    resp = await handle_list_tools(
+        None, "dead_backend_lister", DeadBackendShim(), cfg(public_tools=["echo"]), audit
+    )
+    assert resp.tools == [] and resp.error == "backend unavailable"
+    event = json.loads((tmp_path / "a.jsonl").read_text().splitlines()[-1])
+    assert event["decision"] == "error"
+    assert event["error_class"] == "ConnectionError"
+
+
+@pytest.mark.asyncio
+async def test_call_tool_reports_backend_unavailable_without_invoking(tmp_path):
+    s = DeadBackendShim()
+    resp = await handle_call_tool(
+        None,
+        "dead_backend_caller",
+        CallTool(tool="echo", args=replay_args({"text": "x"}, request_id="dead-backend-0001")),
+        s,
+        cfg(public_tools=["echo"]),
+        AuditWriter(tmp_path / "a.jsonl"),
+        replay_cache=ReplayCache(),
+    )
+    assert resp.error == "backend unavailable" and s.calls == 0
+
+
+@pytest.mark.asyncio
+async def test_internal_error_stays_generic_for_remote_caller(tmp_path):
+    resp = await handle_call_tool(
+        None,
+        "exploding_caller",
+        CallTool(tool="echo", args=replay_args({"text": "x"}, request_id="exploding-0001")),
+        ExplodingShim(),
+        cfg(public_tools=["echo"]),
+        AuditWriter(tmp_path / "a.jsonl"),
+        replay_cache=ReplayCache(),
+    )
+    assert resp.error == "internal bridge error"
+    assert "/internal/path" not in resp.model_dump_json()

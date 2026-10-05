@@ -13,7 +13,7 @@ def test_from_call_tool_result_text_structured_error_binary_truncation():
     assert out.structured == {"x": 1}
     assert out.is_error is True
     assert out.truncated is True
-    assert out.output_bytes == len("hello\n[image content omitted]".encode("utf-8"))
+    assert out.output_bytes == len(b"hello\n[image content omitted]")
     assert len(out.text.encode("utf-8")) <= 10
 
 

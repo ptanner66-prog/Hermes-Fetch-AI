@@ -33,10 +33,12 @@ uv run python -m hermes_fetch_ai.cli demo local
 rm -rf dist build
 uv run python -m build
 uv run python -m twine check dist/*
-uv run python -m pip_audit --skip-editable --ignore-vuln CVE-2025-69277
+uv run python -m pip_audit --skip-editable --ignore-vuln CVE-2025-69277 --ignore-vuln PYSEC-2026-1325
 ```
 
-The `PyNaCl` ignore is a tracked upstream dependency exception. Do not add new ignores without documenting the reason in `docs/security.md`.
+The `PyNaCl` and `ecdsa` ignores are tracked upstream dependency exceptions. Do not add new ignores without documenting the reason in `docs/security.md`.
+
+`ruff` and `mypy` are pinned to a minor series so a new release cannot change the lint or type-check rules underneath CI. Dependabot proposes the bumps; fix any new findings in that PR.
 
 ## Testing expectations
 

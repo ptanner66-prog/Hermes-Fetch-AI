@@ -1,9 +1,11 @@
-# Production-preferred Hermes-backed config (see research/PRODUCTION_DECISION.md).
+# Production-preferred Hermes-backed config (see docs/architecture.md).
 # Launches the Hermes tools MCP server as an isolated stdio subprocess.
 # Set `command` to the python interpreter of the environment where hermes-agent
 # is installed. Field-tested against hermes-agent v0.16.x (docs/demo.md).
-# Note: the Hermes server wraps tool arguments in one required `kwargs` object,
-# so callers send args={"kwargs": {...}} per the served inputSchema.
+# The bridge identity comes from UAGENT_SEED (at least 32 characters); this
+# config refuses to start without it so the agent address stays stable.
+# Callers must follow the served inputSchema: hermes-agent v0.16.x wrapped tool
+# arguments in one required `kwargs` object; newer releases serve flat arguments.
 version: 1
 agent:
   name: hermes_fetch_hermes_stdio
@@ -12,7 +14,7 @@ agent:
   mode: endpoint
   publish_manifest: false
   enable_agent_inspector: false
-  dev_random_seed: true
+  dev_random_seed: false
 hermes_mcp:
   mode: stdio
   command: python
@@ -49,6 +51,9 @@ policy:
     - kanban_create
     - kanban_unblock
     - kanban_link
+    - terminal
+    - patch
+    - write_file
 logging:
   redaction: true
 chat:

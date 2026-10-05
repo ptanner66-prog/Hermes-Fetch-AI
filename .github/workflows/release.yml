@@ -61,9 +61,10 @@ jobs:
 
       - name: Dependency audit
         run: |
-          # Temporary upstream exception: uagents -> cosmpy currently pins PyNaCl==1.6.0.
-          # Remove this ignore as soon as cosmpy/uagents permits PyNaCl>=1.6.2.
-          python -m pip_audit --skip-editable --ignore-vuln CVE-2025-69277
+          # Upstream exceptions, documented in docs/security.md:
+          # - CVE-2025-69277: uagents -> cosmpy pins PyNaCl==1.6.0; remove once PyNaCl>=1.6.2 is allowed.
+          # - PYSEC-2026-1325: ecdsa (via uagents-core/cosmpy) Minerva timing side channel; no fix exists.
+          python -m pip_audit --skip-editable --ignore-vuln CVE-2025-69277 --ignore-vuln PYSEC-2026-1325
 
       - name: Build sdist and wheel
         run: python -m build
@@ -95,3 +96,9 @@ jobs:
         with:
           files: dist/*
           generate_release_notes: true
+
+      # Opt-in: set the repository variable PUBLISH_TO_PYPI=true after configuring a
+      # PyPI trusted publisher for this repo, workflow release.yml, environment release.
+      - name: Publish to PyPI (trusted publishing)
+        if: vars.PUBLISH_TO_PYPI == 'true'
+        uses: pypa/gh-action-pypi-publish@release/v1

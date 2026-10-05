@@ -2,28 +2,43 @@ from __future__ import annotations
 
 import argparse
 import asyncio
+import sys
 from importlib import resources
 from pathlib import Path
 
-from .config import load_config, validate_config_file
+from pydantic import ValidationError
+
+from .config import BridgeConfig, format_validation_error, load_config, validate_config_file
 from .hermes_probe import probe
 from .uagent_app import run_local_roundtrip
 from .version_pins import check_pins
 
 ROOT = Path(__file__).resolve().parents[2]
+MAILBOX_GUIDE = (
+    "https://github.com/ptanner66-prog/Hermes-Fetch-AI/blob/main/docs/agentverse-mailbox.md"
+)
 
 
-def default_config_path() -> Path:
-    repo_example = ROOT / "examples" / "local-direct.yaml"
+def example_config_path(name: str) -> Path:
+    """Return an example config from a source checkout, else the packaged copy."""
+    repo_example = ROOT / "examples" / name
     if repo_example.is_file():
         return repo_example
-    packaged = Path(str(resources.files("hermes_fetch_ai").joinpath("data/local-direct.yaml")))
+    packaged = Path(str(resources.files("hermes_fetch_ai").joinpath(f"data/{name}")))
     if packaged.is_file():
         return packaged
     raise FileNotFoundError(
         "no default config found; pass --config explicitly "
-        f"(looked at {repo_example} and packaged data/local-direct.yaml)"
+        f"(looked at {repo_example} and packaged data/{name})"
     )
+
+
+def default_config_path() -> Path:
+    return example_config_path("local-direct.yaml")
+
+
+def _is_source_checkout() -> bool:
+    return (ROOT / "pyproject.toml").is_file() and (ROOT / "src" / "hermes_fetch_ai").is_dir()
 
 
 def _contamination_scan() -> tuple[bool, str]:
@@ -49,20 +64,37 @@ def _contamination_scan() -> tuple[bool, str]:
     return (not hits, "ok" if not hits else "\n".join(hits))
 
 
+def _load_or_report(path: str | Path) -> BridgeConfig | None:
+    try:
+        return load_config(path)
+    except ValidationError as exc:
+        print(f"config: FAIL: {format_validation_error(exc)}", file=sys.stderr)
+    except ValueError as exc:
+        print(f"config: FAIL: {exc}", file=sys.stderr)
+    return None
+
+
 def doctor(args: argparse.Namespace) -> int:
-    ok, msg = validate_config_file(args.config or default_config_path())
+    config_path = args.config or default_config_path()
+    ok, msg = validate_config_file(config_path)
     if not ok:
         print(f"config: FAIL: {msg}")
         return 1
     pin_problems = check_pins()
     if pin_problems:
         print("pins: WARN: " + "; ".join(pin_problems))
+    seed_warning = load_config(config_path).ignored_seed_warning()
+    if seed_warning:
+        print(f"seed: WARN: {seed_warning}")
     if args.contamination_scan:
-        clean, detail = _contamination_scan()
-        print(f"contamination: {'ok' if clean else 'FAIL'}")
-        if not clean:
-            print(detail)
-            return 1
+        if not _is_source_checkout():
+            print("contamination: SKIP (only meaningful in a source checkout)")
+        else:
+            clean, detail = _contamination_scan()
+            print(f"contamination: {'ok' if clean else 'FAIL'}")
+            if not clean:
+                print(detail)
+                return 1
     print("doctor: ok")
     return 0
 
@@ -85,23 +117,31 @@ async def _demo_local() -> int:
 
 def demo(args: argparse.Namespace) -> int:
     if args.kind == "mailbox":
-        cfg = ROOT / "examples" / "agentverse-mailbox.yaml"
-        ok, msg = validate_config_file(cfg)
+        ok, msg = validate_config_file(example_config_path("agentverse-mailbox.yaml"))
         if not ok:
             print(f"mailbox demo requires UAGENT_SEED and hosted mailbox setup: {msg}")
+            print(f"setup guide: {MAILBOX_GUIDE}")
             return 1
-        print(
-            "mailbox demo is manual hosted setup only; see research/FETCH_ACCOUNT_REQUIREMENTS.md"
-        )
+        print(f"mailbox demo is a manual hosted setup; follow {MAILBOX_GUIDE}")
         return 0
     return asyncio.run(_demo_local())
 
 
 def serve(args: argparse.Namespace) -> int:
+    from .mcp_shim import HermesBackendError
     from .uagent_app import run_bridge
 
-    cfg = load_config(args.config)
-    run_bridge(cfg)
+    cfg = _load_or_report(args.config)
+    if cfg is None:
+        return 1
+    seed_warning = cfg.ignored_seed_warning()
+    if seed_warning:
+        print(f"seed: WARN: {seed_warning}", file=sys.stderr)
+    try:
+        run_bridge(cfg)
+    except HermesBackendError as exc:
+        print(f"hermes backend: FAIL: {exc}", file=sys.stderr)
+        return 1
     return 0
 
 

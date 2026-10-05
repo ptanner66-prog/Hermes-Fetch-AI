@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import hashlib
 import json
 import re
@@ -19,6 +20,7 @@ from uagents_adapter.mcp.protocol import (
 from .arg_validator import validate_args
 from .audit import AuditWriter
 from .config import BridgeConfig
+from .logging import get_logger
 from .policy import (
     REPLAYS,
     ReplayCache,
@@ -32,6 +34,9 @@ from .policy import (
 _REPLAY_META_KEY = "_hermes_fetch_ai"
 _REQUEST_ID_RE = re.compile(r"^[A-Za-z0-9_.:-]{8,128}$")
 _ALLOWED_REPLAY_META_KEYS = {"request_id", "issued_at_ms"}
+BACKEND_UNAVAILABLE = "backend unavailable"
+
+logger = get_logger("hermes_fetch_ai")
 
 
 def _sender(ctx: Any) -> str:
@@ -56,16 +61,6 @@ def _tool_dict(tool: Any) -> dict[str, Any]:
     return d
 
 
-def _tool_fingerprint(tool: dict[str, Any]) -> str:
-    material = {
-        "name": tool.get("name"),
-        "description": tool.get("description", ""),
-        "inputSchema": tool.get("inputSchema") or {"type": "object", "properties": {}},
-    }
-    raw = json.dumps(material, sort_keys=True, separators=(",", ":")).encode("utf-8")
-    return hashlib.sha256(raw).hexdigest()
-
-
 def replay_args(args: dict[str, Any], request_id: str | None = None) -> dict[str, Any]:
     """Return tool args with bridge-level replay/idempotency metadata attached.
 
@@ -87,7 +82,7 @@ def _clean_args_and_replay_fingerprint(
     sender: str, tool_name: str, args: dict[str, Any], cfg: BridgeConfig
 ) -> tuple[dict[str, Any], str]:
     if not isinstance(args, dict):
-        raise ValueError("tool args must be an object")
+        raise TypeError("tool args must be an object")
 
     clean_args = dict(args)
     meta = clean_args.pop(_REPLAY_META_KEY, None)
@@ -146,7 +141,25 @@ async def handle_list_tools(
         )
         return ListToolsResponse(tools=[], error=reason)
 
-    tools = await shim.list_tools()
+    # Any backend failure is reported to the caller as "backend unavailable".
+    try:
+        tools = await shim.list_tools()
+    except Exception as exc:  # noqa: BLE001
+        logger.error("Hermes MCP backend unavailable for list_tools (%s)", exc.__class__.__name__)
+        audit.write(
+            trace_id=trace_id,
+            sender=sender,
+            protocol="mcp",
+            msg_type="list_tools",
+            decision="error",
+            reason=BACKEND_UNAVAILABLE,
+            duration_ms=int((time.perf_counter() - start) * 1000),
+            error_class=exc.__class__.__name__,
+            output_bytes=0,
+            truncated=False,
+            mode=cfg.hermes_mcp.mode,
+        )
+        return ListToolsResponse(tools=[], error=BACKEND_UNAVAILABLE)
     filtered = [_tool_dict(t) for t in visible_tools(sender, tools, cfg.policy)]
     raw = json.dumps(filtered).encode("utf-8")
     truncated = False
@@ -206,30 +219,31 @@ async def handle_call_tool(
             clean_args, replay_fingerprint = _clean_args_and_replay_fingerprint(
                 sender, tool_name, msg.args, cfg
             )
-        except ValueError as exc:
+        except (TypeError, ValueError) as exc:
             reason = str(exc)
             return CallToolResponse(result=None, error=reason)
-        tools = [_tool_dict(t) for t in await shim.list_tools()]
+        try:
+            inventory = await shim.list_tools()
+        except Exception as exc:  # noqa: BLE001 - see handle_list_tools
+            logger.error("Hermes MCP backend unavailable for call_tool (%s)", exc.__class__.__name__)
+            decision = "error"
+            reason = BACKEND_UNAVAILABLE
+            return CallToolResponse(result=None, error=reason)
+        tools = [_tool_dict(t) for t in inventory]
         found = next((t for t in tools if t.get("name") == tool_name), None)
         if not found:
             reason = "unknown tool"
             return CallToolResponse(result=None, error=reason)
-        before_fp = _tool_fingerprint(found)
         try:
-            validate_args(found, clean_args, cfg)
-        except ValueError as exc:
+            # URL checks resolve DNS, so keep them off the event loop.
+            await asyncio.to_thread(validate_args, found, clean_args, cfg)
+        except (TypeError, ValueError) as exc:
             reason = str(exc)
             return CallToolResponse(result=None, error=reason)
         ok, reason = replay_cache.allow(
             replay_fingerprint, cfg.policy.replay_ttl_seconds, cfg.policy.max_replay_entries
         )
         if not ok:
-            return CallToolResponse(result=None, error=reason)
-        # The descriptor/schema fingerprint is computed immediately before the
-        # call after the fresh inventory lookup. This makes validation and the
-        # invocation use the same checked descriptor rather than stale policy data.
-        if before_fp != _tool_fingerprint(found):
-            reason = "tool descriptor changed before call"
             return CallToolResponse(result=None, error=reason)
         normalized = await shim.call_tool(tool_name, clean_args)
         decision = "error" if normalized.is_error else "allowed"
@@ -240,6 +254,9 @@ async def handle_call_tool(
             result=normalized.text, error=normalized.text if normalized.is_error else None
         )
     except Exception:
+        # Never leak internals to the remote caller; keep the traceback for the operator.
+        logger.exception("internal bridge error handling call_tool (trace_id=%s)", trace_id)
+        decision = "error"
         reason = "internal bridge error"
         return CallToolResponse(result=None, error=reason)
     finally:

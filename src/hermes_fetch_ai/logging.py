@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import logging
+
 from ._redaction import redact_text
 
 

@@ -32,6 +32,12 @@ def _cap(text: str, max_bytes: int) -> tuple[str, bool, int]:
     return raw[:keep].decode("utf-8", errors="ignore") + marker, True, original
 
 
+def error_result(text: str, max_bytes: int) -> NormalizedToolResult:
+    """Return a tool error result capped to the same byte limit as normal output."""
+    capped, truncated, original = _cap(text, max_bytes)
+    return NormalizedToolResult(capped, None, True, truncated, original)
+
+
 def _extract_content(content: Any) -> str:
     blocks = content if isinstance(content, list) else [content]
     parts: list[str] = []

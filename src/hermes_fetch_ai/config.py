@@ -11,10 +11,31 @@ from pydantic import BaseModel, ConfigDict, Field, ValidationError, field_valida
 
 from .audit import default_audit_path
 
-SECRET_RE = re.compile(
-    r"(?i)(bearer\s+|sk-|pk-|api[_-]?key|token|secret|seed\s*[:=]|password|[a-f0-9]{48,})"
+MIN_SEED_LENGTH = 32
+SEED_HINT = 'generate one with: python -c "import secrets; print(secrets.token_hex(32))"'
+
+_SECRET_WORDS = r"(?:seed|secret|token|api[_-]?key|password|mailbox[_-]?key)"
+# Credential formats and key=value assignments. Plain words such as "token" in a
+# description are not flagged; values that look like actual secrets are.
+_SECRET_VALUE_PATTERNS = (
+    re.compile(r"(?i)\bbearer\s+[A-Za-z0-9._~+/=-]{8,}"),
+    re.compile(r"\b[sp]k-[A-Za-z0-9_-]{12,}"),
+    re.compile(r"\beyJ[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+"),
+    re.compile(rf"(?i)\b{_SECRET_WORDS}\s*[:=]\s*\S"),
+    re.compile(r"\b(?:0x)?[a-fA-F0-9]{48,}\b"),
 )
-SECRET_KEY_RE = re.compile(r"(?i)(seed|secret|token|api[_-]?key|password|mailbox[_-]?key)")
+# A command-line flag that introduces a secret, e.g. ["--api-key", "..."].
+_SECRET_FLAG_RE = re.compile(rf"(?i)^--?{_SECRET_WORDS}$")
+SECRET_KEY_RE = re.compile(rf"(?i){_SECRET_WORDS}")
+_NON_SECRET_KEYS = frozenset({"dev_random_seed"})
+_SECRET_MESSAGE = (
+    "secret-shaped YAML values are not allowed; supply secrets through the environment "
+    "(for example UAGENT_SEED)"
+)
+
+
+class ConfigError(ValueError):
+    """A config file could not be read or parsed."""
 
 
 class AgentConfig(BaseModel):
@@ -89,7 +110,7 @@ class BridgeConfig(BaseModel):
     chat: ChatConfig = Field(default_factory=ChatConfig)
 
     @model_validator(mode="after")
-    def validate_cross_fields(self) -> "BridgeConfig":
+    def validate_cross_fields(self) -> BridgeConfig:
         if self.version != 1:
             raise ValueError("only config version 1 is supported")
         if self.hermes_mcp.mode == "stdio" and not self.hermes_mcp.command:
@@ -102,6 +123,12 @@ class BridgeConfig(BaseModel):
             runtime_identity = os.environ.get("UAGENT_SEED")
             if not runtime_identity:
                 raise ValueError("UAGENT_SEED is required when agent.dev_random_seed=false")
+            # The agent's signing key is derived from this value, so a short seed
+            # is a guessable private key.
+            if len(runtime_identity) < MIN_SEED_LENGTH:
+                raise ValueError(
+                    f"UAGENT_SEED must be at least {MIN_SEED_LENGTH} characters; {SEED_HINT}"
+                )
         return self
 
     def effective_seed(self) -> str:
@@ -109,32 +136,77 @@ class BridgeConfig(BaseModel):
             return "dev-ephemeral-" + secrets.token_urlsafe(32)
         return os.environ["UAGENT_SEED"]
 
+    def ignored_seed_warning(self) -> str | None:
+        """Explain when a configured UAGENT_SEED will not be used."""
+        if self.agent.dev_random_seed and os.environ.get("UAGENT_SEED"):
+            return (
+                "UAGENT_SEED is set but agent.dev_random_seed is true, so it is ignored and the "
+                "bridge gets a new random address on every start; set "
+                "agent.dev_random_seed: false to use UAGENT_SEED"
+            )
+        return None
+
     @property
     def audit_path(self) -> Path:
         return Path(self.logging.audit_path) if self.logging.audit_path else default_audit_path()
 
 
-def _scan_secret_values(obj: object) -> None:
+def _looks_like_secret(value: str) -> bool:
+    return any(pattern.search(value) for pattern in _SECRET_VALUE_PATTERNS)
+
+
+def _scan_secret_values(obj: object, *, under_secret_key: bool = False) -> None:
     if isinstance(obj, dict):
         for k, v in obj.items():
-            if isinstance(v, str) and (SECRET_RE.search(v) or SECRET_KEY_RE.search(str(k))):
-                raise ValueError("secret-shaped YAML values are not allowed")
-            _scan_secret_values(v)
+            key = str(k)
+            if _looks_like_secret(key):
+                raise ValueError(_SECRET_MESSAGE)
+            secret_key = key not in _NON_SECRET_KEYS and bool(SECRET_KEY_RE.search(key))
+            _scan_secret_values(v, under_secret_key=secret_key)
     elif isinstance(obj, list):
         for v in obj:
-            _scan_secret_values(v)
+            if isinstance(v, str) and _SECRET_FLAG_RE.match(v.strip()):
+                raise ValueError(_SECRET_MESSAGE)
+            _scan_secret_values(v, under_secret_key=under_secret_key)
+    elif isinstance(obj, str) and ((under_secret_key and obj) or _looks_like_secret(obj)):
+        raise ValueError(_SECRET_MESSAGE)
+
+
+def _yaml_problem(exc: yaml.YAMLError) -> str:
+    problem = getattr(exc, "problem", None)
+    mark = getattr(exc, "problem_mark", None)
+    where = f" at line {mark.line + 1}, column {mark.column + 1}" if mark is not None else ""
+    return f"{where}: {problem}" if problem else where
 
 
 def load_config(path: str | Path) -> BridgeConfig:
-    with Path(path).open("r", encoding="utf-8") as f:
-        data = yaml.safe_load(f) or {}
+    config_path = Path(path)
+    try:
+        with config_path.open("r", encoding="utf-8") as f:
+            data = yaml.safe_load(f) or {}
+    except OSError as exc:
+        raise ConfigError(f"cannot read {config_path}: {exc.strerror or exc}") from None
+    except yaml.YAMLError as exc:
+        raise ConfigError(f"invalid YAML in {config_path}{_yaml_problem(exc)}") from None
     _scan_secret_values(data)
     return BridgeConfig.model_validate(data)
+
+
+def format_validation_error(exc: ValidationError) -> str:
+    """Summarize a pydantic error without echoing the submitted values."""
+    parts = []
+    for error in exc.errors():
+        location = ".".join(str(part) for part in error.get("loc", ()))
+        message = str(error.get("msg", "invalid value")).removeprefix("Value error, ")
+        parts.append(f"{location}: {message}" if location else message)
+    return "; ".join(parts)
 
 
 def validate_config_file(path: str | Path) -> tuple[bool, str]:
     try:
         load_config(path)
-        return True, "ok"
-    except (ValidationError, ValueError) as e:
+    except ValidationError as e:
+        return False, format_validation_error(e)
+    except ValueError as e:
         return False, str(e)
+    return True, "ok"
