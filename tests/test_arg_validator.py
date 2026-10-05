@@ -104,3 +104,66 @@ def test_shell_control_characters_rejected(value):
 def test_url_like_dictionary_keys_rejected():
     with pytest.raises(ValueError):
         validate_args({"name": "t"}, {"file:///etc/passwd": "x"}, cfg())
+
+
+def _public_dns(monkeypatch):
+    monkeypatch.setattr(
+        socket,
+        "getaddrinfo",
+        lambda *a, **k: [(socket.AF_INET, None, None, None, ("93.184.216.34", 0))],
+    )
+
+
+@pytest.mark.parametrize(
+    "text", ["Note: hello", "Re: meeting at 3", "key:value", "urn:isbn:0451450523", "12:30"]
+)
+def test_plain_text_with_a_colon_is_not_a_url(text):
+    assert validate_args({"name": "t"}, {"text": text}, cfg()) == {"text": text}
+
+
+@pytest.mark.parametrize(
+    "text",
+    [
+        "see http://169.254.169.254/latest/meta-data",
+        "TODO: fix http://10.0.0.1/admin.",
+        "(mirror at https://[::1]:8443/x)",
+        "read file:///etc/passwd please",
+    ],
+)
+def test_urls_inside_longer_text_are_checked(text):
+    with pytest.raises(ValueError):
+        validate_args({"name": "t"}, {"text": text}, cfg())
+
+
+def test_public_url_inside_text_is_allowed(monkeypatch):
+    _public_dns(monkeypatch)
+    text = "docs at https://example.com/guide, see section 2"
+    assert validate_args({"name": "t"}, {"text": text}, cfg()) == {"text": text}
+
+
+@pytest.mark.parametrize(
+    "value",
+    ["localhost", "localhost:8080", "169.254.169.254/latest/meta-data", "10.0.0.1", "[::1]:80"],
+)
+def test_bare_local_hosts_are_rejected(value):
+    with pytest.raises(ValueError, match="private or local"):
+        validate_args({"name": "t"}, {"host": value}, cfg())
+
+
+def test_bare_public_ip_is_allowed(monkeypatch):
+    _public_dns(monkeypatch)
+    assert validate_args({"name": "t"}, {"host": "93.184.216.34:443"}, cfg())
+
+
+def test_query_strings_need_a_trusted_tool(monkeypatch):
+    _public_dns(monkeypatch)
+    url = "https://example.com/search?q=1&page=2"
+    with pytest.raises(ValueError, match="shell metacharacters"):
+        validate_args({"name": "fetch"}, {"url": url}, cfg())
+    trusted = BridgeConfig(agent={"dev_random_seed": True}, policy={"trusted_shell_tools": ["fetch"]})
+    assert validate_args({"name": "fetch"}, {"url": url}, trusted) == {"url": url}
+
+
+def test_non_object_args_raise_type_error():
+    with pytest.raises(TypeError):
+        validate_args({"name": "t"}, ["not", "an", "object"], cfg())  # type: ignore[arg-type]

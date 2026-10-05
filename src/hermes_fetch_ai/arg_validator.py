@@ -13,8 +13,23 @@ from jsonschema.exceptions import ValidationError as JsonSchemaValidationError
 from .config import BridgeConfig
 
 SHELL_META = re.compile(r"[;&|`$<>\\]\n?|\$\(|\${")
-SHELL_CONTROL = re.compile(r"[\x00-\x1f\x7f\u2028\u2029]")
-URL_RE = re.compile(r"^[a-zA-Z][a-zA-Z0-9+.-]*:")
+SHELL_CONTROL = re.compile(r"[\x00-\x1f\x7f  ]")
+_SCHEME_PREFIX = re.compile(r"^([a-zA-Z][a-zA-Z0-9+.-]*):")
+# URLs that appear anywhere inside a longer string, e.g. "see http://10.0.0.1/x".
+_EMBEDDED_URL = re.compile(r"[a-zA-Z][a-zA-Z0-9+.-]*://[^\s\"'<>]+")
+_TRAILING_PUNCTUATION = ".,;:!?)}'\""
+# A whole string that is only a local or literal-IP host, optionally with a port
+# or path ("localhost:8080", "169.254.169.254/latest", "[::1]:80"). Tools that
+# add a missing "http://" would otherwise turn these into local requests.
+_BARE_LITERAL_HOST = re.compile(
+    r"^(?:localhost|\d{1,3}(?:\.\d{1,3}){3}|\[[0-9A-Fa-f:.]+\])(?::\d{1,5})?(?:[/?#]\S*)?$",
+    re.IGNORECASE,
+)
+# Schemes treated as URLs even without "//", such as "file:/etc/passwd" or
+# "data:text/plain,x". Any other "word:" prefix (e.g. "Note: hello") is plain text.
+_URL_SCHEMES_WITHOUT_SLASHES = frozenset(
+    {"data", "file", "javascript", "vbscript", "mailto", "jar", "blob", "view-source"}
+)
 _ALLOWED_URL_SCHEMES = {"http", "https"}
 
 
@@ -44,7 +59,7 @@ def _parse_weird_ipv4(host: str) -> ipaddress.IPv4Address | None:
             while len(nums) < 4:
                 nums.append(0)
             return ipaddress.IPv4Address(".".join(map(str, nums[:4])))
-    except Exception:
+    except ValueError:
         return None
     return None
 
@@ -70,15 +85,16 @@ def _is_non_global_ip(value: str) -> bool:
     )
 
 
-def _reject_url(value: str) -> None:
-    candidate = value.strip()
-    if not URL_RE.match(candidate):
-        return
+def _is_url_like(value: str) -> bool:
+    match = _SCHEME_PREFIX.match(value)
+    if not match:
+        return False
+    after_colon = value[match.end() :]
+    return after_colon.startswith("/") or match.group(1).lower() in _URL_SCHEMES_WITHOUT_SLASHES
 
-    if candidate != value:
-        raise ValueError("URL must not contain leading or trailing whitespace")
 
-    parsed = urlparse(candidate)
+def _check_url(url: str) -> None:
+    parsed = urlparse(url)
     if parsed.scheme.lower() not in _ALLOWED_URL_SCHEMES:
         raise ValueError("unsupported URL scheme")
 
@@ -101,6 +117,24 @@ def _reject_url(value: str) -> None:
             raise ValueError("URL resolves to private or local address")
 
 
+def _reject_url(value: str) -> None:
+    candidate = value.strip()
+    checked: set[str] = set()
+    if _is_url_like(candidate):
+        if candidate != value:
+            raise ValueError("URL must not contain leading or trailing whitespace")
+        _check_url(candidate)
+        checked.add(candidate)
+    elif _BARE_LITERAL_HOST.match(candidate):
+        _check_url("http://" + candidate)
+
+    for match in _EMBEDDED_URL.finditer(value):
+        url = match.group(0).rstrip(_TRAILING_PUNCTUATION)
+        if url not in checked:
+            _check_url(url)
+            checked.add(url)
+
+
 def _walk_strings(obj: Any) -> list[str]:
     if isinstance(obj, str):
         return [obj]
@@ -120,7 +154,7 @@ def _walk_strings(obj: Any) -> list[str]:
 
 def validate_args(tool: Any, args: dict[str, Any], cfg: BridgeConfig) -> dict[str, Any]:
     if not isinstance(args, dict):
-        raise ValueError("tool args must be an object")
+        raise TypeError("tool args must be an object")
 
     name = tool.get("name") if isinstance(tool, dict) else getattr(tool, "name", "")
     schema = normalize_schema(
@@ -138,6 +172,8 @@ def validate_args(tool: Any, args: dict[str, Any], cfg: BridgeConfig) -> dict[st
 
     for s in _walk_strings(args):
         _reject_url(s)
+        # Deliberately strict: tools that legitimately need these characters
+        # (query strings, multi-line text) must be listed in trusted_shell_tools.
         if name not in cfg.policy.trusted_shell_tools and (
             SHELL_META.search(s) or SHELL_CONTROL.search(s)
         ):

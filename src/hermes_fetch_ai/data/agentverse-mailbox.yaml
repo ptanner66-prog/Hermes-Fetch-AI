@@ -1,0 +1,17 @@
+version: 1
+agent:
+  name: hermes_fetch_mailbox
+  port: 8003
+  network: testnet
+  mode: mailbox
+  publish_manifest: true
+  enable_agent_inspector: true
+  dev_random_seed: false
+hermes_mcp:
+  mode: fake
+policy:
+  public_tools: []
+logging:
+  redaction: true
+chat:
+  enable_chat: false

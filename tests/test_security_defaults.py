@@ -1,6 +1,8 @@
 import subprocess
 import sys
 
+import pytest
+
 from hermes_fetch_ai.audit import AuditWriter
 from hermes_fetch_ai.config import load_config
 
@@ -11,10 +13,32 @@ def test_hermes_backed_example_exposes_only_skills_list_publicly():
     assert "skill_view" in cfg.policy.denied_tools
 
 
+def test_production_hermes_config_requires_a_stable_seed(monkeypatch):
+    with pytest.raises(ValueError, match="UAGENT_SEED is required"):
+        load_config("examples/hermes-stdio.yaml")
+    monkeypatch.setenv("UAGENT_SEED", "production-config-test-" + "identity-material")
+    cfg = load_config("examples/hermes-stdio.yaml")
+    assert cfg.agent.dev_random_seed is False
+    assert cfg.effective_seed() == cfg.effective_seed()
+    assert cfg.policy.public_tools == ["skills_list"]
+
+
+def test_hermes_example_denylists_match_and_use_exact_tool_names(monkeypatch):
+    monkeypatch.setenv("UAGENT_SEED", "production-config-test-" + "identity-material")
+    stdio = load_config("examples/hermes-stdio.yaml").policy.denied_tools
+    local = load_config("examples/hermes-local.yaml").policy.denied_tools
+    assert stdio == local
+    # Bare toolset names such as "web" never match a real tool name.
+    assert not {"web", "browser", "image", "tts", "kanban"} & set(stdio)
+
+
 def test_doctor_does_not_print_seed_or_seed_fragments(monkeypatch):
     monkeypatch.setenv("UAGENT_SEED", "super_secret_seed_value_123456789")
     res = subprocess.run(
-        [sys.executable, "-m", "hermes_fetch_ai.cli", "doctor"], text=True, capture_output=True
+        [sys.executable, "-m", "hermes_fetch_ai.cli", "doctor"],
+        text=True,
+        capture_output=True,
+        check=False,
     )
     assert res.returncode == 0
     assert "super_secret" not in res.stdout + res.stderr
@@ -43,6 +67,7 @@ def test_no_hosted_network_call_in_local_demo_path(monkeypatch):
         [sys.executable, "-m", "hermes_fetch_ai.cli", "demo", "local"],
         text=True,
         capture_output=True,
+        check=False,
     )
     assert res.returncode == 0
     assert "echo result: hello" in res.stdout

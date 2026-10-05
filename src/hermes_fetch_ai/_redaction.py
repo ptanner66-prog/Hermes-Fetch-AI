@@ -10,7 +10,7 @@ _SENSITIVE_KV = re.compile(
     r"(\"[^\"]*\"|'[^']*'|[^,'\";}\]\r\n]+)"
 )
 _PATTERNS = [
-    re.compile(r"Bearer\s+[A-Za-z0-9._~+/=-]+", re.I),
+    re.compile(r"Bearer\s+[A-Za-z0-9._~+/=-]+", re.IGNORECASE),
     re.compile(r"\b[sp]k-[A-Za-z0-9_-]{12,}\b"),
     re.compile(r"\beyJ[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\b"),
     re.compile(r"\b0x[a-fA-F0-9]{32,}\b"),

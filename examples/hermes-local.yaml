@@ -14,11 +14,33 @@ policy:
     - skills_list
   denied_tools:
     - skill_view
-    - web
-    - browser
-    - image
-    - tts
-    - kanban
+    - web_search
+    - web_extract
+    - browser_navigate
+    - browser_click
+    - browser_type
+    - browser_press
+    - browser_snapshot
+    - browser_scroll
+    - browser_back
+    - browser_get_images
+    - browser_console
+    - browser_vision
+    - vision_analyze
+    - image_generate
+    - text_to_speech
+    - kanban_complete
+    - kanban_block
+    - kanban_schedule
+    - kanban_request_review
+    - kanban_request_changes
+    - kanban_comment
+    - kanban_heartbeat
+    - kanban_show
+    - kanban_list
+    - kanban_create
+    - kanban_unblock
+    - kanban_link
     - terminal
     - patch
     - write_file

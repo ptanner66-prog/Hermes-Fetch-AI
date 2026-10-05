@@ -11,7 +11,9 @@ This package exposes a Hermes plugin entry point:
 fetchai = "hermes_fetch_ai.hermes_plugin"
 ```
 
-That entry point makes the package discoverable to Hermes plugin loading. It does **not** assume that every Hermes installation automatically enables third-party entry-point plugins or wires their CLI commands without configuration.
+That entry point makes the package discoverable to Hermes plugin loading when the package is installed in Hermes' own environment. Current Hermes (checked at `main` `bb236287`, 2026-10-05) loads third-party plugins only after `hermes plugins enable fetchai` (config key `plugins.enabled`), and its `register_cli_command(name, help, setup_fn, handler_fn, description)` signature matches what this plugin calls.
+
+**Current blocker:** hermes-agent now develops on Python 3.14 and pins `mcp==2.0.0` in its `[mcp]` extra, while this package supports Python 3.11/3.12 and pins `mcp==1.28.1` through uAgents. The two cannot share one environment today, so `hermes fetchai ...` is not reachable on a current Hermes install. The standalone CLI in its own environment is the supported path.
 
 Verified package CLI:
 
@@ -22,7 +24,7 @@ hermes-fetch-ai demo local
 hermes-fetch-ai serve --config /absolute/path/to/examples/hermes-stdio.yaml
 ```
 
-If the active Hermes build enables the `fetchai` plugin and supports entry-point plugin CLI command wiring, the plugin delegates to:
+Once the package is installed in Hermes' environment and enabled, the plugin delegates to:
 
 ```bash
 hermes fetchai doctor
@@ -52,6 +54,8 @@ python -m agent.transports.hermes_tools_mcp_server
 That module is version-dependent and may not exist in all Hermes installs. Until Hermes maintainers bless a stable tools-server module, treat the Hermes-backed path as gated field integration and keep the fake/local demo as the default CI proof. The conversations/messaging MCP server is excluded by design.
 
 ## Setup flow for Hermes maintainers
+
+Hermes now has a curated plugin catalog (`plugin-catalog/<name>.yaml`, installed with `hermes plugins install <name>`). Catalog entries pin a full commit SHA, and the pinned tree must contain a `plugin.yaml` manifest plus an `__init__.py` entrypoint, so this repo needs a thin directory plugin before it can be listed. See [`upstream-hermes-pr.md`](upstream-hermes-pr.md) for the plan.
 
 If Hermes wants this to appear in setup UX without vendoring the bridge into core, the smallest acceptable change is a setup/catalog entry that installs and enables this plugin package.
 
@@ -96,7 +100,7 @@ A wheel smoke must also install the built wheel into a fresh virtual environment
 - the `hermes_agent.plugins` entry point contains `fetchai`;
 - importing `hermes_fetch_ai.hermes_plugin` succeeds.
 
-A separate Hermes-native smoke should be added once the target Hermes version confirms entry-point plugin enablement and CLI wiring:
+A separate Hermes-native smoke should be added once the plugin can be installed into a current Hermes environment (Hermes already supports enablement and CLI wiring):
 
 - install Hermes in an isolated environment;
 - install the built bridge wheel;
