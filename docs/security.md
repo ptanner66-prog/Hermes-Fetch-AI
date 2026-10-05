@@ -29,13 +29,16 @@ Remote senders may:
   - the replay cache is TTL-pruned and max-entry bounded;
   - schema-invalid requests do not poison a request ID for a corrected retry.
 - Arguments are schema-validated and size-capped before invocation.
-- URL-like strings must use `http` or `https`; `file:`, `data:`, `ftp:`, and hostless URLs are rejected.
-- URL-like strings targeting localhost, non-global, private, link-local, multicast, unspecified, reserved, CGNAT/shared, or private DNS results are rejected.
-- Shell control characters and shell metacharacters are rejected unless a tool is explicitly trusted for shell-like input.
+- URLs must use `http` or `https`; `file:`, `data:`, `javascript:`, `ftp://`, and hostless URLs are rejected. A string counts as a URL when it starts with `scheme:/` or a known non-hierarchical scheme such as `data:`; ordinary text such as `Note: hello` is not treated as a URL.
+- URLs embedded anywhere in a string (`see http://10.0.0.1/admin`) are checked too, as are bare local or literal-IP hosts (`localhost:8080`, `169.254.169.254/latest`, `[::1]:80`).
+- URLs targeting localhost, non-global, private, link-local, multicast, unspecified, reserved, CGNAT/shared, or private DNS results are rejected. DNS lookups run off the event loop.
+- Shell control characters (including newlines) and shell metacharacters (`; & | $ < > \` and backticks) are rejected unless a tool is listed in `policy.trusted_shell_tools`. This is deliberately strict: it also rejects URLs with query strings and multi-line text. Only list a tool there if it never passes arguments to a shell.
 - Tool responses returned to callers are normalized and size-capped. They are not a DLP redaction boundary; only expose tools whose outputs are safe for the intended sender.
 - Audit/log records never store raw arguments, raw outputs, full sender addresses, seeds, tokens, or keys.
 - Stdio uses `shell=False`, a filtered environment, and stderr separated from protocol stdout.
-- Production agent seeds must come from `UAGENT_SEED`; YAML seed and mailbox key values are rejected.
+- Production agent seeds must come from `UAGENT_SEED` and be at least 32 characters; YAML seed and mailbox key values are rejected.
+- Config files are scanned for credential-shaped values anywhere, including inside lists such as `hermes_mcp.args`: bearer tokens, `sk-`/`pk-` keys, JWTs, long hex keys, `token=...`-style assignments, and secret flags such as `--api-key`. Ordinary words such as "token" in a description are allowed.
+- In mailbox mode, the uAgents Agent Inspector endpoints (`/connect`, `/disconnect`) are unauthenticated. Keep the port firewalled to localhost and disable the inspector after connecting; see `docs/agentverse-mailbox.md`.
 
 ## Hermes boundary
 
@@ -53,9 +56,10 @@ The Hermes conversations/messaging MCP surface (`hermes mcp serve`: conversation
 
 ## Residual dependency risk
 
-The dependency audit gate currently ignores one transitive vulnerability until upstream Fetch/uAgents constraints allow a compatible fix:
+The dependency audit gate currently ignores two transitive vulnerabilities until upstream Fetch/uAgents constraints allow a compatible fix:
 
 - `PyNaCl==1.6.0` via the `uagents/cosmpy` dependency chain: `CVE-2025-69277`.
+- `ecdsa` via `uagents-core` and `cosmpy`: `PYSEC-2026-1325`, a Minerva timing side channel in python-ecdsa signing and key generation (signature verification is not affected). The python-ecdsa project treats side channels as out of scope, so no fixed version exists. The bridge signs every response envelope with its agent key through this library. Remote timing over a network is far noisier than local timing, and the bridge's global and per-sender rate limits cap how many signatures a caller can trigger, but an attacker who can precisely time signing on the same host is the realistic threat. Run the bridge on a host you control, and remove this exception when uagents moves to a constant-time signing backend.
 
 Do not remove the ignore without confirming `uagents`, `cosmpy`, signing, and wallet behavior remain compatible with the fixed dependency. Track this as an upstream dependency exception, not as an application-level acceptance of arbitrary vulnerable code.
 

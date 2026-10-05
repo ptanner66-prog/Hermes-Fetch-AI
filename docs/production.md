@@ -4,9 +4,13 @@
 
 One bridge per process. `serve` owns a dedicated event loop, starts the MCP backend (stdio subprocess preferred), runs the uAgent server, and shuts down gracefully on SIGINT/SIGTERM/SIGBREAK (exit code 0; the MCP child receives a clean EOF). The two-process HTTP round trip, signed message exchange, and graceful shutdown path are covered by `tests/test_serve_http_roundtrip.py`.
 
+If the Hermes backend cannot start, `serve` prints `hermes backend: FAIL: ...` and exits with status 1 (covered by `tests/test_cli.py`), so `Restart=on-failure` below retries it. The child's stderr is discarded because it is outside the bridge's redaction boundary; run the configured `hermes_mcp.command` and `args` by hand to see the underlying error. If the backend dies after startup, callers get `backend unavailable` and the audit log records `decision: error`; restart the service to recover.
+
 ## Secrets
 
 - `UAGENT_SEED` comes from the environment only. The config loader rejects production YAML seed values; mailbox/hosted mode fails closed without the seed; logs and audit redact seed-shaped strings.
+- The seed must be at least 32 characters because the agent's signing key is derived from it. Generate one with `python -c "import secrets; print(secrets.token_hex(32))"`.
+- Production configs must set `agent.dev_random_seed: false` (as `examples/hermes-stdio.yaml` does). With `true`, `UAGENT_SEED` is ignored and the bridge gets a new address on every start; `doctor` and `serve` print `seed: WARN` in that case.
 - Use a dedicated agent seed. Fund the derived `fetch1...` wallet with only what Almanac registration needs.
 - Do not put seeds, mailbox keys, API tokens, private endpoints, or connection strings in examples, audit logs, issues, PRs, or screenshots.
 
@@ -58,12 +62,17 @@ ReadWritePaths=/var/lib/hermes-fetch-ai
 WantedBy=multi-user.target
 ```
 
-Point `logging.audit_path` at `/var/lib/hermes-fetch-ai/audit.jsonl` and rotate it with logrotate (`copytruncate`); the writer appends line-delimited JSON and tolerates truncation between writes.
+Point `logging.audit_path` at `/var/lib/hermes-fetch-ai/audit.jsonl`. The writer appends line-delimited JSON and rotates the file itself at 25 MB, keeping five rotated files (`audit.jsonl.1` to `audit.jsonl.5`). External logrotate is optional; if you use it, use `copytruncate`.
 
 ## Network egress
 
 - Local/endpoint mode with `publish_manifest: false`: no mandatory egress for local tests. uAgents may probe the configured network at startup; failures are logged and non-fatal in local mode.
 - Hosted mode (mailbox/manifest): allow egress to Agentverse and the configured Fetch network (Almanac REST/gRPC, mailbox HTTPS).
+
+## Who can reach the bridge
+
+- With `publish_manifest: false` the bridge is not registered in the Almanac, so remote agents cannot discover its address. Only clients that are configured with its endpoint directly can reach it, which is what `tests/test_serve_http_roundtrip.py` does.
+- Public discovery needs either `publish_manifest: true` with a reachable `agent.endpoint` (Almanac registration may need a funded wallet) or mailbox mode ([`agentverse-mailbox.md`](agentverse-mailbox.md)). Neither path is covered by CI yet; prove it on testnet first.
 
 ## Going to mainnet (checklist)
 
@@ -100,4 +109,4 @@ Before public release, configure repository settings so the workflow files are e
 
 ## Upgrades
 
-Dependencies are intentionally constrained. Bump pins in a dedicated change with CI green, build verification, dependency audit, serve smoke, and a field-test re-run (`docs/demo.md`). The current dependency-audit exception for `PyNaCl==1.6.0` is tracked in `docs/security.md` and should be removed only after compatible upstream Fetch/uAgents constraints are available.
+Dependencies are intentionally constrained. Bump pins in a dedicated change with CI green, build verification, dependency audit, serve smoke, and a field-test re-run (`docs/demo.md`). `doctor` reads the tested pins from the installed package metadata, so it warns if the running environment drifts from them. The current dependency-audit exceptions (`PyNaCl==1.6.0` and `ecdsa`) are tracked in `docs/security.md` and should be removed only after compatible upstream Fetch/uAgents constraints are available.

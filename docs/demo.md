@@ -11,14 +11,15 @@ This uses fake MCP tools and an in-process direct call path. It must not require
 
 ## Hermes-backed local demo
 
-Preferred path (isolated stdio subprocess of the Hermes tools MCP server):
+Preferred path (isolated stdio subprocess of the Hermes tools MCP server). This config is production-shaped, so it needs a stable identity in `UAGENT_SEED` (at least 32 characters):
 
 ```bash
+export UAGENT_SEED="$(python -c 'import secrets; print(secrets.token_hex(32))')"
 python -m hermes_fetch_ai.cli doctor --config examples/hermes-stdio.yaml
 python -m hermes_fetch_ai.cli serve --config examples/hermes-stdio.yaml
 ```
 
-The `command` in `examples/hermes-stdio.yaml` must be the Python interpreter of the environment where `hermes-agent` is installed, so that `python -m agent.transports.hermes_tools_mcp_server` resolves.
+The `command` in `examples/hermes-stdio.yaml` must be the Python interpreter of the environment where `hermes-agent` is installed, so that `python -m agent.transports.hermes_tools_mcp_server` resolves. If it does not, `serve` exits with `hermes backend: FAIL` and tells you to run that command by hand to see its error output.
 
 Fallback path (in-process private server builder):
 
@@ -73,13 +74,13 @@ Observed behavior: the keyless server lists only tools whose prerequisites are m
 
 Pitfalls:
 
-- The Hermes tools MCP server wraps every tool's arguments in one required `kwargs` object (its handlers take `**kwargs`). Follow the served inputSchema: send `args={"kwargs": {...}}`, e.g. `{"kwargs": {}}` for `skills_list`. Schema-following uAgent clients get this right automatically; hand-written callers must wrap.
+- Follow the served inputSchema. hermes-agent v0.16.x wrapped every tool's arguments in one required `kwargs` object (send `{"kwargs": {}}` for `skills_list`); newer releases build flat schemas from each tool's JSON schema (send `{}` for `skills_list`, `{"query": "..."}` for `web_search`). Schema-following uAgent clients get this right automatically, and the field test handles both shapes.
 - Replay metadata is in addition to the served schema and is stripped by the bridge before the schema check.
 - `hermes_mcp.command` must be the Python interpreter of the environment where `hermes-agent` is installed. `HERMES_HOME` is forwarded to the subprocess by the bridge's environment allowlist.
 
 ## Agentverse mailbox manual demo
 
-See `research/FETCH_ACCOUNT_REQUIREMENTS.md`. The mailbox config intentionally fails without `UAGENT_SEED`.
+See [`agentverse-mailbox.md`](agentverse-mailbox.md). This tier is manual and not yet verified end to end. The mailbox config intentionally fails without `UAGENT_SEED`.
 
 ## Windows notes
 

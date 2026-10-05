@@ -11,10 +11,10 @@ The bridge runs an end-to-end uAgent round trip: a client uAgent sends `ListTool
 
 | Tier | What it proves | State |
 |------|----------------|-------|
-| Local end-to-end | Client uAgent -> bridge uAgent -> MCP tool -> response through the real uAgents dispatcher | Green in CI on Python 3.11/3.12 |
-| Real HTTP serve smoke | Separate bridge process, signed HTTP envelopes, dynamic port, graceful SIGINT/SIGTERM/SIGBREAK shutdown | Green; covered by `tests/test_serve_http_roundtrip.py` |
-| Hermes-backed demo | Real Hermes tools through `agent.transports.hermes_tools_mcp_server` as an isolated stdio subprocess | Gated field test; depends on a Hermes build that exposes that tools server |
-| Agentverse mailbox | Remote uAgent reaches the bridge over Fetch rails | Operator tier; requires `UAGENT_SEED` and Agentverse mailbox setup |
+| Local end-to-end | Client uAgent -> bridge uAgent -> MCP tool -> response through the real uAgents dispatcher | Covered by CI on Ubuntu, macOS, and Windows with Python 3.11/3.12 |
+| Real HTTP serve smoke | Separate bridge process, signed HTTP envelopes, dynamic port, graceful SIGINT/SIGTERM/SIGBREAK shutdown | Covered by CI; `tests/test_serve_http_roundtrip.py` |
+| Hermes-backed demo | Real Hermes tools through `agent.transports.hermes_tools_mcp_server` as an isolated stdio subprocess | Gated field test (`docs/demo.md`); see "Hermes compatibility" below |
+| Agentverse mailbox | Remote uAgent reaches the bridge over Fetch rails | Manual and not yet verified end to end; [`docs/agentverse-mailbox.md`](docs/agentverse-mailbox.md) |
 
 The local tier requires no secrets, hosted services, or network:
 
@@ -32,7 +32,7 @@ hermes-fetch-ai doctor
 hermes-fetch-ai demo local
 ```
 
-> Current release note: the GitHub release workflow builds and attests artifacts. It does not yet publish to PyPI, so `pip install hermes-fetch-ai` is the intended package command once an artifact is published to the selected package index.
+> Release note: pushing a `vX.Y.Z` tag runs the release workflow, which verifies, builds, attests, and attaches the wheel and sdist to a GitHub release. Publishing to PyPI is built in but opt-in (trusted publishing, enabled with the `PUBLISH_TO_PYPI` repository variable) and has not happened yet. Until then, install from a release wheel or from git.
 
 ## Hermes plugin entry point
 
@@ -43,7 +43,7 @@ The package exposes a lightweight plugin entry point:
 fetchai = "hermes_fetch_ai.hermes_plugin"
 ```
 
-That makes the plugin discoverable to Hermes. Current Hermes installations may still require explicit plugin enablement, for example by enabling `fetchai` in Hermes plugin configuration, before `hermes fetchai ...` is wired into the Hermes CLI. The verified standalone package CLI remains:
+That makes the plugin discoverable to Hermes when the package is installed in Hermes' own environment. Hermes loads third-party plugins only after they are enabled (`hermes plugins enable fetchai`). The verified standalone package CLI remains:
 
 ```bash
 hermes-fetch-ai doctor
@@ -51,7 +51,7 @@ hermes-fetch-ai demo local
 hermes-fetch-ai serve --config /absolute/path/to/examples/hermes-stdio.yaml
 ```
 
-If enabled in Hermes and the active Hermes build wires entry-point plugin CLI commands, the plugin delegates to equivalent subcommands:
+Once installed into Hermes' environment and enabled, the plugin delegates to equivalent subcommands:
 
 ```bash
 hermes fetchai doctor
@@ -60,7 +60,12 @@ hermes fetchai demo local
 hermes fetchai serve --config /absolute/path/to/examples/hermes-stdio.yaml
 ```
 
-The upstream contribution plan is intentionally small: keep this repo standalone, then ask Hermes maintainers whether they want a docs/catalog/setup entry that installs and enables the plugin. See [`docs/native-hermes-plugin.md`](docs/native-hermes-plugin.md).
+The upstream contribution plan is intentionally small: keep this repo standalone and list it through the Hermes plugin catalog. See [`docs/native-hermes-plugin.md`](docs/native-hermes-plugin.md) and [`docs/upstream-hermes-pr.md`](docs/upstream-hermes-pr.md).
+
+## Hermes compatibility
+
+- Field-tested against hermes-agent v0.16.x, where the tools server wrapped tool arguments in one `kwargs` object.
+- Current hermes-agent `main` develops on Python 3.14, pins `mcp==2.0.0` in its `[mcp]` extra, and serves flat tool arguments. This package pins `mcp==1.28.1` (via uAgents) and Python 3.11/3.12, so it cannot be installed into a current Hermes environment, which also rules out the in-process mode and the `hermes fetchai` plugin there. Run it from its own environment in stdio mode with `hermes_mcp.command` pointing at Hermes' Python.
 
 ## Security defaults
 
@@ -72,7 +77,8 @@ The upstream contribution plan is intentionally small: keep this repo standalone
 - Arguments are size-limited, schema-validated, and checked for unsupported URL schemes, local/private URL targets, and shell-control characters.
 - Tool responses returned to remote callers are size-limited with deterministic truncation. They are **not** treated as a data-loss-prevention redaction boundary.
 - Audit records omit raw arguments, raw outputs, full sender addresses, seeds, tokens, and keys.
-- Production seeds must come from `UAGENT_SEED`; YAML seed/mailbox key material is rejected.
+- Production seeds must come from `UAGENT_SEED` and be at least 32 characters; YAML seed/mailbox key material and other credential-shaped config values are rejected.
+- If the Hermes backend cannot start, `serve` exits non-zero with `hermes backend: FAIL` instead of serving an empty tool list.
 - The bridge consumes the Hermes **tools** MCP server only. The Hermes conversations/messaging MCP surface is explicitly out of scope.
 - Chat protocol is out of v1 scope.
 
@@ -80,12 +86,14 @@ See [`docs/security.md`](docs/security.md) and [`SECURITY.md`](SECURITY.md).
 
 ## Minimal production shape
 
-1. Install the package in the Hermes environment.
-2. Enable the Hermes plugin only if the active Hermes build supports entry-point plugin CLI wiring; otherwise use `hermes-fetch-ai` directly.
-3. Set `UAGENT_SEED` from a secret manager or a `0600` environment file; never put it in YAML.
-4. Start `hermes-fetch-ai serve --config /absolute/path/to/hermes-stdio.yaml`.
+1. Install the package in its own virtual environment (Python 3.11 or 3.12).
+2. Set `UAGENT_SEED` (at least 32 random characters) from a secret manager or a `0600` environment file; never put it in YAML.
+3. Copy `examples/hermes-stdio.yaml` and set `hermes_mcp.command` to the Python interpreter of the Hermes environment. It keeps `agent.dev_random_seed: false`, so the bridge identity stays stable across restarts.
+4. Start `hermes-fetch-ai serve --config /absolute/path/to/hermes-stdio.yaml` under a supervisor such as systemd with `Restart=on-failure`.
 5. Keep `policy.public_tools` empty or tiny. `skills_list` is the only Hermes-backed demo-public tool.
-6. Read the JSONL audit log and alert on denied spikes, replay denials, and send failures.
+6. Read the JSONL audit log and alert on denied spikes, replay denials, `backend unavailable` errors, and send failures.
+
+With `publish_manifest: false` the bridge is not registered in the Almanac, so only clients configured with its endpoint can reach it. Public discovery (Almanac registration or an Agentverse mailbox) is not covered by CI yet.
 
 Deployment notes are in [`docs/production.md`](docs/production.md).
 
@@ -94,7 +102,7 @@ Deployment notes are in [`docs/production.md`](docs/production.md).
 - License: MIT.
 - Supported Python: 3.11 and 3.12.
 - Required local gate: `doctor`, contamination scan, ruff, mypy, pytest, local demo, package build, twine check, wheel smoke, and dependency audit.
-- CI: OS/Python matrix, security audit, build verification, CodeQL, Dependabot.
+- CI: OS/Python matrix, security audit, build verification, CodeQL, Dependabot. Ruff and mypy are pinned to a minor series so tool releases cannot change the rules underneath CI.
 - Contributions: see [`CONTRIBUTING.md`](CONTRIBUTING.md).
 
 ## Scope
