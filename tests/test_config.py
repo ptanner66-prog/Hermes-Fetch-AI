@@ -55,8 +55,8 @@ def test_dev_random_seed_true_accepted_without_seed():
     )
 
 
-def test_chat_rejected():
-    with pytest.raises(ValidationError, match="chat is out of v1 scope"):
+def test_chat_only_sells_services():
+    with pytest.raises(ValidationError, match="chat sells the services"):
         BridgeConfig(agent={"dev_random_seed": True}, chat={"enable_chat": True})
 
 

@@ -7,6 +7,7 @@
 | `hermes-local.yaml` | The same policy with Hermes' tools server imported into the bridge's process. Works only with hermes-agent v0.16.x, which could share the bridge's environment. |
 | `agentverse-mailbox.yaml` | For a manual Agentverse mailbox setup; needs `UAGENT_SEED`. See [`docs/agentverse-mailbox.md`](../docs/agentverse-mailbox.md). |
 | `paid-services.yaml` | Sells two services for testnet FET: a defensive code security review by a local AI model, and a word count to use as a template. Set the program paths first. See [`docs/payments.md`](../docs/payments.md). |
+| `asi-one.yaml` | Sells the security review to ASI:One users through chat, in mailbox mode. See [`docs/asi-one.md`](../docs/asi-one.md). |
 | `services/code_review.py` | The security review program: sends the buyer's code only to a model server on this machine, and gives the model no tools. |
 | `services/word_count.py` | A template for your own service program. |
 | `call_bridge.py` | A client that lists a running bridge's tools and calls one, with replay-protection metadata. With `--pay` it pays for a service on testnet. |
@@ -26,6 +27,7 @@ Or run both sides in one process, with no HTTP:
 ```bash
 hermes-fetch-ai demo local
 hermes-fetch-ai demo paid    # the same, selling a service on a simulated ledger
+hermes-fetch-ai demo chat    # a chat sale, the way an ASI:One user buys
 ```
 
 Every setting is described in [`docs/configuration.md`](../docs/configuration.md).

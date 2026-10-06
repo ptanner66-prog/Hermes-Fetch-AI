@@ -185,6 +185,10 @@ The address is mistyped or is not a Fetch wallet address. Leave it unset to rece
 
 `hermes-fetch-ai ledger --config <file>` could not reach `payments.ledger_url`, or the endpoint is not Fetch's testnet. Check your network, or wait if Fetch's endpoint is down; buyers get `payment pending` meanwhile and can retry.
 
+### `agentverse: FAIL: ...`
+
+Listing the bridge for ASI:One users: see the table of problems in [`asi-one.md`](asi-one.md#problems).
+
 ### A service keeps failing (`decision: error` in the audit log)
 
 Run it by hand with `hermes-fetch-ai seller try <service> --request "..." --config <file>`, which shows the program's error output. Buyers keep their payment for a retry; after `payments.max_attempts` failures it is listed as `failed` by `seller credits` and needs a refund.

@@ -60,6 +60,9 @@ jobs:
       - name: Paid service demo (offline, simulated testnet ledger)
         run: python -m hermes_fetch_ai.cli demo paid
 
+      - name: Chat sale demo (offline, the way an ASI:One user buys)
+        run: python -m hermes_fetch_ai.cli demo chat
+
   package:
     name: package smoke
     runs-on: ubuntu-latest
@@ -91,6 +94,7 @@ jobs:
           hermes-fetch-ai doctor
           hermes-fetch-ai demo local
           hermes-fetch-ai demo paid
+          hermes-fetch-ai demo chat
 
   coverage:
     name: test coverage

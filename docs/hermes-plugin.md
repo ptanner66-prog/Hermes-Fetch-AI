@@ -42,10 +42,11 @@ Stored under `plugins.entries.fetchai-bridge.settings` and shown in the Desktop 
 |-----|------|---------|
 | `command` | `str` | Path to `hermes-fetch-ai` when it is not on PATH. Empty means search PATH. |
 | `uagent_seed` | `secret` | Stored as `UAGENT_SEED` in `$HERMES_HOME/.env`. Hermes loads that file into its environment, and the plugin passes the value to the bridge; the plugin never prints it. |
+| `agentverse_api_key` | `secret` | Stored as `AGENTVERSE_API_KEY` in `$HERMES_HOME/.env`, and passed to the bridge the same way. Only `agentverse register` uses it ([`asi-one.md`](asi-one.md)). |
 
 ## How the plugin runs the bridge
 
-The bridge gets an allowlisted environment, not Hermes' whole one: `UAGENT_SEED`, `HERMES_HOME`, `PATH`, `HOME`, locale, temp-directory, proxy and certificate settings, and the Windows essentials (`BRIDGE_ENV` in [`__init__.py`](../hermes-plugin/fetchai-bridge/__init__.py)). Everything else Hermes loaded from its `.env`, such as model-provider API keys, stays out.
+The bridge gets an allowlisted environment, not Hermes' whole one: `UAGENT_SEED`, `AGENTVERSE_API_KEY`, `HERMES_HOME`, `PATH`, `HOME`, locale, temp-directory, proxy and certificate settings, and the Windows essentials (`BRIDGE_ENV` in [`__init__.py`](../hermes-plugin/fetchai-bridge/__init__.py)). Everything else Hermes loaded from its `.env`, such as model-provider API keys, stays out.
 
 `serve` starts Hermes' tools MCP server (`python -m agent.transports.hermes_tools_mcp_server`) as a stdio child process, and that needs Hermes' interpreter. The plugin passes Hermes' interpreter (`sys.executable`) as `HERMES_FETCH_AI_HERMES_PYTHON`, and Hermes' `PYTHONPATH`, if any, as `HERMES_FETCH_AI_HERMES_PYTHONPATH`. Hermes' own Python variables are not passed as such, because they would point the bridge's interpreter at Hermes' packages (a managed Hermes runtime sets `PYTHONPATH` to its checkout and site-packages).
 

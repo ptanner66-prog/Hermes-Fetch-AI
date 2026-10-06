@@ -11,9 +11,11 @@ from typing import Any, TypeVar, cast
 import uagents.agent as uagents_agent
 from uagents import Agent, Model
 from uagents.dispatch import dispatcher
+from uagents.registration import AlmanacApiRegistrationPolicy
 from uagents_adapter.mcp.protocol import CallTool, CallToolResponse, ListTools, ListToolsResponse
 
 from .audit import AuditWriter
+from .chat_protocol import build_chat_protocols
 from .config import BridgeConfig
 from .direct_protocol import build_protocol, replay_args
 from .ledger import LcdLedgerReader, LedgerReader
@@ -28,14 +30,13 @@ from .wallet import agent_address, wallet_address
 T = TypeVar("T", bound=Model)
 
 
-class PrivateAgent(Agent):
-    """A uAgent that never contacts the Almanac, for ``publish_manifest: false``.
+class ApiRegisteredAgent(Agent):
+    """A uAgent created without looking up the Almanac contract on the ledger.
 
-    uAgents looks up the Almanac contract on the Fetch ledger whenever an agent
-    is created, and reports the agent as active at startup and inactive at
-    shutdown through the Almanac API, even when registration is disabled. Only
-    ledger registration needs the contract, and a private bridge never registers
-    or announces its address, so both are skipped.
+    uAgents looks the contract up whenever an agent is created, but only ledger
+    registration, which can spend from the agent's wallet, needs it. A bridge
+    registers through the Almanac API instead, unless the owner turns on
+    ``agent.ledger_registration``.
     """
 
     def __init__(self, **kwargs: Any) -> None:
@@ -45,6 +46,16 @@ class PrivateAgent(Agent):
             super().__init__(**kwargs)
         finally:
             uagents_agent.get_almanac_contract = lookup
+
+
+class PrivateAgent(ApiRegisteredAgent):
+    """A uAgent that never contacts the Almanac, for ``publish_manifest: false``.
+
+    Besides the contract lookup, uAgents reports every agent as active at
+    startup and inactive at shutdown through the Almanac API, even when
+    registration is disabled. A private bridge never registers or announces its
+    address, so that is skipped too.
+    """
 
     async def _update_agent_status(self, active: bool) -> None:
         return None
@@ -89,9 +100,6 @@ def build_agent(
     seed: str | None = None,
     desk: ServiceDesk | None = None,
 ) -> Agent:
-    if cfg.chat.enable_chat:
-        raise NotImplementedError("chat is out of v1 scope")
-
     kwargs: dict[str, Any] = {
         "name": cfg.agent.name,
         "port": cfg.agent.port,
@@ -109,10 +117,12 @@ def build_agent(
         # each service's run slots bound the work.
         "handle_messages_concurrently": cfg.payments.enabled,
     }
-    if cfg.agent.publish_manifest:
-        # Leave registration to uAgents' default ledger-backed policy, so a
-        # funded wallet can pay for Almanac registration.
-        agent = Agent(**kwargs)
+    if cfg.agent.publish_manifest and cfg.agent.ledger_registration:
+        # uAgents' default policy: the Almanac API, then the Almanac contract,
+        # which a funded wallet pays for.
+        agent: Agent = Agent(**kwargs)
+    elif cfg.agent.publish_manifest:
+        agent = ApiRegisteredAgent(**kwargs, registration_policy=AlmanacApiRegistrationPolicy())
     else:
         agent = PrivateAgent(
             **kwargs,
@@ -120,10 +130,14 @@ def build_agent(
             mark_inactive_on_shutdown=False,
         )
 
+    audit = AuditWriter(cfg.audit_path)
     agent.include(
-        build_protocol(shim or HermesMCPClientShim(cfg), cfg, AuditWriter(cfg.audit_path), desk),
+        build_protocol(shim or HermesMCPClientShim(cfg), cfg, audit, desk),
         publish_manifest=cfg.agent.publish_manifest,
     )
+    if cfg.chat.enable_chat and desk is not None:
+        for protocol in build_chat_protocols(cfg, desk, audit):
+            agent.include(protocol, publish_manifest=cfg.agent.publish_manifest)
     return agent
 
 

@@ -13,11 +13,14 @@ All notable changes are documented here. The project follows [semantic versionin
 - CLI: `demo paid` (an offline sale with a simulated ledger), `wallet` (addresses and, with `--balance`, the income wallet's balance), `ledger` (checks the ledger endpoint is the testnet), and `seller credits | try | pause | resume | ban | unban | backup`. `doctor` reports payments and fails when a service program is missing; `serve` refuses to start then.
 - `examples/call_bridge.py` can pay for a service on testnet with `--pay`, from the wallet of `HERMES_FETCH_PAYER_SEED`, up to `--max-fet`.
 - Tested on Fetch's real testnet: a paid call, replays, a copied transaction, an underpayment of one `atestfet`, a wrong memo, and a restart ([results](docs/payments.md#tested-on-the-real-testnet)).
+- Sell services to ASI:One users through Fetch's chat protocol ([`docs/asi-one.md`](docs/asi-one.md)), with `chat.enable_chat`: a plain-language menu, a payment request in the shape ASI:One's payment card reads, payments verified on the ledger, and the answer. Chat prices carry an order code (a surcharge of up to 0.000066 FET) that ties a payment without a memo to its order.
+- `agentverse register` lists a selling bridge on Agentverse (README from its services, chat and payment protocols, optional `agent.handle`) with an API key from `AGENTVERSE_API_KEY`, which the Hermes plugin offers as a secret setting. `demo chat` shows a chat sale offline.
 
 ### Changed
 
 - The project's scope now includes Fetch.ai's agent economy on testnet: selling services to other agents and ASI:One users, and paying other agents with the owner's approval. The design and its threat model are in `docs/architecture.md` (decision 9) and `docs/security.md`.
 - uAgents 0.25.5 and uagents-core 0.4.9, the versions Fetch tests its examples with. uAgents now resolves testnet addresses without a network prefix.
+- With `publish_manifest: true`, the bridge registers through the Almanac API only and no longer looks up the Almanac contract, so it never spends from its wallet on its own. `agent.ledger_registration: true` restores contract registration.
 
 ### Tests
 

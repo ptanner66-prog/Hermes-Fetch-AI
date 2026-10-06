@@ -194,3 +194,16 @@ def test_two_bridges_sharing_a_store_cannot_both_use_a_payment(tmp_path):
     finally:
         first.close()
         second.close()
+
+
+def test_unused_credit_finds_a_paid_credit_for_the_same_buyer_and_request(store):
+    assert store.unused_credit(sender="agent1qbuyer", subject="research", digest="d") is None
+    pay(store, reference="ref-old", tx_hash="A" * 64, now_ms=1_000)
+    pay(store, reference="ref-new", tx_hash="B" * 64, now_ms=2_000)
+    found = store.unused_credit(sender="agent1qbuyer", subject="research", digest="d")
+    assert found is not None and found.reference == "ref-old"
+    store.begin_run("ref-old", max_attempts=3, now_ms=3_000)
+    found = store.unused_credit(sender="agent1qbuyer", subject="research", digest="d")
+    assert found is not None and found.reference == "ref-new"
+    assert store.unused_credit(sender="agent1qother", subject="research", digest="d") is None
+    assert store.unused_credit(sender="agent1qbuyer", subject="other", digest="d") is None

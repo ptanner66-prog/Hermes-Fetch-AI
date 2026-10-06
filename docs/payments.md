@@ -108,6 +108,10 @@ Back it up with your seed, and do not delete it: the database is what remembers 
 
 A bridge that sells services contacts nothing extra until a paid call arrives. Then it reads the ledger through `payments.ledger_url` (Fetch's public endpoint by default): once per start to confirm it is the testnet, then one lookup per new payment, by transaction hash. Listing services and quoting prices stay on your computer.
 
+## Selling through chat (ASI:One)
+
+With `chat.enable_chat: true`, the same services are also sold in plain language to ASI:One users and other chat agents: a buyer writes `security-review: <code>`, approves ASI:One's payment card, and gets the answer. Chat prices carry a small order code. The guide is [`asi-one.md`](asi-one.md), and `hermes-fetch-ai demo chat` shows a chat sale offline.
+
 ## For agent developers: buying a service
 
 A service appears in `ListTools` as the tool `service.<name>`, with one string argument, `request`, and its price in the tool's `_meta`:
@@ -202,5 +206,4 @@ The paying transactions were `518F266EA453BC09275D8AD40A224E8FB55358E6376858BEBB
 
 - Testnet only. Mainnet stays locked until the conditions in [`agent-economy.md`](agent-economy.md#before-mainnet) are met.
 - Refunds are manual.
-- Buyers reach services through MCP calls only; plain-language requests from ASI:One come next.
 - Hermes cannot buy from other agents yet.

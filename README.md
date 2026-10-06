@@ -125,6 +125,8 @@ hermes-fetch-ai serve --config services.yaml
 
 Payments are off unless you turn them on, and mainnet is locked. The guide covers setup, prices, your controls (pause, ban, refunds, backups), and what buyers see: [`docs/payments.md`](docs/payments.md).
 
+The same services can be sold in plain language to [ASI:One](https://asi1.ai) users, Fetch.ai's chat assistant: they write `security-review: <code>`, approve ASI:One's payment card, and get the answer. `hermes-fetch-ai demo chat` shows such a sale offline; [`docs/asi-one.md`](docs/asi-one.md) shows how to list your agent on Agentverse with `hermes-fetch-ai agentverse register`.
+
 ## Status
 
 | Tier | What it proves | State |
@@ -135,6 +137,7 @@ Payments are off unless you turn them on, and mainnet is locked. The guide cover
 | Hermes plugin | The plugin loads in real Hermes and runs the bridge | CI against Hermes 0.21.5 and a pinned `main`: `hermes plugins validate --install-deps` and `hermes plugins doctor --ci` pass, and `hermes fetchai-bridge doctor` and `demo local` work |
 | Agentverse mailbox | A remote uAgent reaches the bridge through Agentverse | Manual and not yet verified end to end; [`docs/agentverse-mailbox.md`](docs/agentverse-mailbox.md) |
 | Paid services | A bridge process sells a service: price, a payment verified on the ledger, one run, replays refused | CI against a ledger on 127.0.0.1 (`tests/test_serve_paid.py`); by hand on Fetch's testnet, including replayed, copied, underpaid, and wrong-memo payments ([results](docs/payments.md#tested-on-the-real-testnet)) |
+| Chat and ASI:One | A chat buyer orders in plain text, pays without a memo, and gets the answer | CI between two real uAgents in one process (`tests/test_chat_flow.py`, `demo chat`); a live test with a real ASI:One user is pending ([`docs/asi-one.md`](docs/asi-one.md#what-is-tested)) |
 
 ## Hermes compatibility
 
@@ -148,7 +151,7 @@ Payments are off unless you turn them on, and mainnet is locked. The guide cover
 - `hermes fetchai-bridge <args>` runs the separately installed `hermes-fetch-ai` with the same arguments (`doctor`, `demo local`, `serve --config ...`, `seller credits --config ...`, and the rest).
 - It hands the bridge Hermes' interpreter and import path, so `serve` starts Hermes' tools server the way Hermes does, and it passes the bridge only an allowlisted environment, so Hermes' provider API keys never reach it.
 - It ships an `operate` skill the agent loads with `skill_view("fetchai-bridge:operate")`.
-- Settings: `command` (the path to `hermes-fetch-ai` if it is not on PATH) and `uagent_seed` (a secret stored as `UAGENT_SEED` in Hermes' `.env`).
+- Settings: `command` (the path to `hermes-fetch-ai` if it is not on PATH), `uagent_seed` (a secret stored as `UAGENT_SEED` in Hermes' `.env`), and `agentverse_api_key` (a secret stored as `AGENTVERSE_API_KEY`, used only to list a selling bridge on Agentverse).
 
 Details and the full list of what it does are in [`docs/hermes-plugin.md`](docs/hermes-plugin.md) and the [plugin README](hermes-plugin/fetchai-bridge/README.md).
 
@@ -166,7 +169,7 @@ Details and the full list of what it does are in [`docs/hermes-plugin.md`](docs/
 - The bridge listens on all interfaces (`0.0.0.0`) on `agent.port`; uAgents has no bind-address setting, so firewall the port.
 - If Hermes' tools server cannot start, `serve` exits non-zero instead of serving an empty tool list.
 - Payments are off by default and run on Fetch's testnet only. The bridge verifies each payment on the ledger itself (amount in exact integers, recipient, memo, time), binds it to a signed quote for one buyer and request, and records it so it can be used only once. Service programs run without a shell, with an environment allowlist, a timeout, and an output cap.
-- The bridge uses Hermes' **tools** MCP server only; the conversations/messaging surface is out of scope. The chat protocol is not served yet.
+- The bridge uses Hermes' **tools** MCP server only; the conversations/messaging surface is out of scope. Chat (off by default) sells only the configured services and never reaches Hermes' tools.
 
 Residual risks are listed in [`docs/security.md`](docs/security.md); to report a vulnerability, see [`SECURITY.md`](SECURITY.md).
 
@@ -176,7 +179,7 @@ Residual risks are listed in [`docs/security.md`](docs/security.md); to report a
 - Keep `agent.dev_random_seed: false` (as `examples/hermes-stdio.yaml` does) so the bridge address stays stable; `doctor` and `serve` warn if a config ignores `UAGENT_SEED`.
 - Keep `policy.public_tools` empty or small, and read the JSONL audit log: alert on spikes in denials, replay rejections, `backend unavailable` errors, and send failures.
 - When selling services, back up the payment records with `hermes-fetch-ai seller backup`; they are what stops a payment from being used twice ([`docs/production.md`](docs/production.md#payment-records)).
-- With `publish_manifest: false` the bridge is not in the Almanac, so only clients configured with its endpoint can reach it. With `publish_manifest: true`, uAgents registers it on the Almanac contract, which can spend registration fees from the wallet derived from `UAGENT_SEED`. Neither public discovery path is covered by CI yet.
+- With `publish_manifest: false` the bridge is not in the Almanac, so only clients configured with its endpoint can reach it. With `publish_manifest: true`, it registers through Agentverse's Almanac API, which is free; it registers on the Almanac contract, which spends fees from the wallet derived from `UAGENT_SEED`, only with `agent.ledger_registration: true`. Neither public discovery path is covered by CI yet.
 
 Deployment notes, including a systemd unit, are in [`docs/production.md`](docs/production.md); every setting and its default is in [`docs/configuration.md`](docs/configuration.md).
 
@@ -189,7 +192,7 @@ Deployment notes, including a systemd unit, are in [`docs/production.md`](docs/p
 - [ ] Support mcp 2.x and Python 3.13+, so the in-process mode also works with current Hermes.
 - [ ] Drop the PyNaCl and ecdsa dependency-audit exceptions once upstream allows (see [`docs/security.md`](docs/security.md)).
 - [x] Sell services you define to other agents for FET, with each payment verified on the ledger (testnet; unreleased, [`docs/payments.md`](docs/payments.md)).
-- [ ] Reach Hermes from ASI:One in plain language, with ASI:One's testnet payment card.
+- [ ] Reach Hermes from ASI:One in plain language, with ASI:One's testnet payment card (built and tested offline; live test pending, [`docs/asi-one.md`](docs/asi-one.md)).
 - [ ] Let Hermes find and pay other agents, asking you before every payment.
 - [ ] Guided setup (`hermes fetchai-bridge setup`) and plain-language docs.
 
@@ -207,6 +210,7 @@ Deployment notes, including a systemd unit, are in [`docs/production.md`](docs/p
 | [`docs/hermes-plugin.md`](docs/hermes-plugin.md) | The `fetchai-bridge` Hermes plugin: install, settings, how it runs the bridge |
 | [`docs/upstream-hermes-pr.md`](docs/upstream-hermes-pr.md) | Plan and ready-to-paste text for the Hermes plugin catalog |
 | [`docs/payments.md`](docs/payments.md) | Selling services for testnet FET: setup, prices, your controls, what buyers see |
+| [`docs/asi-one.md`](docs/asi-one.md) | Selling to ASI:One users through chat: listing on Agentverse, order codes, what is tested |
 | [`docs/agent-economy.md`](docs/agent-economy.md) | Design and status of the agent economy: selling, chat with ASI:One, buying |
 
 ## Development

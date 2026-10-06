@@ -1,6 +1,6 @@
 # Agent economy (design and status)
 
-This is the design for letting Hermes take part in Fetch.ai's agent economy. Selling over MCP calls has landed (unreleased; how to use it: [`payments.md`](payments.md)). The rest is the plan the code is being built against; the [status table](#status) says what has landed.
+This is the design for letting Hermes take part in Fetch.ai's agent economy. Selling over MCP calls and through chat has landed (unreleased; how to use it: [`payments.md`](payments.md), [`asi-one.md`](asi-one.md)). The rest is the plan the code is being built against; the [status table](#status) says what has landed.
 
 ## What it will do
 
@@ -22,9 +22,9 @@ Fetch's Agent Payment Protocol defines the messages (`RequestPayment`, `CommitPa
 
 Services run through a `command` runner: the owner's program gets the request on stdin and its output is the answer ([`payments.md`](payments.md#your-own-program)). The "bug bounty with a local AI" service is built this way: [`examples/services/code_review.py`](../examples/services/code_review.py) sends the buyer's code only to a model server on the seller's machine and gives the model no tools. This was planned for a guest Hermes runner; a plain program is smaller and depends on no Hermes internals, so the guest runner is now for services that need Hermes' tools, such as research.
 
-## Selling through chat (ASI:One)
+## Selling through chat (ASI:One) (landed)
 
-The bridge speaks Fetch's chat protocol and answers with a menu of services and prices. A chosen service gets a `RequestPayment` in the exact shape ASI:One's testnet payment card expects. ASI:One may not put the reference in the memo, so chat quotes also carry a unique amount tag that binds the payment to the quote. Long work runs in a small bounded queue, and the bridge only asks for money when it has room to do the work.
+The bridge speaks Fetch's chat protocol and answers with a menu of services and prices. A chosen service gets a `RequestPayment` in the shape of Fetch's own ASI:One payment example. ASI:One may not put the reference in the memo, so chat quotes also carry an order code, a unique amount surcharge that binds the payment to the quote. Long work runs in a small bounded queue, and the bridge only asks for money when it has room to do the work. A live test with a real ASI:One user is still to come ([`asi-one.md`](asi-one.md#what-is-tested)).
 
 Chat requests never reach the owner's Hermes. Each service has its own runner: a program the owner configures, or a separate guest Hermes with its own home, its own model key, and only the tools that service needs. Before every run the bridge checks that the guest's configuration still has those limits and refuses otherwise.
 
@@ -53,7 +53,7 @@ All of these must hold before mainnet can be unlocked:
 |------|-------|
 | Scope, threat model, and test-network guard | Landed |
 | Paid services over MCP calls | Landed; tested on the real testnet |
-| Chat and ASI:One | Planned |
+| Chat and ASI:One | Landed; offline tests; live ASI:One test pending |
 | Guest Hermes runners | Planned |
 | Buying, plugin tools, approvals | Planned |
 | Guided setup and plain-language docs | Planned |

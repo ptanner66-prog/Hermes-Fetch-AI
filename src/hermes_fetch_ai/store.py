@@ -372,6 +372,15 @@ class Store:
         assert credit is not None
         return credit
 
+    def unused_credit(self, *, sender: str, subject: str, digest: str) -> Credit | None:
+        """The oldest paid, not yet used credit for this buyer and request, if any."""
+        row = self._conn.execute(
+            "SELECT * FROM credits WHERE sender = ? AND subject = ? AND digest = ?"
+            " AND status = 'paid' ORDER BY paid_ms LIMIT 1",
+            (sender, subject, digest),
+        ).fetchone()
+        return _credit(row) if row else None
+
     def credits(self, status: str | None = None, limit: int = 100) -> list[Credit]:
         if status is None:
             rows = self._conn.execute(

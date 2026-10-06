@@ -2,7 +2,7 @@
 
 The bridge reads one YAML file (`--config`). Unknown keys are errors, and so are credential-shaped values: secrets come from the environment. [`src/hermes_fetch_ai/config.py`](../src/hermes_fetch_ai/config.py) is the source of truth for everything below; `hermes-fetch-ai doctor --config <file>` checks a file without starting anything.
 
-The examples in [`examples/`](../examples) are complete configs: `local-direct.yaml` (fake tools), `hermes-stdio.yaml` (real Hermes tools, the production shape), `hermes-local.yaml` (Hermes in the same environment, v0.16.x only), `agentverse-mailbox.yaml` (manual, unverified), and `paid-services.yaml` (selling services for testnet FET).
+The examples in [`examples/`](../examples) are complete configs: `local-direct.yaml` (fake tools), `hermes-stdio.yaml` (real Hermes tools, the production shape), `hermes-local.yaml` (Hermes in the same environment, v0.16.x only), `agentverse-mailbox.yaml` (manual, unverified), `paid-services.yaml` (selling services for testnet FET), and `asi-one.yaml` (selling them to ASI:One users through chat).
 
 ## `agent`
 
@@ -13,10 +13,12 @@ The examples in [`examples/`](../examples) are complete configs: `local-direct.y
 | `network` | `testnet` | `testnet` or `mainnet`: the Fetch network for the agent's address and the Almanac. Selling services needs `testnet`. |
 | `mode` | `endpoint` | How remote agents reach the bridge: `endpoint` (directly, at `endpoint`), `mailbox` (through an Agentverse mailbox; manual and unverified), or `proxy` (through Agentverse's proxy; untested). |
 | `endpoint` | none | The URL other agents use to reach the bridge, such as `https://bridge.example.com/submit`. Needed for Almanac registration. |
-| `publish_manifest` | `false` | Register the bridge in the Almanac and publish its protocol manifest. With `false` the bridge makes no outbound calls of its own; with `true`, registration can spend fees from the agent's wallet. |
+| `publish_manifest` | `false` | Register the bridge in the Almanac through Agentverse's API (free) and publish its protocol manifests. With `false` the bridge makes no outbound calls of its own. |
+| `ledger_registration` | `false` | With `publish_manifest`, also register on the Almanac contract on the Fetch ledger, which spends fees from the agent's wallet. Off, the bridge never looks the contract up and never spends on its own. |
 | `enable_agent_inspector` | `false` | uAgents' Agent Inspector. Its `/connect` and `/disconnect` endpoints are unauthenticated; enable it only while connecting a mailbox. |
 | `dev_random_seed` | `false` | Use a new random identity on every start, for demos. With `false`, `UAGENT_SEED` is required. |
-| `description` | `Hermes Fetch AI bridge` | Shown in the published manifest. |
+| `description` | `Hermes Fetch AI bridge` | Shown in the published manifest and on Agentverse. |
+| `handle` | none | The agent's handle on Agentverse, which ASI:One users can write as `@handle`: lowercase letters, digits, `-` and `_`, 3 to 20 characters. Used by `agentverse register`. |
 | `seed` | | Always rejected: the seed comes only from `UAGENT_SEED`. |
 
 ## `hermes_mcp`
@@ -109,7 +111,7 @@ A `command` runner:
 
 | Key | Default | Meaning |
 |-----|---------|---------|
-| `enable_chat` | `false` | Must stay `false` for now; chat and ASI:One support is planned ([`agent-economy.md`](agent-economy.md)). |
+| `enable_chat` | `false` | Sell the services under `services` through Fetch's chat protocol, in plain language, to ASI:One users and other chat agents ([`asi-one.md`](asi-one.md)). Needs at least one service. Chat reaches only the services, never Hermes' tools. |
 
 ## Environment
 
@@ -118,5 +120,6 @@ A `command` runner:
 | `UAGENT_SEED` | The bridge's identity and wallet key, at least 32 random characters. Required unless `agent.dev_random_seed` is `true`. Never put it in YAML. |
 | `HERMES_HOME` | Passed to Hermes' tools server, so it uses the right Hermes home. |
 | `HERMES_FETCH_AI_HERMES_PYTHON`, `HERMES_FETCH_AI_HERMES_PYTHONPATH` | Set by the Hermes plugin: Hermes' interpreter and import path, used when `hermes_mcp.command` is unset. |
+| `AGENTVERSE_API_KEY` | Only for `agentverse register`: an Agentverse API key with write access. Through Hermes, the plugin's "Agentverse API key" setting. |
 
 The bridge does not read `.env` files. Through `hermes fetchai-bridge`, Hermes loads `$HERMES_HOME/.env` and the plugin passes `UAGENT_SEED` on; under systemd, use an `EnvironmentFile` ([`production.md`](production.md)).

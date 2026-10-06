@@ -22,3 +22,8 @@ config_schema:
     env: UAGENT_SEED
     label: uAgent seed
     description: Stable bridge identity for `serve` (at least 32 random characters). Kept in Hermes' .env and passed to the bridge through the environment.
+  agentverse_api_key:
+    type: secret
+    env: AGENTVERSE_API_KEY
+    label: Agentverse API key
+    description: Only for `agentverse register`, which lists a selling bridge on Agentverse so ASI:One users can find it. Kept in Hermes' .env and passed to the bridge through the environment.

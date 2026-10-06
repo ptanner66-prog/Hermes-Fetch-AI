@@ -166,3 +166,16 @@ def test_example_with_real_paths_passes_doctor_and_try(tmp_path, monkeypatch, ca
     args = ["seller", "try", "word-count", "--request", "hello there", "--config", str(path)]
     assert cli.main(args) == 0
     assert capsys.readouterr().out.strip() == "Your text has 2 words and 11 characters."
+
+
+@pytest.mark.skipif(os.name == "nt", reason="the example uses POSIX paths")
+def test_asi_one_example_sells_through_chat_on_agentverse(monkeypatch):
+    from hermes_fetch_ai.agentverse import registration
+
+    monkeypatch.setenv("UAGENT_SEED", SEED)
+    cfg = load_config(EXAMPLES / "asi-one.yaml")
+    assert cfg.chat.enable_chat and cfg.agent.mode == "mailbox"
+    assert cfg.agent.publish_manifest and not cfg.agent.ledger_registration
+    request = registration(cfg)
+    assert (request.type, request.handle) == ("mailbox", "hermes-reviews")
+    assert "`security-review: <your request>`" in (request.readme or "")
