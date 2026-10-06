@@ -184,6 +184,7 @@ class Buyer:
         self.send: SendInSession | None = None
         # One event per waiting caller, set when its conversation gets a message.
         self._arrivals: dict[tuple[str, str], set[asyncio.Event]] = {}
+        self._closing = False
 
     def _now_ms(self) -> int:
         return int(self._clock() * 1000)
@@ -202,6 +203,25 @@ class Buyer:
     def _arrived(self, peer: str, session: str) -> None:
         for event in self._arrivals.get((peer, session), ()):
             event.set()
+
+    def stop_waiting(self) -> None:
+        """The bridge is stopping: every wait for replies returns what it has, now."""
+        self._closing = True
+        for waiting in self._arrivals.values():
+            for event in waiting:
+                event.set()
+
+    def recover(self) -> list[Purchase]:
+        """After a restart: payments the bridge stopped in the middle of sending.
+
+        Whether they left the wallet is unknown, so they wait for ``check``,
+        like any payment whose outcome is unknown; they are never resent.
+        """
+        stuck = self.store.purchases(status="broadcasting", limit=200)
+        return [
+            self._needs_review(p.id, "the bridge stopped while sending it; run check")
+            for p in stuck
+        ]
 
     # -- talking ------------------------------------------------------------
 
@@ -257,12 +277,14 @@ class Buyer:
         waiting.add(event)
         loop = asyncio.get_running_loop()
         deadline = loop.time() + timeout
+        last_new = loop.time()
         try:
             entries = self.store.inbox(peer=peer, session=session, after_id=after_id)
-            while len(first_replies(entries)) == len(entries):
+            while len(first_replies(entries)) == len(entries) and not self._closing:
                 answered = any(answers(entry) for entry in entries)
-                left = deadline - loop.time()
-                wait = min(settle, left) if answered else left
+                # Once answered, quiet means `settle` seconds without a new message.
+                end = min(deadline, last_new + settle) if answered else deadline
+                wait = end - loop.time()
                 if wait <= 0:
                     break
                 event.clear()
@@ -271,9 +293,9 @@ class Buyer:
                 more = self.store.inbox(
                     peer=peer, session=session, after_id=entries[-1].id if entries else after_id
                 )
-                if answered and not more:
-                    break  # quiet for `settle` seconds
-                entries += more
+                if more:
+                    entries += more
+                    last_new = loop.time()
             return first_replies(entries)
         finally:
             waiting.discard(event)
@@ -288,6 +310,7 @@ class Buyer:
         await ctx.send(peer, ChatAcknowledgement(acknowledged_msg_id=msg.msg_id))
         session = str(ctx.session)
         text = text_of(msg)
+        ended = any(isinstance(item, EndSessionContent) for item in msg.content)
         if text:
             self.store.add_message(
                 peer=peer,
@@ -296,12 +319,13 @@ class Buyer:
                 body=_clean(text, MAX_REPLY_CHARS),
                 now_ms=self._now_ms(),
             )
-        if any(isinstance(item, EndSessionContent) for item in msg.content):
+        if ended:
             self.store.add_message(
                 peer=peer, session=session, kind="end", body="", now_ms=self._now_ms()
             )
         self._audit(peer, "reply", "allowed", "kept", output_bytes=len(text.encode("utf-8")))
-        self._arrived(peer, session)
+        if text or ended:
+            self._arrived(peer, session)
 
     # -- payment requests ---------------------------------------------------
 
@@ -403,6 +427,9 @@ class Buyer:
                 memo=purchase.reference or "",
                 before_broadcast=record,
             )
+        except asyncio.CancelledError:  # the bridge is stopping mid-send
+            self._needs_review(purchase.id, "the bridge stopped while sending it; run check")
+            raise
         except Exception:  # the payment may have left; never assume it did not
             logger.exception("payment %s: sending failed unexpectedly", purchase.id)
             return self._needs_review(purchase.id, "sending failed unexpectedly; run check")
@@ -469,6 +496,13 @@ class Buyer:
         )
         try:
             await self.send(purchase.peer, commit, purchase.session)
+        except asyncio.CancelledError:
+            # Stopped before the seller surely heard: `check` tells it again.
+            with contextlib.suppress(PurchaseRefused):
+                self.store.move_purchase(
+                    purchase.id, from_states=("committed",), to="paid", now_ms=self._now_ms()
+                )
+            raise
         except Exception:  # the payment is made; telling the seller can be retried
             logger.exception("payment %s: could not tell the seller", purchase.id)
             return self.store.move_purchase(

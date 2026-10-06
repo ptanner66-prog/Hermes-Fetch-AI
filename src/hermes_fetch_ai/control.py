@@ -23,6 +23,7 @@ import math
 import os
 import secrets
 import tempfile
+import uuid
 from dataclasses import asdict
 from pathlib import Path
 from typing import Any
@@ -41,6 +42,8 @@ MAX_REQUEST_BYTES = 1024 * 1024
 MAX_ANSWER_BYTES = 4 * 1024 * 1024
 READ_TIMEOUT_SECONDS = 10.0
 MAX_WAIT_SECONDS = 600.0
+# On shutdown, how long requests in progress (a payment being sent) get to finish.
+STOP_GRACE_SECONDS = 20.0
 _DAY_MS = 86_400_000
 
 
@@ -76,6 +79,7 @@ class ControlServer:
         self.agent_address = agent_address
         self.token = secrets.token_hex(32)
         self._server: asyncio.Server | None = None
+        self._requests: set[asyncio.Task[None]] = set()
 
     async def start(self) -> None:
         if await _answers(self.path):
@@ -100,7 +104,14 @@ class ControlServer:
 
     async def stop(self) -> None:
         if self._server is not None:
-            self._server.close()
+            self._server.close()  # no new requests
+            # Requests waiting for replies answer with what they have; a payment
+            # being sent gets a moment to finish, so its caller hears how it went.
+            self.buyer.stop_waiting()
+            if self._requests:
+                await asyncio.wait(set(self._requests), timeout=STOP_GRACE_SECONDS)
+            for task in self._requests:
+                task.cancel()
             with contextlib.suppress(Exception):
                 await self._server.wait_closed()
             self._server = None
@@ -109,6 +120,10 @@ class ControlServer:
                 self.path.unlink()
 
     async def _handle(self, reader: asyncio.StreamReader, writer: asyncio.StreamWriter) -> None:
+        task = asyncio.current_task()
+        if task is not None:
+            self._requests.add(task)
+            task.add_done_callback(self._requests.discard)
         try:
             try:
                 line = await asyncio.wait_for(reader.readline(), READ_TIMEOUT_SECONDS)
@@ -199,6 +214,11 @@ class ControlServer:
     async def _inbox(self, args: dict[str, Any]) -> list[dict[str, Any]]:
         after = int(args.get("after", 0))
         peer, session = args.get("peer"), args.get("session")
+        if session is not None:
+            try:
+                session = str(uuid.UUID(str(session)))
+            except ValueError:
+                raise ControlError("that is not a conversation id") from None
         if args.get("wait"):
             if not (peer and session):
                 raise ControlError("to wait for replies, give the agent and the conversation")
@@ -225,9 +245,10 @@ class ControlServer:
         )
         view = purchase_view(paid)
         replies: list[InboxEntry] = []
-        if paid.status in ("paid", "committed", "completed"):
+        if paid.status in ("committed", "completed"):
             # The seller answers once it has checked the payment and done the work;
-            # its confirmation of the payment alone is not the answer.
+            # its confirmation of the payment alone is not the answer. (A payment
+            # left `paid` was not announced to the seller, so no answer is coming.)
             replies = await self.buyer.wait_for_reply(
                 paid.peer,
                 paid.session,
@@ -296,6 +317,10 @@ async def request(path: Path, op: str, args: dict[str, Any], *, timeout: float) 
         writer.close()
         with contextlib.suppress(Exception):
             await writer.wait_closed()
+    if not raw:
+        raise ControlError(
+            "the bridge stopped before it answered; `buyer purchases` shows what was done"
+        )
     try:
         response = json.loads(raw)
     except ValueError:

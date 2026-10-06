@@ -91,3 +91,24 @@ def test_an_unreachable_agentverse_is_explained():
 def test_an_empty_search_is_refused():
     with pytest.raises(SearchError, match="say what to search for"):
         search_agents("   ", transport=transport())
+
+
+def test_find_can_read_the_search_from_standard_input(monkeypatch, capsys):
+    import io
+
+    from hermes_fetch_ai import agent_search, cli
+
+    asked = []
+
+    def search(query, *, limit, api_key):
+        asked.append((query, limit))
+        return []
+
+    monkeypatch.setattr(agent_search, "search_agents", search)
+    stdin = io.TextIOWrapper(io.BytesIO(b"tide research & more\r\n"))
+    monkeypatch.setattr("sys.stdin", stdin)
+    assert cli.main(["buyer", "find", "-", "--limit", "3", "--json"]) == 0
+    assert asked == [("tide research & more", 3)]
+    assert json.loads(capsys.readouterr().out) == []
+    assert cli.main(["buyer", "find", "tides"]) == 0
+    assert asked[-1] == ("tides", 10) and "no agents found" in capsys.readouterr().out

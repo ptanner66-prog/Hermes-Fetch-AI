@@ -11,11 +11,48 @@ from pathlib import Path
 from typing import ClassVar
 
 from hermes_fetch_ai import cli
+from hermes_fetch_ai.money import parse_fet
+from hermes_fetch_ai.store import Store
 from hermes_fetch_ai.wallet import BUYING_WALLET_INDEX, agent_address, wallet_address
 
 from .test_serve_http_roundtrip import _request_graceful_stop, _wait_for_port
 
 SEED = "serve-buying-test-" + "identity-material-not-a-real-seed"
+SELLER = "agent1qfuexnwkscrhfhx7tdchlz486mtzsl53grlnr3zpntxsyu6zhp2ckpemfdz"
+PAYOUT = "fetch1hh09pm44murgmu7rpaxluwad3way3nxq0fl6fx"
+
+
+def payment_left_mid_send(records: Path) -> str:
+    """A payment the last run of the bridge stopped in the middle of sending."""
+    now = int(time.time() * 1000)
+    store = Store.open(records)
+    try:
+        store.add_quote(
+            purchase_id="pay-0badf00d",
+            peer=SELLER,
+            session="6d0c1b0e-5e1d-4a52-9f0e-2a3c1d4e5f60",
+            reference="order-1",
+            recipient=PAYOUT,
+            amount_base=parse_fet("0.1"),
+            description="research",
+            deadline_ms=now + 3_600_000,
+            now_ms=now,
+        )
+        store.issue_nonce("pay-0badf00d", "c0de", now_ms=now)
+        store.start_payment(
+            "pay-0badf00d",
+            nonce="c0de",
+            expect_amount_base=parse_fet("0.1"),
+            expect_recipient=PAYOUT,
+            max_payment_base=parse_fet("0.5"),
+            max_per_day_base=parse_fet("5"),
+            max_per_seller_base=parse_fet("2"),
+            allowed_sellers=[],
+            now_ms=now,
+        )
+    finally:
+        store.close()
+    return "pay-0badf00d"
 
 
 def test_serve_opens_the_control_channel_and_closes_it(
@@ -44,6 +81,7 @@ def test_serve_opens_the_control_channel_and_closes_it(
         f"  audit_path: {json.dumps(str(tmp_path / 'audit.jsonl'))}\n",
         encoding="utf-8",
     )
+    stuck = payment_left_mid_send(state / agent_address(SEED) / "payments.sqlite3")
     env = dict(os.environ)
     env["UAGENT_" + "SEED"] = SEED
     creationflags = getattr(subprocess, "CREATE_NEW_PROCESS_GROUP", 0) if os.name == "nt" else 0
@@ -67,14 +105,18 @@ def test_serve_opens_the_control_channel_and_closes_it(
         assert status["agent"] == agent_address(SEED)
         assert status["wallet"] == wallet_address(SEED, BUYING_WALLET_INDEX)
         assert status["max_payment"] == "0.5"
+        # A payment the last run stopped in the middle of sending waits for `check`.
         assert cli.main(["buyer", "purchases", "--config", str(config), "--json"]) == 0
-        assert json.loads(capsys.readouterr().out) == []
+        (purchase,) = json.loads(capsys.readouterr().out)
+        assert (purchase["id"], purchase["status"]) == (stuck, "needs_review")
+        assert "stopped while sending" in purchase["note"]
         assert cli.main(["wallet", "--config", str(config)]) == 0
         assert f"buying wallet: {status['wallet']}" in capsys.readouterr().out
     finally:
         rc = _request_graceful_stop(proc)
     output = proc.stdout.read() if proc.stdout else ""
     assert rc == 0, f"serve did not shut down cleanly (rc={rc}):\n{output[-2000:]}"
+    assert f"payment {stuck} was being sent when the bridge stopped" in output
     assert not control.exists()
     assert SEED not in output
     # Buying keeps its records next to the selling ones.

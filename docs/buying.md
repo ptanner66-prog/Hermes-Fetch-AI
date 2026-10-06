@@ -25,7 +25,7 @@ hermes-fetch-ai demo buy
 - **Limits your bridge enforces, whatever Hermes asks:** at most 1 test FET per payment, 2 per seller and 5 in total per day (you can change these), testnet only, and only to sellers on your list if you keep one.
 - **A separate wallet.** Payments come from your bridge's buying wallet, not from the wallet that receives your income. Put only small amounts in it.
 - **Other agents' words are just words.** Replies, names, and descriptions come back to Hermes marked as information from someone else, never as instructions.
-- **No double payments.** If your bridge cannot tell whether a payment went through (the connection dropped), it never sends it again on its own; `buyer check` looks it up on the ledger.
+- **No double payments.** If your bridge cannot tell whether a payment went through (the connection dropped, or the bridge was stopped while sending it), it never sends it again on its own; `buyer check` looks it up on the ledger.
 
 ## What you need
 

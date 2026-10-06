@@ -14,6 +14,7 @@ from uagents_core.contrib.protocols.chat import (
     ChatAcknowledgement,
     ChatMessage,
     EndSessionContent,
+    MetadataContent,
     TextContent,
 )
 from uagents_core.contrib.protocols.payment import (
@@ -435,6 +436,74 @@ async def test_a_payment_that_arrived_after_all_is_settled_by_a_check(tmp_path):
         market.close()
 
 
+class HangingSender:
+    """Starts a payment and never hears back, like a ledger that stopped answering."""
+
+    def __init__(self):
+        self.started = asyncio.Event()
+
+    def address(self):
+        return BUYING_WALLET
+
+    async def send(self, *, recipient, amount_base, memo, before_broadcast):
+        before_broadcast("AB" * 32)
+        self.started.set()
+        await asyncio.Event().wait()
+
+
+async def test_a_bridge_stopped_while_sending_leaves_the_payment_for_check(market):
+    _, shown = await market.quote()
+    market.buyer.sender = hanging = HangingSender()
+    paying = asyncio.create_task(market.approve(shown))
+    await asyncio.wait_for(hanging.started.wait(), 5)
+    paying.cancel()
+    with pytest.raises(asyncio.CancelledError):
+        await paying
+    stuck = market.buyer_store.purchase(shown.id)
+    assert stuck.status == "needs_review" and stuck.tx_hash == "AB" * 32
+    assert "stopped while sending" in stuck.note
+    # It still counts against the limits, and is never sent again on its own.
+    assert market.buyer_store.spent_since(0) == shown.amount_base
+
+
+async def test_payments_left_mid_send_by_a_crash_wait_for_check(market):
+    _, shown = await market.quote()
+    market.buyer_store.start_payment(
+        shown.id,
+        nonce=shown.nonce,
+        expect_amount_base=shown.amount_base,
+        expect_recipient=shown.recipient,
+        max_payment_base=parse_fet("1"),
+        max_per_day_base=parse_fet("5"),
+        max_per_seller_base=parse_fet("2"),
+        allowed_sellers=[],
+        now_ms=int(NOW * 1000),
+    )
+    (recovered,) = market.buyer.recover()
+    assert recovered.id == shown.id and recovered.status == "needs_review"
+    assert market.buyer.recover() == []
+
+
+async def test_a_bridge_stopped_while_telling_the_seller_tells_it_again_on_check(market):
+    _, shown = await market.quote()
+    tell = market.buyer.send
+
+    async def hang_on_commit(to, message, session):
+        if isinstance(message, CommitPayment):
+            await asyncio.Event().wait()
+        await tell(to, message, session)
+
+    market.buyer.send = hang_on_commit
+    paying = asyncio.create_task(market.approve(shown))
+    await asyncio.sleep(0.1)
+    paying.cancel()
+    with pytest.raises(asyncio.CancelledError):
+        await paying
+    assert market.buyer_store.purchase(shown.id).status == "paid"
+    market.buyer.send = tell
+    assert (await market.buyer.check(shown.id)).status == "completed"
+
+
 async def test_a_cancelled_payment_is_reported_for_a_refund(market):
     _, shown = await market.quote()
     paid = await market.approve(shown)
@@ -554,13 +623,14 @@ async def test_waiting_for_a_reply_returns_it_or_times_out(market):
 async def say(market, session, text, *, delay=0.0):
     """The other agent says ``text`` in ``session`` after ``delay`` seconds."""
     await asyncio.sleep(delay)
+    content = [TextContent(text=text)] if text else [MetadataContent(metadata={"typing": "yes"})]
     ctx = Ctx(market, uuid.UUID(session), "buyer")
 
     async def ignore(destination, message):
         return None
 
     ctx.send = ignore
-    await market.buyer.on_chat(ctx, STRANGER, ChatMessage(content=[TextContent(text=text)]))
+    await market.buyer.on_chat(ctx, STRANGER, ChatMessage(content=content))
 
 
 async def test_waiting_collects_a_burst_of_replies_until_it_goes_quiet(market):
@@ -576,6 +646,41 @@ async def test_waiting_collects_a_burst_of_replies_until_it_goes_quiet(market):
     assert [r.body for r in replies] == ["one", "two"]
     await talk
     assert market.buyer._arrivals == {}
+
+
+async def test_a_message_without_text_does_not_cut_the_wait_short(market):
+    session, mark = await market.buyer.message(STRANGER, "hello?")
+
+    async def wake_with_nothing_new(delay):
+        await asyncio.sleep(delay)
+        market.buyer._arrived(STRANGER, session)
+
+    talk = asyncio.gather(
+        say(market, session, "one", delay=0.05),
+        say(market, session, "", delay=0.2),  # metadata only: nothing kept
+        wake_with_nothing_new(0.3),
+        say(market, session, "two", delay=0.6),
+    )
+    replies = await market.buyer.wait_for_reply(
+        STRANGER, session, after_id=mark, timeout=10, settle=1.0
+    )
+    assert [r.body for r in replies] == ["one", "two"]
+    await talk
+
+
+async def test_a_stopping_bridge_ends_every_wait_at_once(market):
+    session, mark = await market.buyer.message(STRANGER, "hello?")
+    await say(market, session, "partial")
+    waiting = asyncio.create_task(
+        market.buyer.wait_for_reply(STRANGER, session, after_id=mark, timeout=60, settle=60)
+    )
+    idle = asyncio.create_task(
+        market.buyer.wait_for_reply(STRANGER, session, after_id=10_000, timeout=60)
+    )
+    await asyncio.sleep(0.05)
+    market.buyer.stop_waiting()
+    assert [r.body for r in await asyncio.wait_for(waiting, 2)] == ["partial"]
+    assert await asyncio.wait_for(idle, 2) == []
 
 
 async def test_waiting_for_an_answer_skips_what_is_not_one(market):

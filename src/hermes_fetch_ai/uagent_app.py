@@ -21,6 +21,7 @@ from .config import BridgeConfig
 from .control import ControlServer, control_path
 from .direct_protocol import build_protocol, replay_args
 from .ledger import LcdLedgerReader, LedgerReader
+from .logging import get_logger
 from .mcp_shim import HermesMCPClientShim
 from .quotes import quote_key
 from .registration_policies import NoopRegistrationPolicy
@@ -29,6 +30,8 @@ from .sender import CosmpySender, PaymentSender
 from .services import ServiceDesk, ServiceRunner
 from .store import Store
 from .wallet import BUYING_WALLET_INDEX, agent_address, wallet_address, wallet_for
+
+logger = get_logger("hermes_fetch_ai")
 
 T = TypeVar("T", bound=Model)
 
@@ -375,6 +378,14 @@ def run_bridge(cfg: BridgeConfig) -> None:
                 if buyer is not None:
                     control = ControlServer(buyer, control_path(cfg), agent_address=agent.address)
                     await control.start()
+                    # Only now is this the one bridge buying with these records.
+                    for stuck in buyer.recover():
+                        logger.warning(
+                            "payment %s was being sent when the bridge stopped; "
+                            "run `hermes-fetch-ai buyer check %s`",
+                            stuck.id,
+                            stuck.id,
+                        )
                 await _run_agent_until_stop(agent, stop)
             finally:
                 if control is not None:

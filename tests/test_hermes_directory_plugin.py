@@ -429,12 +429,12 @@ def test_find_and_message_return_untrusted_text_marked_as_such(monkeypatch):
         "conversation": SESSION,
         "after_id": 8,
     }
-    # The message goes through standard input, never the command line.
+    # The search and the message go through standard input, never the command line.
     assert bridge.calls == [
-        ["buyer", "find", "tides", "--limit", "20"],
+        ["buyer", "find", "-", "--limit", "20"],
         ["buyer", "message", AGENT, "--text", "-", "--session", SESSION, "--wait", "300"],
     ]
-    assert bridge.inputs == [None, "research: tides"]
+    assert bridge.inputs == ["tides", "research: tides"]
     assert bridge.timeouts[1] > 300
     assert (
         "give the agent's address"
@@ -460,12 +460,32 @@ def test_nothing_the_model_passes_can_become_a_bridge_option(monkeypatch, tool, 
     assert bridge.calls == [] and hermes.prompts == []
 
 
-def test_a_search_cannot_become_a_bridge_option(monkeypatch):
+def test_a_search_never_reaches_the_command_line(monkeypatch):
     FakeHermes(monkeypatch)
     bridge = FakeBridge(monkeypatch)
-    call(buyer_ctx(), "fetchai_find_agents", query="--config=/tmp/x")
-    assert bridge.calls == [["buyer", "find", "config=/tmp/x", "--limit", "10"]]
-    assert "say what kind" in call(buyer_ctx(), "fetchai_find_agents", query="--")["error"]
+    call(buyer_ctx(), "fetchai_find_agents", query="--config=/tmp/x & calc.exe")
+    assert bridge.calls == [["buyer", "find", "-", "--limit", "10"]]
+    assert bridge.inputs == ["--config=/tmp/x & calc.exe"]
+    assert "say what kind" in call(buyer_ctx(), "fetchai_find_agents", query="  ")["error"]
+
+
+@pytest.mark.parametrize("wait", ["soon", float("inf")])
+def test_pay_checks_its_arguments_before_asking_the_user(monkeypatch, wait):
+    hermes = FakeHermes(monkeypatch, answer="accept")
+    bridge = FakeBridge(monkeypatch)
+    refused = call(buyer_ctx(), "fetchai_pay", payment_request="pay-1a2b3c4d", wait_seconds=wait)
+    assert refused["error"].startswith("bad arguments")
+    assert hermes.prompts == [] and bridge.calls == []
+
+
+def test_a_payment_that_did_not_finish_is_never_reported_as_unpaid(monkeypatch):
+    FakeHermes(monkeypatch, answer="accept")
+    stopped = RuntimeError("buyer pay: FAIL: the bridge stopped before it answered")
+    FakeBridge(monkeypatch, answers={"pay": stopped})
+    refused = call(buyer_ctx(), "fetchai_pay", payment_request="pay-1a2b3c4d")
+    assert "may or may not have been made" in refused["error"]
+    assert "buyer check pay-1a2b3c4d" in refused["error"]
+    assert "nothing was paid" not in refused["error"]
 
 
 def test_message_waits_as_long_as_the_bridge_does_unless_told(monkeypatch):

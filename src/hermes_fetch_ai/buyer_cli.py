@@ -34,7 +34,8 @@ def add_parser(sub: Any) -> None:
     b.add_argument(
         "target",
         nargs="?",
-        help="what to search for (find), the agent (message), or the payment request id",
+        help="what to search for (find; - reads it from stdin), the agent (message), "
+        "or the payment request id",
     )
     b.add_argument("--config", default=None, help="the config `serve` runs with")
     b.add_argument(
@@ -141,14 +142,20 @@ def _show_status(status: dict[str, Any]) -> None:
     print(f"spent:        {status['spent_last_24h']} FET in the last 24 hours")
 
 
+def _stdin_text() -> str:
+    """Standard input as UTF-8 text, with Windows line endings undone."""
+    return sys.stdin.buffer.read().decode("utf-8", errors="replace").replace("\r\n", "\n")
+
+
 def _find(args: argparse.Namespace) -> int:
     from .agent_search import SearchError, search_agents
 
-    if not args.target:
+    query = _stdin_text().strip() if args.target == "-" else args.target
+    if not query:
         return _fail("find", "say what to search for, for example: buyer find 'research'")
     try:
         found = search_agents(
-            args.target, limit=args.limit, api_key=os.environ.get("AGENTVERSE_API_KEY") or None
+            query, limit=args.limit, api_key=os.environ.get("AGENTVERSE_API_KEY") or None
         )
     except SearchError as exc:
         return _fail("find", str(exc))
@@ -199,11 +206,7 @@ def _operation(args: argparse.Namespace) -> tuple[Any, dict[str, Any], Any, floa
         _fail(action, f"give {what}")
         return None, {}, None, 0.0
     if action == "message":
-        if args.text == "-":
-            raw = sys.stdin.buffer.read().decode("utf-8", errors="replace")
-            text = raw.replace("\r\n", "\n")
-        else:
-            text = args.text
+        text = _stdin_text() if args.text == "-" else args.text
         if not text:
             _fail("message", "give the message with --text")
             return None, {}, None, 0.0

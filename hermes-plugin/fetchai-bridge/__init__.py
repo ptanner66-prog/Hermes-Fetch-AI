@@ -204,7 +204,8 @@ _SEND_SECONDS = 180.0
 _BRIDGE_WAIT_SECONDS = 600
 _MAX_WAIT_SECONDS = 300
 # What the tools accept as an agent, a conversation, and a payment request. Each
-# goes to the bridge as a command-line argument, so none may look like an option.
+# goes to the bridge as a command-line argument, so none may look like an option
+# or carry a shell character; free text (searches, messages) goes on stdin.
 _AGENT = re.compile(r"agent1[0-9a-z]{20,120}")
 _CONVERSATION = re.compile(r"[0-9A-Fa-f]{8}(-?[0-9A-Fa-f]{4}){3}-?[0-9A-Fa-f]{12}")
 _PAYMENT_REQUEST = re.compile(r"pay-[0-9a-z]{1,32}")
@@ -426,7 +427,7 @@ def _guarded(ctx: Any, work: Callable[[dict[str, Any]], str]) -> Callable[..., s
             return work(args or {})
         except RuntimeError as exc:
             return _refusal(str(exc))
-        except (TypeError, ValueError) as exc:
+        except (TypeError, ValueError, OverflowError) as exc:
             return _refusal(f"bad arguments: {exc}")
 
     return handler
@@ -458,12 +459,15 @@ def _conversation(
 
 
 def find_agents(ctx: Any, args: dict[str, Any]) -> str:
-    query = str(args.get("query") or "").strip().lstrip("-").strip()
+    query = str(args.get("query") or "").strip()
     if not query:
         return _refusal("say what kind of agent to look for")
     limit = max(1, min(int(args.get("limit") or 10), 20))
     found = run_bridge_json(
-        ["buyer", "find", query, "--limit", str(limit)], ctx, timeout=_SEARCH_SECONDS
+        ["buyer", "find", "-", "--limit", str(limit)],
+        ctx,
+        timeout=_SEARCH_SECONDS,
+        input_text=query,
     )
     return _reply({"agents": found, "note": UNTRUSTED_NOTE})
 
@@ -541,6 +545,7 @@ def pay(ctx: Any, args: dict[str, Any]) -> str:
     purchase_id = str(args.get("payment_request") or "").strip()
     if not _PAYMENT_REQUEST.fullmatch(purchase_id):
         return _refusal("give the payment request id (pay-...)")
+    wait = _wait(args)  # checked before the user is asked, not after
     view = run_bridge_json(["buyer", "show", purchase_id], ctx, timeout=_COMMAND_SECONDS)
     answer = ask_owner(
         _consent_text(view, _listing(ctx, str(view["peer"]))),
@@ -572,11 +577,19 @@ def pay(ctx: Any, args: dict[str, Any]) -> str:
         "--recipient",
         str(view["recipient"]),
     ]
-    wait = _wait(args)
     if wait is not None:
         argv += ["--wait", str(wait)]
     timeout = _SEND_SECONDS + (wait if wait is not None else _BRIDGE_WAIT_SECONDS)
-    paid = run_bridge_json(argv, ctx, timeout=timeout + _COMMAND_SECONDS)
+    try:
+        paid = run_bridge_json(argv, ctx, timeout=timeout + _COMMAND_SECONDS)
+    except RuntimeError as exc:
+        # Refusals (limits, an approval that no longer matches) send nothing, but
+        # a bridge that stopped or timed out may have paid: never say it did not.
+        return _refusal(
+            f"{exc}. The payment may or may not have been made; before anything else, "
+            f"see its state with `hermes fetchai-bridge buyer check {purchase_id}`. "
+            "A payment request is never paid twice."
+        )
     status = paid.get("status")
     summaries = {
         "completed": "paid, and the seller confirmed it",

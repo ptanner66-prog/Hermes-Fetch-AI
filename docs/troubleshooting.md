@@ -258,9 +258,13 @@ A payment shown as `failed` with `could not prepare the payment` usually means t
 
 Some work takes minutes. Paying waits for the answer as long as `buying.reply_wait_seconds` (60 seconds by default); after that the answer waits in the bridge. Hermes reads it with `fetchai_read_replies`; from a terminal, `hermes-fetch-ai buyer inbox --agent <agent> --session <conversation> --wait 120` waits for it. If the seller cancelled after you paid, the payment shows as `cancelled`: ask the seller for a refund.
 
+### `buyer ...: FAIL: the bridge stopped before it answered ...`
+
+The bridge was stopped while it worked on the request. On a stop, requests waiting for replies answer at once with what they have, and a payment being sent gets 20 seconds to finish. Run `hermes-fetch-ai buyer purchases`: a payment that was still being sent shows as `needs_review` (see below).
+
 ### A payment is `needs_review`
 
-The bridge could not tell whether it went through. It is never resent on its own. Run `hermes-fetch-ai buyer check <id>`: it looks the payment up on the ledger and marks it paid (and tells the seller) or failed. A payment that never appears is marked failed after an hour.
+The bridge could not tell whether it went through, or was stopped while sending it. It is never resent on its own. Run `hermes-fetch-ai buyer check <id>`: it looks the payment up on the ledger and marks it paid (and tells the seller) or failed. A payment that never appears is marked failed after an hour.
 
 ## Windows
 

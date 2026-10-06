@@ -11,8 +11,12 @@ import os
 import socket
 import stat
 import threading
+import time
+import uuid
 
 import pytest
+from uagents_core.contrib.protocols.chat import ChatMessage
+from uagents_core.contrib.protocols.payment import CommitPayment
 
 from hermes_fetch_ai import cli
 from hermes_fetch_ai.control import MAX_REQUEST_BYTES, ControlError, ControlServer, request
@@ -178,6 +182,111 @@ def test_declining_and_checking_from_the_command_line(running, capsys):
     assert "declined" in capsys.readouterr().out
     assert running.cli("check", purchase_id, "--json") == 0
     assert json.loads(capsys.readouterr().out)["status"] == "declined"
+
+
+def quote(running, capsys):
+    """Ask the seller for research; returns the conversation and the request as shown."""
+    assert running.cli("message", SELLER, "--text", "research: tides", "--wait", "5", "--json") == 0
+    sent = json.loads(capsys.readouterr().out)
+    purchase_id = sent["replies"][1]["body"].split("payment request ")[1].split(")")[0]
+    assert running.cli("show", purchase_id, "--json") == 0
+    return sent, json.loads(capsys.readouterr().out)
+
+
+def pay_args(shown):
+    return [
+        "pay",
+        shown["id"],
+        "--code",
+        shown["nonce"],
+        "--amount",
+        shown["amount"],
+        "--recipient",
+        shown["recipient"],
+    ]
+
+
+def test_paying_waits_for_an_answer_that_comes_after_the_confirmation(running, capsys, monkeypatch):
+    market, deliver = running.market, running.market.deliver
+    committed, later = [], []
+
+    async def slow_seller(side, destination, message, session):
+        if side == "buyer" and isinstance(message, CommitPayment):
+            committed.append(message)
+        if side == "seller" and committed and isinstance(message, ChatMessage):
+            # The seller confirms the payment at once, and answers after the work.
+            async def answer():
+                await asyncio.sleep(3.0)  # longer than the 1.5 s a wait settles
+                await deliver(side, destination, message, session)
+
+            later.append(asyncio.get_running_loop().create_task(answer()))
+            return
+        await deliver(side, destination, message, session)
+
+    monkeypatch.setattr(market, "deliver", slow_seller)
+    _, shown = quote(running, capsys)
+    assert running.cli(*pay_args(shown), "--wait", "20", "--json") == 0
+    paid = json.loads(capsys.readouterr().out)
+    assert [r["kind"] for r in paid["replies"]] == ["payment_complete", "text", "end"]
+
+
+def test_a_payment_the_seller_was_not_told_about_returns_at_once(running, capsys, monkeypatch):
+    tell = running.market.buyer.send
+
+    async def unreachable_seller(to, message, session):
+        if isinstance(message, CommitPayment):
+            raise ConnectionError("the seller cannot be reached")
+        await tell(to, message, session)
+
+    monkeypatch.setattr(running.market.buyer, "send", unreachable_seller)
+    _, shown = quote(running, capsys)
+    started = time.monotonic()
+    assert running.cli(*pay_args(shown), "--json") == 0  # the configured wait is 60 s
+    paid = json.loads(capsys.readouterr().out)
+    assert paid["status"] == "paid" and paid["replies"] == []
+    assert time.monotonic() - started < 10
+
+
+def test_conversation_ids_are_read_in_any_spelling(running, capsys):
+    sent, _ = quote(running, capsys)
+    session = sent["session"]
+    for spelling in (session, session.upper(), uuid.UUID(session).hex):
+        assert running.cli("inbox", "--agent", SELLER, "--session", spelling, "--json") == 0
+        assert len(json.loads(capsys.readouterr().out)) == 2
+    assert running.cli("inbox", "--session", "not-a-conversation") == 1
+    assert "that is not a conversation id" in capsys.readouterr().err
+
+
+def test_a_stopping_bridge_answers_the_requests_it_was_working_on(running, capsys):
+    done = {}
+
+    def ask():
+        done["rc"] = running.cli("message", STRANGER, "--text", "hi", "--wait", "60", "--json")
+
+    asking = threading.Thread(target=ask)
+    started = time.monotonic()
+    asking.start()
+    time.sleep(0.5)  # the request is waiting for a reply that is not coming
+    running.call(running.server.stop())
+    asking.join(15)
+    assert done["rc"] == 0 and time.monotonic() - started < 15
+    assert json.loads(capsys.readouterr().out)["replies"] == []
+
+
+async def test_an_answer_cut_off_by_a_stopping_bridge_is_explained(tmp_path):
+    async def hang_up(reader, writer):
+        await reader.readline()
+        writer.close()
+
+    server = await asyncio.start_server(hang_up, "127.0.0.1", 0)
+    path = tmp_path / "control.json"
+    path.write_text(json.dumps({"port": server.sockets[0].getsockname()[1], "token": "t"}))
+    try:
+        with pytest.raises(ControlError, match="stopped before it answered"):
+            await request(path, "status", {}, timeout=5)
+    finally:
+        server.close()
+        await server.wait_closed()
 
 
 def test_a_message_can_come_from_standard_input(running, capsys, monkeypatch):
