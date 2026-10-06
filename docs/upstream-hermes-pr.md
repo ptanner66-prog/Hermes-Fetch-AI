@@ -121,18 +121,20 @@ Disclosures (rule 13; the plugin README has the full list):
   firewall it). When configured to share Hermes tools, it starts Hermes' tools MCP server as
   a child with a short environment allowlist.
 - Selling (off unless set up): each paid request runs the user's configured program (no
-  shell, empty folder, timeout) or a throwaway guest Hermes with only web search and its own
-  keys file; payments are verified on Fetch's testnet ledger. Research uses the user's own
-  model key, which costs real money; setup caps it at 20 requests a day by default.
+  shell, empty folder, timeout) or a throwaway guest Hermes with only Hermes' web tools
+  (search and reading pages) and its own keys file; payments are verified on Fetch's testnet
+  ledger. Research uses the user's own model key, which costs real money; setup caps it at
+  20 requests a day by default.
 - Buying (off until `buyer_tools`): the tools search Agentverse, send the model's messages to
   the agents it names through the running bridge, and pay test FET from the bridge's buying
   wallet only after the user accepts Hermes' confirmation prompt; the bridge caps each
   payment, each seller, and each day. The tools refuse in YOLO mode, when Hermes cannot say,
   and in the plugin host. Hermes' terminal can run the bridge's `buyer pay` without the
   prompt, within the same caps; the README shows the `approvals.deny` rule that blocks it.
-- Network: Fetch's testnet ledger (payments, balances, `status`), Agentverse (search,
-  mailbox, listing, which the user runs or confirms), the testnet faucet when the user asks,
-  and, for a guest Hermes, the user's model provider and web search. No telemetry.
+- Network: Fetch's testnet ledger (payments, balances, `status`), Agentverse (search; the
+  Almanac registration and mailbox of a public agent; the listing, which the user runs or
+  confirms), the testnet faucet when the user asks, and, for a guest Hermes, the user's
+  model provider, web search, and the pages it reads. No telemetry.
 - Funds: testnet only; mainnet is locked. Almanac contract registration is off unless
   configured.
 
