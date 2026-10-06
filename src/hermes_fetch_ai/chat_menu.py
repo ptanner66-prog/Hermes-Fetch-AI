@@ -7,6 +7,7 @@ request: "security-review: <code>". Anything else gets the menu.
 
 from __future__ import annotations
 
+import re
 from collections.abc import Mapping
 
 from .config import ServiceConfig
@@ -14,6 +15,7 @@ from .money import format_fet
 
 # Characters that may separate a service name from the request.
 _SEPARATORS = ":-–—\n\t "
+_MENTION = re.compile(r"^@[\w.-]+[,:]?\s*")
 
 
 def price_text(svc: ServiceConfig) -> str:
@@ -49,7 +51,8 @@ def pick_service(text: str, services: Mapping[str, ServiceConfig]) -> tuple[str,
     the message. Longer names are tried first, so "review-pro" wins over
     "review". The request may be empty; the caller asks for it.
     """
-    stripped = text.strip()
+    # ASI:One users address an agent as @handle or @agent1...; that is not part of the order.
+    stripped = _MENTION.sub("", text.strip(), count=1).strip()
     lowered = stripped.lower()
     labels = sorted(
         ((label, name) for name, svc in services.items() for label in (name, svc.title)),

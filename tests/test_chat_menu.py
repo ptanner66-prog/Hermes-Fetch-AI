@@ -38,13 +38,17 @@ def test_menu_lists_services_prices_and_how_to_order():
         ("review: short", ("review", "short")),
         ("word-count", ("word-count", "")),
         ("Word count — hello there", ("word-count", "hello there")),
+        ("@hermes-reviews security-review: x = 1", ("security-review", "x = 1")),
+        ("@agent1qabc, review: short", ("review", "short")),
     ],
 )
 def test_a_message_orders_by_name_or_title(text, expected):
     assert pick_service(text, SERVICES) == expected
 
 
-@pytest.mark.parametrize("text", ["hi", "menu", "reviewer: x", "please review this", "", "   "])
+@pytest.mark.parametrize(
+    "text", ["hi", "menu", "reviewer: x", "please review this", "", "   ", "@hermes-reviews hi"]
+)
 def test_other_messages_order_nothing(text):
     assert pick_service(text, SERVICES) is None
 
