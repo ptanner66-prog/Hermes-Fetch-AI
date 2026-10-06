@@ -5,11 +5,12 @@
 #   1. Set UAGENT_SEED, the agent's identity and wallet key, and back it up.
 #   2. Change every /path/to/... below to the real absolute path on your
 #      machine, and /usr/bin/python3 to what `which python3` prints.
-#   3. Check the file:
+#   3. Give the research service's guest Hermes its model key (see below).
+#   4. Check the file:
 #        hermes-fetch-ai doctor --config examples/paid-services.yaml
-#   4. Try a service without payment:
+#   5. Try a service without payment:
 #        hermes-fetch-ai seller try word-count --request "hello there" --config examples/paid-services.yaml
-#   5. Start selling:
+#   6. Start selling:
 #        hermes-fetch-ai serve --config examples/paid-services.yaml
 version: 1
 agent:
@@ -25,6 +26,35 @@ payments:
   enabled: true
   # payout_address: fetch1...  # where income goes; the default is the agent's own wallet
 services:
+  research:
+    title: Research a topic
+    description: >-
+      Ask a question and get a short answer with its sources. A Hermes agent
+      searches the public web for you; it cannot reach the seller's computer,
+      files, or accounts.
+    price: "0.05"
+    runner:
+      # A guest Hermes: a separate Hermes run for each request, in a throwaway
+      # home folder, with only the web search tools. Guide: docs/guest-hermes.md.
+      type: hermes
+      toolsets: [web]
+      # Any model your provider offers. Its key goes in the guest's keys file,
+      # which `doctor` names (by default
+      # ~/.local/state/hermes-fetch-ai/guests/research.env), one line such as
+      #   OPENROUTER_API_KEY=...
+      # then: chmod 600 that file. Your own Hermes keys are never shared.
+      provider: openrouter
+      model: anthropic/claude-sonnet-4
+      instructions: >-
+        Research the client's question with web search, then answer in a few
+        short paragraphs, followed by the sources you used (title and URL).
+        Say where sources disagree and what you could not find.
+      max_turns: 8
+      timeout_seconds: 300
+      # python: /path/to/hermes-agent/venv/bin/python  # only outside `hermes fetchai-bridge`
+    disclaimer: >-
+      Researched by an AI agent from public web pages. Check the sources
+      before you rely on it.
   security-review:
     title: Defensive code security review
     description: >-

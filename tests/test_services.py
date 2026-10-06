@@ -166,19 +166,16 @@ def program(tmp_path, body):
 
 
 def command_runner(argv, **overrides):
-    runner = build_runner(
-        cfg(
-            {
-                "svc": {
-                    "title": "t",
-                    "description": "d",
-                    "runner": {"type": "command", "argv": argv, **overrides},
-                }
+    config = cfg(
+        {
+            "svc": {
+                "title": "t",
+                "description": "d",
+                "runner": {"type": "command", "argv": argv, **overrides},
             }
-        )
-        .services["svc"]
-        .runner
+        }
     )
+    runner = build_runner(config, "svc")
     assert isinstance(runner, CommandRunner)
     return runner
 

@@ -22,7 +22,8 @@ from pathlib import Path
 from typing import Any, Protocol
 
 from .arg_validator import validate_args
-from .config import BridgeConfig, CommandRunnerConfig, RunnerConfig, ServiceConfig
+from .config import BridgeConfig, CommandRunnerConfig, HermesRunnerConfig, ServiceConfig
+from .guest import HermesRunner, guest_problems, keys_file
 from .ledger import normalize_tx_hash
 from .logging import get_logger
 from .money import format_fet
@@ -97,6 +98,9 @@ def program_problems(cfg: BridgeConfig) -> list[str]:
     problems = []
     for name, svc in cfg.services.items():
         runner = svc.runner
+        if isinstance(runner, HermesRunnerConfig):
+            problems.extend(guest_problems(cfg, name))
+            continue
         if not isinstance(runner, CommandRunnerConfig):
             continue
         program = Path(runner.argv[0])
@@ -112,9 +116,14 @@ def program_problems(cfg: BridgeConfig) -> list[str]:
     return problems
 
 
-def build_runner(cfg: RunnerConfig, *, show_errors: bool = False) -> ServiceRunner:
-    if cfg.type == "command":
-        return CommandRunner(cfg, show_errors=show_errors)
+def build_runner(cfg: BridgeConfig, name: str, *, show_errors: bool = False) -> ServiceRunner:
+    """The runner for service ``name``."""
+    svc = cfg.services[name]
+    runner = svc.runner
+    if isinstance(runner, CommandRunnerConfig):
+        return CommandRunner(runner, show_errors=show_errors)
+    if isinstance(runner, HermesRunnerConfig):
+        return HermesRunner(svc, keys_file(cfg, name), show_errors=show_errors)
     return EchoRunner()
 
 
@@ -232,7 +241,7 @@ class ServiceDesk:
         self.cfg = cfg
         self.seller = seller
         self.runners: dict[str, ServiceRunner] = {
-            name: build_runner(svc.runner) for name, svc in cfg.services.items()
+            name: build_runner(cfg, name) for name in cfg.services if name not in (runners or {})
         }
         if runners:
             self.runners.update(runners)

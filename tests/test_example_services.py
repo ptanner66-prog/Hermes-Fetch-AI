@@ -15,12 +15,19 @@ from typing import Any
 import pytest
 
 from hermes_fetch_ai import cli
-from hermes_fetch_ai.config import CommandRunnerConfig, load_config
+from hermes_fetch_ai.config import (
+    HERMES_PYTHON_VAR,
+    HERMES_PYTHONPATH_VAR,
+    CommandRunnerConfig,
+    HermesRunnerConfig,
+    load_config,
+)
 from hermes_fetch_ai.services import CommandRunner, program_problems
 
 EXAMPLES = Path(__file__).resolve().parents[1] / "examples"
 CODE_REVIEW = EXAMPLES / "services" / "code_review.py"
 WORD_COUNT = EXAMPLES / "services" / "word_count.py"
+FAKE_HERMES = Path(__file__).resolve().parent / "fakes" / "fake_hermes"
 SEED = "example-services-test-" + "identity-material-not-real"
 ANSWER = "1. eval() on user input (critical): use ast.literal_eval instead."
 
@@ -131,9 +138,13 @@ def test_word_count_template():
 @pytest.mark.skipif(os.name == "nt", reason="the example uses POSIX paths")
 def test_paid_services_example_loads_and_flags_its_placeholders(monkeypatch):
     monkeypatch.setenv("UAGENT_SEED", SEED)
+    monkeypatch.delenv(HERMES_PYTHON_VAR, raising=False)
     cfg = load_config(EXAMPLES / "paid-services.yaml")
     assert cfg.payments.enabled and cfg.policy.public_tools == []
-    assert list(cfg.services) == ["security-review", "word-count"]
+    assert list(cfg.services) == ["research", "security-review", "word-count"]
+    research = cfg.services["research"].runner
+    assert isinstance(research, HermesRunnerConfig)
+    assert research.toolsets == ["web"] and research.python is None
     review = cfg.services["security-review"]
     assert review.input.check_urls is False and review.price == "0.1"
     assert review.runner.argv[2:] == [
@@ -147,10 +158,17 @@ def test_paid_services_example_loads_and_flags_its_placeholders(monkeypatch):
     assert any(
         "/path/to/Hermes-Fetch-AI/examples/services/code_review.py not found" in p for p in problems
     )
+    # Outside `hermes fetchai-bridge`, the guest needs to be told where Hermes is.
+    assert any(p.startswith("service research: Hermes' Python is unknown") for p in problems)
 
 
 def test_example_with_real_paths_passes_doctor_and_try(tmp_path, monkeypatch, capsys):
     monkeypatch.setenv("UAGENT_SEED", SEED)
+    monkeypatch.setenv("XDG_STATE_HOME", str(tmp_path / "state"))
+    monkeypatch.setenv("LOCALAPPDATA", str(tmp_path / "state"))  # the state folder on Windows
+    # The Hermes the fetchai-bridge plugin hands over: here, a stand-in.
+    monkeypatch.setenv(HERMES_PYTHON_VAR, sys.executable)
+    monkeypatch.setenv(HERMES_PYTHONPATH_VAR, str(FAKE_HERMES))
     text = (EXAMPLES / "paid-services.yaml").read_text(encoding="utf-8")
     text = text.replace("/usr/bin/python3", json.dumps(sys.executable))
     text = text.replace(
@@ -162,10 +180,16 @@ def test_example_with_real_paths_passes_doctor_and_try(tmp_path, monkeypatch, ca
     path = tmp_path / "paid-services.yaml"
     path.write_text(text, encoding="utf-8")
     assert cli.main(["doctor", "--config", str(path)]) == 0
-    assert "services: security-review 0.1 FET, word-count 0.01 FET" in capsys.readouterr().out
+    out = capsys.readouterr().out
+    assert "services: research 0.05 FET, security-review 0.1 FET, word-count 0.01 FET" in out
+    assert "guest research: tools web; model anthropic/claude-sonnet-4 (openrouter)" in out
+    assert f"{Path('guests', 'research.env')} (not there yet" in out
     args = ["seller", "try", "word-count", "--request", "hello there", "--config", str(path)]
     assert cli.main(args) == 0
     assert capsys.readouterr().out.strip() == "Your text has 2 words and 11 characters."
+    args = ["seller", "try", "research", "--request", "What causes tides?", "--config", str(path)]
+    assert cli.main(args) == 0
+    assert capsys.readouterr().out.strip().startswith("the answer\n\n— Researched by an AI")
 
 
 @pytest.mark.skipif(os.name == "nt", reason="the example uses POSIX paths")

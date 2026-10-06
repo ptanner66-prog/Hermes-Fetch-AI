@@ -72,6 +72,12 @@ def doctor(args: argparse.Namespace) -> int:
         )
         p = cfg.payments
         print(f"payments: on ({p.network}, {p.chain_id}); services: {prices or 'none'}")
+        from .config import HermesRunnerConfig
+        from .guest import describe
+
+        for name, svc in cfg.services.items():
+            if isinstance(svc.runner, HermesRunnerConfig):
+                print(describe(cfg, name))
     else:
         print("payments: off")
     if not _programs_ok(cfg):
@@ -239,7 +245,7 @@ def _try_service(cfg: BridgeConfig, name: str | None, request: str | None) -> in
     if not _programs_ok(cfg):
         return 1
     svc = cfg.services[name]
-    result = asyncio.run(build_runner(svc.runner, show_errors=True).run(request))
+    result = asyncio.run(build_runner(cfg, name, show_errors=True).run(request))
     if not result.ok:
         print(f"seller: FAIL: {name}: {result.problem}", file=sys.stderr)
         return 1
