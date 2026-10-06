@@ -19,16 +19,16 @@ Hermes Fetch AI stays a standalone project. Its way into Hermes is one file in N
 | 6, capabilities match | No tools, hooks, middleware, or required env vars; the entry's `capabilities` lists are empty. `hermes plugins validate` checks this. |
 | 9, no core overrides | Only `register_cli_command`, `register_skill`, and `get_config`. |
 | 10, dependencies | None installed into Hermes (`python_runtime: external`, stdlib-only). |
-| 11, credentials | Only `UAGENT_SEED`, the plugin's own `config_schema` secret. |
-| 12, approvals and unattended runs | No tools, so the agent reaches the bridge only through the terminal tool under normal approvals. The tools server gets an allowlisted environment, so `HERMES_YOLO_MODE` and `HERMES_NONINTERACTIVE` never reach it. Nothing prompts or waits for input. |
-| 13, disclosure | Plugin README "What this plugin does", the PR body below, and a `Disclosure —` sentence already in the draft entry. |
+| 11, credentials | Only `UAGENT_SEED`, the plugin's own `config_schema` secret. The bridge gets an allowlisted environment, so model-provider keys in Hermes' `.env` never reach it. |
+| 12, approvals and unattended runs | No tools, so the agent reaches the bridge only through the terminal tool under normal approvals. The bridge and the tools server get allowlisted environments, so `HERMES_YOLO_MODE` and `HERMES_NONINTERACTIVE` never reach them. Nothing prompts or waits for input. |
+| 13, disclosure | Plugin README "What this plugin does" (processes, environment, listener, what remote agents see, network, funds, files), the PR body below, and a `Disclosure —` sentence already in the draft entry. |
 | 14, truthful metadata | `requires_hermes: ">=0.21.5"`, the latest release, which CI tests; `version` matches `plugin.yaml`; `validate --install-deps` passes. |
 | 16, lineage | Original plugin, not a fork. |
 
 ## Readiness
 
-- [x] Directory plugin in [`hermes-plugin/fetchai-bridge`](../hermes-plugin/fetchai-bridge) ([`native-hermes-plugin.md`](native-hermes-plugin.md)).
-- [x] CI, against Hermes 0.21.5 and a pinned `main`: `hermes plugins validate --install-deps` (`Validation passed`, security scan `safe`), `hermes plugins doctor --ci`, `hermes fetchai-bridge doctor` and `demo local`, and the stdio field test.
+- [x] Directory plugin in [`hermes-plugin/fetchai-bridge`](../hermes-plugin/fetchai-bridge) ([`hermes-plugin.md`](hermes-plugin.md)).
+- [x] CI, against Hermes 0.21.5 and a pinned `main`: `hermes plugins validate --install-deps` (`Validation passed`; the security scan's verdict, checked by hand on 2026-10-06, was `safe`), `hermes plugins doctor --ci`, `hermes fetchai-bridge doctor` and `demo local`, and the stdio field test.
 - [x] Entry draft [`upstream/hermes-pr/plugin-catalog/fetchai-bridge.yaml`](../upstream/hermes-pr/plugin-catalog/fetchai-bridge.yaml). With a real SHA filled in it passes Hermes' `scripts/validate_plugin_catalog.py` and loads with Hermes' catalog loader; `tests/test_hermes_directory_plugin.py` keeps it consistent with `plugin.yaml`.
 - [ ] Merge the plugin to `main` here, with CI green on the merge commit.
 - [ ] Optionally tag `v1.0.0` (the pin is still the commit SHA).
@@ -85,25 +85,39 @@ and a manifest v2 `config_schema` (`command`, plus `uagent_seed` as a `secret` s
 environment; the bridge pins its own dependencies (uAgents, mcp 1.28.1) in a separate one.
 
 Disclosures (rule 13):
-- Runs one subprocess, without a shell: the `hermes-fetch-ai` executable, only when the
-  user runs `hermes fetchai-bridge ...`. It inherits the user's environment, including
-  `UAGENT_SEED` from `$HERMES_HOME/.env`, minus Hermes' Python variables; Hermes'
-  interpreter path and `PYTHONPATH` are passed as `HERMES_FETCH_AI_HERMES_PYTHON` and
-  `HERMES_FETCH_AI_HERMES_PYTHONPATH`.
-- `hermes fetchai-bridge serve` is long-running: it listens on the configured port, starts
-  `python -m agent.transports.hermes_tools_mcp_server` with Hermes' interpreter as a child
-  process with an allowlisted environment (`PATH`, `HOME`, `TMPDIR`, `HERMES_HOME`,
-  locale). With `publish_manifest: false`, as in the example config, it makes no outbound
-  calls of its own; replying to a remote agent can look up that agent's endpoint in the
-  Almanac (Agentverse's API, falling back to the Fetch ledger). With `publish_manifest:
-  true` or mailbox mode, it also registers with the Almanac and Agentverse.
-- Remote uAgents see only `skills_list` by default; every other tool is denylisted. Calls
-  need replay metadata and pass argument checks (URL/SSRF and shell guards), size limits,
-  and a redacted JSONL audit log.
-- Credentials: only `UAGENT_SEED`, the plugin's own config secret.
+- Processes: runs one subprocess, without a shell, only when the user runs
+  `hermes fetchai-bridge ...`: the separately installed `hermes-fetch-ai` executable.
+  `probe-hermes` also runs Hermes' interpreter once to check an import.
+- Environment and credentials: the bridge gets an allowlisted environment: `UAGENT_SEED`
+  (the plugin's own `config_schema` secret, from `$HERMES_HOME/.env`), `HERMES_HOME`,
+  `PATH`, `HOME`, locale, temp-directory, proxy and certificate settings, and the Windows
+  essentials, plus Hermes' interpreter path and `PYTHONPATH` as
+  `HERMES_FETCH_AI_HERMES_PYTHON` and `HERMES_FETCH_AI_HERMES_PYTHONPATH`. Model-provider
+  API keys and other `.env` entries are not passed.
+- Long-running listener: `hermes fetchai-bridge serve` runs until stopped and listens on the
+  configured port on all network interfaces (there is no bind-address setting; the README
+  says to firewall the port). It starts `python -m agent.transports.hermes_tools_mcp_server`
+  with Hermes' interpreter as a child process with a shorter allowlist (`PATH`, `HOME`,
+  `TMPDIR`, `HERMES_HOME`, locale).
+- What remote agents reach: in the example config, only `skills_list`, which returns the
+  name, description, and category of every installed skill (the README says to remove it
+  if that is sensitive). Every other tool is denylisted until the user changes the policy,
+  and the tools server never serves terminal, file, or process tools. Calls need replay
+  metadata and pass rate limits, URL (private-address) and shell-character checks, and size
+  caps; every decision goes to a redacted JSONL audit log.
+- Network: with `publish_manifest: false`, as in the example config, the bridge makes no
+  outbound calls of its own; replying to a remote agent can look up that agent's endpoint
+  in the Almanac (Agentverse's API, falling back to the Fetch ledger). With
+  `publish_manifest: true` or mailbox mode, it also registers with the Almanac and
+  Agentverse.
+- Funds: with `publish_manifest: true`, uAgents registers the bridge on the Almanac
+  contract, which can pay registration fees from the wallet derived from `UAGENT_SEED`.
+  Nothing is spent with `publish_manifest: false`.
+- Files: `serve` writes a JSONL audit log, without arguments or outputs, under
+  `~/.local/state/hermes-fetch-ai/` by default.
 - Approvals (rule 12): no tools, so the agent reaches the bridge only through the terminal
-  tool under normal approvals; `HERMES_YOLO_MODE` and `HERMES_NONINTERACTIVE` never reach
-  the tools server; nothing prompts or waits for input.
+  tool under normal approvals; `HERMES_YOLO_MODE` and `HERMES_NONINTERACTIVE` reach neither
+  the bridge nor the tools server; nothing prompts or waits for input.
 - No telemetry, no self-updates, and the plugin itself makes no network calls.
 - Community project, not affiliated with Fetch.ai.
 

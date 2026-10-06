@@ -2,7 +2,7 @@
 
 ## Our pledge
 
-We want Hermes Fetch AI to be a serious, useful open-source integration for people building safe agent networks. Contributors and maintainers are expected to communicate with professionalism, respect, and technical honesty.
+Contributors and maintainers communicate with respect and technical honesty.
 
 ## Expected behavior
 
@@ -23,3 +23,7 @@ We want Hermes Fetch AI to be a serious, useful open-source integration for peop
 ## Enforcement
 
 Maintainers may edit, hide, or remove comments; close issues; reject contributions; or block participants who violate this code of conduct. Serious security or safety violations may be handled privately first to avoid increasing user risk.
+
+## Reporting
+
+To report a conduct problem, open an issue titled "Conduct report" without any details, and the maintainer will arrange a private channel. Report security problems as described in [`SECURITY.md`](SECURITY.md).

@@ -1,5 +1,5 @@
 # Production-preferred Hermes-backed config (see docs/architecture.md).
-# Launches the Hermes tools MCP server as an isolated stdio subprocess.
+# Starts Hermes' tools MCP server as a separate stdio subprocess.
 # Field-tested against hermes-agent v0.16.x, 0.21.5, and main bb236287;
 # see docs/demo.md.
 # The bridge identity comes from UAGENT_SEED (at least 32 characters); this
@@ -27,9 +27,9 @@ hermes_mcp:
 policy:
   public_tools:
     - skills_list
-  # Explicit denylist of every other tool the Hermes tools server can expose
-  # (EXPOSED_TOOLS in hermes-agent 0.21.5 and main bb236287)
-  # (denylist wins even if a sender allowlist is added later).
+  # Every other tool the Hermes tools server can serve (EXPOSED_TOOLS in
+  # hermes-agent 0.21.5 and main bb236287), plus terminal and file tools in case
+  # a future server adds them. The denylist wins even over a sender allowlist.
   denied_tools:
     - skill_view
     - web_search

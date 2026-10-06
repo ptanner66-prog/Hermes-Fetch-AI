@@ -46,7 +46,7 @@ def _now_ms() -> int:
 
 
 def replay_args(args: dict[str, Any], request_id: str | None = None) -> dict[str, Any]:
-    """Return tool args with bridge-level replay/idempotency metadata attached.
+    """Return tool args with the bridge's replay-protection metadata attached.
 
     The uAgents MCP `CallTool` model has only `tool` and `args`, so v1 carries
     bridge metadata under a reserved args key. The bridge strips this key before

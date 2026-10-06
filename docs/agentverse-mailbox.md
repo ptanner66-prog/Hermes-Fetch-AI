@@ -20,8 +20,11 @@ endpoint.
    python -c "import secrets; print(secrets.token_hex(32))"
    ```
 
-3. Testnet funds for the derived `fetch1...` address only if the current Agentverse or
-   Almanac registration flow asks for them. Local CI never depends on funding.
+3. Optionally, testnet funds for the agent's `fetch1...` wallet, which is derived from the
+   seed. With `publish_manifest: true`, uAgents registers through the Almanac API and also
+   on the Almanac contract, paying the contract's registration fee from that wallet. Without
+   enough funds it logs a warning and skips the on-chain registration. Never fund it from a
+   wallet that holds real money, and stay on `network: testnet` while you try this.
 
 ## Steps
 
@@ -63,9 +66,10 @@ endpoint.
   to their own Agentverse account or disconnect it. Firewall the port to localhost
   during setup.
 - After the mailbox is connected, set `enable_agent_inspector: false` and restart. In
-  mailbox mode with the inspector off, the bridge opens no local HTTP listener at all
-  and receives messages only through the mailbox. (Expected from the uAgents code path;
-  verify it in your setup.)
+  mailbox mode with the inspector off, the bridge opens no local HTTP listener at all and
+  receives messages only through the mailbox: uAgents starts its HTTP server in mailbox
+  mode only when REST endpoints are registered, and the inspector is what registers them.
+  Check with `ss -ltn` (or `netstat`) that the port is closed.
 - `CallTool` still requires replay metadata, and every policy, rate-limit, and
   validation rule applies exactly as in endpoint mode.
 - Never share the seed, recovery phrases, private keys, Agentverse tokens, or funding

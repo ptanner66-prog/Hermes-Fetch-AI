@@ -1,79 +1,72 @@
 # Security
 
-Hermes Fetch AI bridges a local Hermes tools surface onto a uAgent network, so the security posture is intentionally conservative: small surface, default deny, explicit replay protection, bounded resources, and redacted audit.
+Hermes Fetch AI puts part of a local Hermes install on an agent network, so it is conservative by default: a small surface, default deny, replay protection, bounded resources, and a redacted audit log.
 
 ## Threat model
 
 Remote senders may:
 
-- enumerate tools to learn local capability information;
+- enumerate tools to learn what the local install can do;
 - replay signed `CallTool` messages;
-- rotate sender identities to bypass per-sender rate limits;
+- rotate sender identities to get around per-sender rate limits;
 - submit expensive or sensitive tool calls;
-- pass unsupported URL schemes, local/private URLs, shell-control characters, oversized payloads, or schema-invalid arguments;
-- trigger outputs containing secrets or very large content;
-- exploit subprocess transport stderr/environment leakage.
+- pass unsupported URL schemes, private or local URLs, shell-control characters, oversized payloads, or schema-invalid arguments;
+- trigger outputs that contain secrets or very large content;
+- try to exploit the subprocess transport, for example through its environment or stderr.
 
 ## Controls
 
-- Default deny for tool calls.
-- Denylist wins over allowlists and public tools.
-- Sender identity is routing evidence, not authorization by itself.
-- `ListTools` is filtered, rate-limited globally/per sender, and size-capped.
-- `CallTool` is rate-limited globally/per sender before expensive validation.
-- `CallTool` requires bridge replay/idempotency metadata by default:
-  - metadata is carried under reserved args key `_hermes_fetch_ai`;
-  - `request_id` must be unique per sender within the replay TTL;
-  - `issued_at_ms` must be fresh and not too far in the future;
-  - duplicate, stale, malformed, or oversized calls are denied before tool invocation;
-  - the replay cache is TTL-pruned and max-entry bounded;
-  - schema-invalid requests do not poison a request ID for a corrected retry.
-- Arguments are schema-validated and size-capped before invocation.
-- URLs must use `http` or `https`; `file:`, `data:`, `javascript:`, `ftp://`, and hostless URLs are rejected. A string counts as a URL when it starts with `scheme:/` or a known non-hierarchical scheme such as `data:`; ordinary text such as `Note: hello` is not treated as a URL.
-- URLs embedded anywhere in a string (`see http://10.0.0.1/admin`) are checked too, as are bare local or literal-IP hosts (`localhost:8080`, `169.254.169.254/latest`, `[::1]:80`).
-- URLs targeting localhost, non-global, private, link-local, multicast, unspecified, reserved, CGNAT/shared, or private DNS results are rejected. DNS lookups run off the event loop.
-- Shell control characters (including newlines) and shell metacharacters (`; & | $ < > \` and backticks) are rejected unless a tool is listed in `policy.trusted_shell_tools`. This is deliberately strict: it also rejects URLs with query strings and multi-line text. Only list a tool there if it never passes arguments to a shell.
-- Tool responses returned to callers are normalized and size-capped. They are not a DLP redaction boundary; only expose tools whose outputs are safe for the intended sender.
-- Audit/log records never store raw arguments, raw outputs, full sender addresses, seeds, tokens, or keys.
-- Stdio uses `shell=False`, a filtered environment, and stderr separated from protocol stdout.
-- With `publish_manifest: false`, the bridge makes no outbound calls of its own. uAgents looks up the Almanac contract on the Fetch ledger whenever an agent is created and reports every agent as active or inactive to Agentverse's Almanac API, even with registration disabled; the bridge's `PrivateAgent` skips both. Replying to a remote agent can still look up that agent's endpoint in the Almanac.
-- Production agent seeds must come from `UAGENT_SEED` and be at least 32 characters; YAML seed and mailbox key values are rejected.
-- Config files are scanned for credential-shaped values anywhere, including inside lists such as `hermes_mcp.args`: bearer tokens, `sk-`/`pk-` keys, JWTs, long hex keys, `token=...`-style assignments, and secret flags such as `--api-key`. Ordinary words such as "token" in a description are allowed.
-- In mailbox mode, the uAgents Agent Inspector endpoints (`/connect`, `/disconnect`) are unauthenticated. Keep the port firewalled to localhost and disable the inspector after connecting; see `docs/agentverse-mailbox.md`.
+- Tool calls are default-deny, and the denylist wins over allowlists and public tools.
+- A verified signature proves which agent address sent a message (uAgents checks every envelope) but grants nothing by itself: an address can call a tool only if the tool is in `public_tools` or listed for that address in `allowed_senders`.
+- `ListTools` is filtered, size-capped, and rate-limited per sender and globally.
+- `CallTool` is rate-limited per sender and globally before any expensive work. A request only counts against the global limit once it passes the sender's own, so one sender cannot lock others out.
+- `CallTool` requires replay-protection metadata by default, under the reserved argument key `_hermes_fetch_ai`:
+  - `request_id` must be unique per sender while the call could still be accepted;
+  - `issued_at_ms` must be a finite number, no older than `replay_ttl_seconds` and no further ahead than `max_replay_clock_skew_seconds`;
+  - duplicate, stale, future-dated, malformed, or oversized calls are denied before the tool runs;
+  - accepted request IDs are remembered for `replay_ttl_seconds + max_replay_clock_skew_seconds`, the longest time a copy could still pass the freshness check;
+  - a schema-invalid call does not use up its request ID, so a corrected retry works.
+- Tool names must be plain ASCII identifiers of at most 128 characters, so a displayed name is always the authorized one. Policy names are checked when the config loads.
+- Arguments are size-capped and validated against the tool's JSON schema.
+- URL checks:
+  - only `http` and `https` are allowed; `file:`, `data:`, `javascript:`, `ftp://` and hostless URLs are rejected;
+  - a string counts as a URL when it starts with `scheme:/`, with `http:` or `https:` (even without slashes), or with a non-hierarchical scheme such as `data:`; ordinary text such as `Note: hello` is not a URL;
+  - URLs embedded in longer text (`see http://10.0.0.1/admin`) are checked too, as are strings that are only a local or IP host (`localhost:8080`, `169.254.169.254/latest`, `[::1]:80`, `127.1/admin`);
+  - IPv4 literals are parsed the way the C library parses them, so encodings such as `0x7f.0.0.1`, `0177.0.0.1`, `127.1` and `2130706433` are recognized;
+  - URLs with backslashes, whitespace, or control characters are rejected, because URL parsers disagree about them;
+  - targets that are local, private, link-local, multicast, unspecified, reserved, or shared (CGNAT) are rejected, both as literals and after DNS resolution;
+  - DNS lookups run off the event loop, after the cheap checks, at most once per host, for at most 16 hosts per call, and within `hermes_mcp.timeout_seconds`.
+- Shell control characters (including newlines) and shell metacharacters (`; & | $ < > \` and backticks) are rejected unless the tool is listed in `policy.trusted_shell_tools`. This is strict on purpose: it also rejects URLs whose query string contains `&`, and multi-line text. List a tool there only if it never passes arguments to a shell.
+- Tool responses are size-capped. They are not redacted, so expose only tools whose output is safe for the caller.
+- Audit records hold only an allowlist of fields (no arguments, outputs, full sender addresses, seeds, tokens, or keys). Each value is redacted before the record is written, so caller-supplied text cannot corrupt the log.
+- Backend transport errors reach the caller as `tool call failed`; the details go to the bridge's log.
+- The tools server runs with `shell=False`, a short environment allowlist (`PATH`, `HOME`, `TMPDIR`, `HERMES_HOME`, locale), and its stderr discarded, because stderr is outside the redaction boundary.
+- With `publish_manifest: false` the bridge makes no outbound calls of its own. uAgents looks up the Almanac contract on the Fetch ledger whenever an agent is created, and reports every agent as active or inactive to Agentverse's Almanac API even with registration disabled; the bridge's `PrivateAgent` skips both. Replying to a remote agent can still look up that agent's endpoint in the Almanac.
+- Production seeds come only from `UAGENT_SEED` and must be at least 32 characters. Config files are scanned for credential-shaped values anywhere, including inside lists such as `hermes_mcp.args`: bearer tokens, `sk-`/`pk-` keys, JWTs, long hex keys, `token=...`-style assignments, and flags such as `--api-key`. Ordinary words such as "token" in a description are allowed.
+- In mailbox mode, the uAgents Agent Inspector endpoints (`/connect`, `/disconnect`) are unauthenticated. Keep the port firewalled and disable the inspector after connecting; see [`agentverse-mailbox.md`](agentverse-mailbox.md).
 
 ## Hermes boundary
 
-The bridge targets the Hermes tools MCP server only:
+The bridge uses Hermes' tools MCP server (`agent.transports.hermes_tools_mcp_server`) and nothing else. That server never serves terminal, file, process, messaging, or approval tools, so the bridge cannot expose them even if a config allowlists them. Of what it does serve (web, browser, vision, image, text-to-speech, skills, kanban), only `skills_list` is public in `examples/hermes-stdio.yaml`. `skills_list` returns the name, description, and category of every installed skill, including skills the user or the agent wrote; remove it from `public_tools` if that is sensitive. `skill_view` (full skill content) is denylisted.
 
-```text
-agent.transports.hermes_tools_mcp_server
-```
+The server module is version-dependent, and Hermes treats it as an internal interface. CI checks it against Hermes 0.21.5 and a pinned `main`; check again before upgrading Hermes.
 
-That module is Hermes-version-dependent. If it is not present in the active Hermes installation, use the fake/local demo tier or wait for Hermes tools-server support before advertising a Hermes-backed production deployment.
+Hermes' conversations and messaging MCP surface (`hermes mcp serve`: conversation reads, message sends, approvals) is out of scope and must never be bridged onto an agent network.
 
-The Hermes conversations/messaging MCP surface (`hermes mcp serve`: conversation reads, message sends, approval handling) is structurally out of scope and must not be bridged across an agent network.
+The `fetchai-bridge` Hermes plugin adds no tools, hooks, or middleware, so it changes nothing the Hermes agent can do on its own. What it does is listed in its [README](../hermes-plugin/fetchai-bridge/README.md).
 
-`skill_view` is not demo-public because it can reveal private skill content. The Hermes-backed demo exposes `skills_list` only.
+## Residual risks
 
-The `fetchai-bridge` Hermes plugin adds no tools, hooks, or middleware, so it changes nothing the Hermes agent can do on its own. It runs the bridge only when a user runs `hermes fetchai-bridge`, without a shell, and strips Hermes' Python variables from the bridge's environment. When it hands the bridge Hermes' interpreter, the tools server still starts with the bridge's environment allowlist, so Hermes settings such as `HERMES_YOLO_MODE` never reach it. Disclosures are in [`native-hermes-plugin.md`](native-hermes-plugin.md).
+- **DNS rebinding and redirects.** URL checks run when a call is validated. The tool resolves the host again when it connects, and may follow redirects, so a name whose answer changes, or a redirect, can still reach a private address. Treat the URL checks as defense in depth and run fetching tools where private addresses are not reachable.
+- **Bare numbers are not hosts.** A string that is only a number, such as `2130706433`, is treated as text, because treating every number as an address would reject ordinary arguments. A tool that turns bare input into a URL must do its own checks.
+- **Replay cache in memory.** A restart clears the cache, so a captured call can be replayed until its issue time is older than `replay_ttl_seconds` (300 seconds by default). Wall-clock jumps on the bridge host have a similar effect.
+- **Same user as Hermes.** The tools server runs as the user who runs the bridge, with that user's access to `HERMES_HOME`. The separate process and filtered environment limit what reaches it; they are not a sandbox.
+- **Dependency audit exceptions.** The audit currently ignores two transitive vulnerabilities until uAgents' dependencies allow a fix:
+  - `PyNaCl==1.6.0` through `uagents`/`cosmpy`: `CVE-2025-69277`.
+  - `ecdsa` through `uagents-core` and `cosmpy`: `PYSEC-2026-1325`, a Minerva timing side channel in python-ecdsa signing and key generation (verification is not affected). python-ecdsa treats side channels as out of scope, so no fixed version exists. The bridge signs every response envelope with its agent key through this library. Remote timing over a network is far noisier than local timing, and the rate limits cap how many signatures a caller can trigger; an attacker who can time signing precisely on the same host is the realistic threat. Run the bridge on a host you control. Remove this exception when uAgents moves to a constant-time signing backend.
 
-## Residual dependency risk
-
-The dependency audit gate currently ignores two transitive vulnerabilities until upstream Fetch/uAgents constraints allow a compatible fix:
-
-- `PyNaCl==1.6.0` via the `uagents/cosmpy` dependency chain: `CVE-2025-69277`.
-- `ecdsa` via `uagents-core` and `cosmpy`: `PYSEC-2026-1325`, a Minerva timing side channel in python-ecdsa signing and key generation (signature verification is not affected). The python-ecdsa project treats side channels as out of scope, so no fixed version exists. The bridge signs every response envelope with its agent key through this library. Remote timing over a network is far noisier than local timing, and the bridge's global and per-sender rate limits cap how many signatures a caller can trigger, but an attacker who can precisely time signing on the same host is the realistic threat. Run the bridge on a host you control, and remove this exception when uagents moves to a constant-time signing backend.
-
-Do not remove the ignore without confirming `uagents`, `cosmpy`, signing, and wallet behavior remain compatible with the fixed dependency. Track this as an upstream dependency exception, not as an application-level acceptance of arbitrary vulnerable code.
+Do not remove an audit exception without confirming that `uagents`, `cosmpy`, signing, and wallet behavior still work with the fixed dependency.
 
 ## Reporting vulnerabilities
 
-Please report suspected vulnerabilities privately. Do not open a public issue containing exploit details, seeds, tokens, mailbox keys, private endpoints, or connection strings.
-
-Preferred disclosure path for this repository:
-
-1. Open a minimal GitHub security advisory if available, or contact the repository owner privately.
-2. Include affected version/commit, reproduction steps, expected impact, and any safe proof of concept.
-3. Redact all secrets as `[REDACTED]`.
-
-Maintainers should acknowledge within 72 hours and publish a patched release or mitigation note once verified.
+See [`SECURITY.md`](../SECURITY.md).

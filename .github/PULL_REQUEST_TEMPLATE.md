@@ -2,35 +2,26 @@
 
 <!-- What changed and why? -->
 
-## Security / safety impact
+## Security and safety
 
 - [ ] No new network exposure by default
 - [ ] Default-deny policy preserved
 - [ ] No secrets or seed material committed
-- [ ] Replay/rate-limit/validation/redaction impact considered
+- [ ] Impact on replay protection, rate limits, argument checks, and redaction considered
 
 ## Verification
 
-Paste the commands you ran and their results:
+<!-- Paste the output of the local gate from CONTRIBUTING.md (ruff, mypy, pytest with coverage, demo, build, pip-audit), and any manual checks. -->
 
 ```text
-uv run python -m hermes_fetch_ai.cli doctor
-uv run python -m hermes_fetch_ai.cli doctor --contamination-scan
-uv run ruff check .
-uv run ruff format --check .
-uv run mypy src tests
-uv run pytest -q --cov
-uv run python -m hermes_fetch_ai.cli demo local
-rm -rf dist build
-uv run python -m build
-uv run python -m twine check dist/*
+
 ```
 
 ## Docs
 
-- [ ] README/docs updated if behavior changed
-- [ ] SECURITY/docs updated if risk changed
-- [ ] CHANGELOG updated
+- [ ] README or docs updated if behavior or configuration changed
+- [ ] `docs/security.md` updated if risk changed
+- [ ] `CHANGELOG.md` updated
 
 ## Release notes
 

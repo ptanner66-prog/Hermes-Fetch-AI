@@ -46,12 +46,16 @@ cp <this-repo>/upstream/hermes-pr/plugin-catalog/fetchai-bridge.yaml plugin-cata
 # Replace REPLACE_WITH_THE_40_CHARACTER_COMMIT_SHA with the SHA from step 1.
 python3 scripts/validate_plugin_catalog.py plugin-catalog/fetchai-bridge.yaml   # needs ruamel.yaml
 git add plugin-catalog/fetchai-bridge.yaml
-git commit -m "feat(plugin-catalog): add fetchai-bridge"
+git -c user.name=ptanner66-prog \
+    -c user.email=236672476+ptanner66-prog@users.noreply.github.com \
+    commit -m "feat(plugin-catalog): add fetchai-bridge"
 ```
 
-- **Author email:** Hermes' contributor check fails on unmapped commit emails. Commit as
-  `236672476+ptanner66-prog@users.noreply.github.com`, or add your email with
-  `python3 scripts/add_contributor.py <email> ptanner66-prog` in the same PR.
+- **Author email:** Hermes' contributor check fails on commit emails it cannot map to a
+  GitHub account. The commit above uses your GitHub noreply address, which the check
+  resolves on its own and which keeps your personal email out of hermes-agent. (The
+  check's other fix, `scripts/add_contributor.py`, adds a file named after your email to
+  the repository.)
 - **PR title and body:** "Ready-to-paste catalog PR" in `docs/upstream-hermes-pr.md`.
 - **CI:** wait for the `plugin-catalog-ci` checks. They clone this repository at the pin
   and run `hermes plugins validate --install-deps` on `hermes-plugin/fetchai-bridge`.
@@ -66,9 +70,10 @@ commit range being adopted, so keep plugin changes small and described in `CHANG
 ## What this submission is not
 
 - No Hermes core changes and no self-updating code.
-- No funds-moving code. The bridge's wallet derives from `UAGENT_SEED`; when Almanac
-  registration is enabled, uAgents' default registration policy may pay its fee from that
-  wallet.
+- No code of its own that moves funds. The bridge's `fetch1...` wallet derives from
+  `UAGENT_SEED`; with Almanac registration enabled (`publish_manifest: true`, off in the
+  example config), uAgents can pay the registration fee from that wallet. The entry, the
+  PR body, and the plugin README disclose this.
 - No conversations/messaging surface; the bridge reaches only the Hermes tools MCP
   server, allowlisted and in a separate process.
 - If a maintainer ever asks for an in-tree optional skill instead, start from the plugin's

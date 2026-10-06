@@ -2,12 +2,12 @@ name: fetchai-bridge
 repo: https://github.com/ptanner66-prog/Hermes-Fetch-AI
 sha: REPLACE_WITH_THE_40_CHARACTER_COMMIT_SHA
 subdir: hermes-plugin/fetchai-bridge
-description: "Lets Fetch.ai uAgents call a default-deny, allowlisted subset of Hermes tools (only skills_list by default) through the hermes-fetch-ai bridge, with replay protection, argument checks and a redacted audit log. Adds `hermes fetchai-bridge`, which runs the separately installed bridge in its own Python environment (nothing is installed into Hermes), and an operate skill. Community project, not affiliated with Fetch.ai. Disclosure — `hermes fetchai-bridge` runs the hermes-fetch-ai executable (no shell) with the user's environment, including UAGENT_SEED from $HERMES_HOME/.env; `serve` is a long-running process that listens on the configured port, starts Hermes' tools MCP server as a child process with an allowlisted environment, and with publish_manifest: false (the example config) makes no outbound calls of its own beyond looking up a remote caller's endpoint in the Almanac (Agentverse API or Fetch ledger) to reply; with publish_manifest: true or mailbox mode it also registers with the Almanac and Agentverse; no telemetry."
+description: "Lets Fetch.ai uAgents call a default-deny, allowlisted subset of Hermes tools (only skills_list by default) through the hermes-fetch-ai bridge, with replay protection, argument checks and a redacted audit log. Adds `hermes fetchai-bridge`, which runs the separately installed bridge in its own Python environment (nothing is installed into Hermes), and an operate skill; no tools, hooks or middleware. Community project, not affiliated with Fetch.ai. Disclosure — `hermes fetchai-bridge` runs the hermes-fetch-ai executable (no shell) with an allowlisted environment that includes UAGENT_SEED from $HERMES_HOME/.env but not model-provider keys; `serve` is a long-running process that listens on the configured port on all network interfaces and starts Hermes' tools MCP server as a child process with a short environment allowlist; remote agents allowed skills_list see every installed skill's name, description and category; with publish_manifest: false (the example config) the bridge makes no outbound calls of its own beyond looking up a remote caller's endpoint in the Almanac (Agentverse API or Fetch ledger) to reply; with publish_manifest: true or mailbox mode it also registers with the Almanac and Agentverse, and Almanac registration can pay fees from the wallet derived from UAGENT_SEED; no telemetry."
 maintainer: ptanner66-prog
 tier: community
 category: tools
 requires_hermes: ">=0.21.5"
-docs_url: https://github.com/ptanner66-prog/Hermes-Fetch-AI/blob/main/docs/native-hermes-plugin.md
+docs_url: https://github.com/ptanner66-prog/Hermes-Fetch-AI/blob/main/docs/hermes-plugin.md
 version: "1.0.0"
 platforms: []
 capabilities:
