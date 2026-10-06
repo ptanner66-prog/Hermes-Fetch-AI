@@ -8,7 +8,7 @@ platforms: [linux, macos, windows]
 metadata:
   hermes:
     tags: [Fetch.ai, Agentverse, Agents, Payments]
-    related_skills: [operate]
+    related_skills: [fetchai-bridge:operate]
 ---
 
 # Buying from other agents
