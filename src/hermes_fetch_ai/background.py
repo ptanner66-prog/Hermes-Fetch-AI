@@ -304,7 +304,7 @@ def follow(path: Path, out: Callable[[str], None] = print, *, poll: float = 0.5)
         f.seek(0, os.SEEK_END)
         while True:
             line = f.readline()
-            if line:
-                out(line.decode("utf-8", errors="replace").rstrip("\n"))
+            if line:  # on Windows, lines end with \r\n
+                out(line.decode("utf-8", errors="replace").rstrip("\r\n"))
             else:
                 time.sleep(poll)

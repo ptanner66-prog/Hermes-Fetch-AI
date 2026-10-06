@@ -234,8 +234,8 @@ def test_follow_prints_new_lines_as_they_come(tmp_path):
 
     def write() -> None:
         time.sleep(0.2)
-        with log.open("a") as f:
-            f.write("one\ntwo\n")
+        with log.open("ab") as f:
+            f.write(b"one\r\ntwo\n")  # a log written on Windows ends lines with \r\n
 
     threading.Thread(target=write).start()
     with pytest.raises(KeyboardInterrupt):

@@ -398,6 +398,33 @@ def test_the_model_server_probe_and_the_port_check():
     assert port_is_free(port)
 
 
+def test_a_port_another_program_holds_on_127_0_0_1_is_not_free(monkeypatch):
+    # macOS and Windows let the agent listen on every interface beside a program on
+    # 127.0.0.1, which would then get this computer's own connections to the agent.
+    from hermes_fetch_ai import setup_wizard
+
+    tried = []
+
+    class Socket:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *exc):
+            return False
+
+        def setsockopt(self, *args):
+            pass
+
+        def bind(self, address):
+            tried.append(address)
+            if address[0] == "127.0.0.1":
+                raise OSError("address in use")
+
+    monkeypatch.setattr(setup_wizard.socket, "socket", lambda *args: Socket())
+    assert not setup_wizard.port_is_free(8001)
+    assert tried == [("", 8001), ("127.0.0.1", 8001)]
+
+
 def test_a_busy_port_moves_to_the_next_free_one(tmp_path, monkeypatch):
     asker = ScriptedAsker({"sell": False, "buy": False})
     w = Wizard(

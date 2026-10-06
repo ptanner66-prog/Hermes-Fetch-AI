@@ -319,14 +319,18 @@ def agent_name(text: str) -> str:
 
 
 def port_is_free(port: int) -> bool:
-    """True if the agent could listen on ``port`` (on every interface, as it does)."""
-    with socket.socket() as s:
-        if os.name != "nt":  # as the agent's server does: a port just let go of is free
-            s.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
-        try:
-            s.bind(("", port))
-        except OSError:
-            return False
+    """True if the agent could listen on ``port`` (on every interface, as it does) with
+    nothing else answering there."""
+    # macOS and Windows let a program listen on every interface while another listens on
+    # 127.0.0.1, which then gets this computer's own connections: so try that address too.
+    for host in ("", "127.0.0.1"):
+        with socket.socket() as s:
+            if os.name != "nt":  # as the agent's server does: a port just let go of is free
+                s.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+            try:
+                s.bind((host, port))
+            except OSError:
+                return False
     return True
 
 
