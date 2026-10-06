@@ -170,6 +170,10 @@ Deployment notes, including a systemd unit, are in [`docs/production.md`](docs/p
 - [ ] Verify the Agentverse mailbox tier and Almanac registration end to end on testnet.
 - [ ] Support mcp 2.x and Python 3.13+, so the in-process mode also works with current Hermes.
 - [ ] Drop the PyNaCl and ecdsa dependency-audit exceptions once upstream allows (see [`docs/security.md`](docs/security.md)).
+- [ ] Sell services you define to other agents for FET, with each payment verified on the ledger (testnet).
+- [ ] Reach Hermes from ASI:One in plain language, with ASI:One's testnet payment card.
+- [ ] Let Hermes find and pay other agents, asking you before every payment.
+- [ ] Guided setup (`hermes fetchai-bridge setup`) and plain-language docs.
 
 ## Documentation
 
@@ -184,6 +188,7 @@ Deployment notes, including a systemd unit, are in [`docs/production.md`](docs/p
 | [`docs/agentverse-mailbox.md`](docs/agentverse-mailbox.md) | Manual Agentverse mailbox setup (unverified) |
 | [`docs/hermes-plugin.md`](docs/hermes-plugin.md) | The `fetchai-bridge` Hermes plugin: install, settings, how it runs the bridge |
 | [`docs/upstream-hermes-pr.md`](docs/upstream-hermes-pr.md) | Plan and ready-to-paste text for the Hermes plugin catalog |
+| [`docs/agent-economy.md`](docs/agent-economy.md) | Design and status of selling and buying services between agents (in development) |
 
 ## Development
 
@@ -193,4 +198,4 @@ Deployment notes, including a systemd unit, are in [`docs/production.md`](docs/p
 
 ## Scope
 
-This package is a connection layer. It is not an agent framework, and it does not implement commerce, exchange, or wallet features beyond uAgents' seed-derived identity.
+This package is a connection layer, not an agent framework. It is growing into a way for Hermes to take part in Fetch.ai's agent economy: selling services you define to other agents and to ASI:One users, and paying other agents with your approval. Payments run on Fetch's testnet only (test tokens with no value) until a security review; see the [design](docs/agent-economy.md) and the roadmap.

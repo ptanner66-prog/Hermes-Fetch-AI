@@ -2,6 +2,17 @@
 
 All notable changes are documented here. The project follows [semantic versioning](https://semver.org/).
 
+## Unreleased (after 1.0.0)
+
+### Changed
+
+- The project's scope now includes Fetch.ai's agent economy on testnet: selling services to other agents and ASI:One users, and paying other agents with the owner's approval. The design and its threat model are in `docs/architecture.md` (decision 9) and `docs/security.md`.
+- uAgents 0.25.5 and uagents-core 0.4.9, the versions Fetch tests its examples with. uAgents now resolves testnet addresses without a network prefix.
+
+### Tests
+
+- The default test run fails any test that connects outside this machine, even when the code under test hides the error. Live tests opt out with the `network` marker.
+
 ## 1.0.0 - Unreleased
 
 The first release. To release, set the date here and push the `v1.0.0` tag.

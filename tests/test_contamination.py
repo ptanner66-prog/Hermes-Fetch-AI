@@ -1,8 +1,8 @@
 """The public tree stays on topic.
 
-The public docs, code, and examples must not mention unrelated projects, and
-must not describe commerce features (marketplaces, billing, payments), which
-are out of scope for the bridge. This is a repository check, so it lives in
+The public docs, code, and examples must not mention the maintainer's
+unrelated or private projects; services built on them are configured
+privately, never committed here. This is a repository check, so it lives in
 the test suite rather than in the shipped CLI.
 """
 
@@ -24,9 +24,6 @@ FORBIDDEN = [
     "private project",
     "domain-specific guardrail",
     "legal-tech",
-    "marketplace",
-    "billing",
-    "payment",
 ]
 
 
