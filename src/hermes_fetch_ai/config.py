@@ -1,16 +1,21 @@
 from __future__ import annotations
 
+import ipaddress
 import os
 import re
 import secrets
+import shutil
 from pathlib import Path
-from typing import Literal
+from typing import Annotated, Literal
+from urllib.parse import urlsplit
 
+import bech32
 import yaml
 from pydantic import BaseModel, ConfigDict, Field, ValidationError, field_validator, model_validator
 
 from ._redaction import SECRET_WORDS
-from .audit import default_audit_path
+from .audit import default_audit_path, default_state_dir
+from .money import MAX_PRICE_BASE, format_fet, parse_fet
 from .tool_names import validate_tool_name
 
 MIN_SEED_LENGTH = 32
@@ -118,6 +123,157 @@ class LoggingConfig(BaseModel):
     audit_path: str | None = None
 
 
+DEFAULT_LEDGER_URL = "https://rest-dorado.fetch.ai"
+_SERVICE_NAME_RE = re.compile(r"[a-z0-9][a-z0-9_-]{0,39}")
+_ENV_NAME_RE = re.compile(r"[A-Za-z_][A-Za-z0-9_]{0,127}")
+
+
+def is_fetch_address(value: str) -> bool:
+    """True for a well-formed ``fetch1...`` wallet address."""
+    hrp, data = bech32.bech32_decode(value)
+    if hrp != "fetch" or data is None:
+        return False
+    decoded = bech32.convertbits(data, 5, 8, False)
+    return decoded is not None and len(decoded) == 20
+
+
+def _is_loopback_host(host: str) -> bool:
+    if host == "localhost":
+        return True
+    try:
+        return ipaddress.ip_address(host).is_loopback
+    except ValueError:
+        return False
+
+
+class PaymentsConfig(BaseModel):
+    """How the bridge is paid. Fetch's testnet only: test FET has no value."""
+
+    model_config = ConfigDict(extra="forbid")
+    enabled: bool = False
+    network: str = "testnet"
+    chain_id: Literal["dorado-1"] = "dorado-1"
+    denom: Literal["atestfet"] = "atestfet"
+    ledger_url: str = DEFAULT_LEDGER_URL
+    ledger_timeout_seconds: float = Field(default=8.0, gt=0, le=60)
+    # Where buyers pay. Unset means the agent's own wallet (from UAGENT_SEED).
+    payout_address: str | None = None
+    state_dir: str | None = None
+    quote_ttl_seconds: int = Field(default=600, ge=60, le=86_400)
+    redeem_window_seconds: int = Field(default=86_400, ge=600, le=30 * 86_400)
+    max_attempts: int = Field(default=3, ge=1, le=10)
+    max_verifications_per_minute_per_sender: int = Field(default=6, ge=1)
+    max_global_verifications_per_minute: int = Field(default=60, ge=1)
+
+    @field_validator("network")
+    @classmethod
+    def _testnet_only(cls, value: str) -> str:
+        if value != "testnet":
+            raise ValueError(
+                "payments run on Fetch's testnet only; mainnet is locked until a security review"
+            )
+        return value
+
+    @field_validator("ledger_url")
+    @classmethod
+    def _ledger_url(cls, value: str) -> str:
+        parts = urlsplit(value)
+        host = parts.hostname or ""
+        secure = parts.scheme == "https" or (parts.scheme == "http" and _is_loopback_host(host))
+        if not secure or not host or parts.username or parts.password or parts.query:
+            raise ValueError(
+                "ledger_url must be an https:// address (http:// only on this machine), "
+                "without credentials or a query"
+            )
+        return value.rstrip("/")
+
+    @field_validator("payout_address")
+    @classmethod
+    def _payout_address(cls, value: str | None) -> str | None:
+        if value is not None and not is_fetch_address(value):
+            raise ValueError("payout_address must be a fetch1... wallet address")
+        return value
+
+    @property
+    def state_path(self) -> Path:
+        return Path(self.state_dir).expanduser() if self.state_dir else default_state_dir()
+
+
+class ServiceInputConfig(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    max_chars: int = Field(default=4000, ge=1, le=200_000)
+    # Turn off for services whose requests are code or text that merely mention
+    # local addresses (a code review, for example) and that never fetch URLs.
+    check_urls: bool = True
+
+
+class EchoRunnerConfig(BaseModel):
+    """Answers with the request itself; for demos and tests."""
+
+    model_config = ConfigDict(extra="forbid")
+    type: Literal["echo"] = "echo"
+
+
+class CommandRunnerConfig(BaseModel):
+    """Runs a program on this machine: the request as JSON on stdin, the answer on stdout."""
+
+    model_config = ConfigDict(extra="forbid")
+    type: Literal["command"]
+    argv: list[str] = Field(min_length=1)
+    timeout_seconds: float = Field(default=300.0, gt=0, le=3600)
+    max_output_chars: int = Field(default=20_000, ge=1, le=1_000_000)
+    # Names of environment variables the program may see (values are never in config).
+    pass_env: list[str] = Field(default_factory=list)
+
+    @field_validator("argv")
+    @classmethod
+    def _absolute_program(cls, argv: list[str]) -> list[str]:
+        if not Path(argv[0]).is_absolute():
+            found = shutil.which(argv[0])
+            hint = f", such as {found}" if found else ""
+            raise ValueError(f"the program (argv[0]) must be an absolute path{hint}")
+        if any("\x00" in arg for arg in argv):
+            raise ValueError("arguments must not contain NUL characters")
+        return argv
+
+    @field_validator("pass_env")
+    @classmethod
+    def _env_names(cls, names: list[str]) -> list[str]:
+        for name in names:
+            if not _ENV_NAME_RE.fullmatch(name):
+                raise ValueError(f"{name!r} is not an environment variable name")
+        return names
+
+
+RunnerConfig = Annotated[EchoRunnerConfig | CommandRunnerConfig, Field(discriminator="type")]
+
+
+class ServiceConfig(BaseModel):
+    """A service this agent sells, offered to other agents as the tool ``service.<name>``."""
+
+    model_config = ConfigDict(extra="forbid")
+    title: str = Field(min_length=1, max_length=80)
+    description: str = Field(min_length=1, max_length=500)
+    # Testnet FET per request, as a string ("0.05"); "0" is free.
+    price: str = "0"
+    input: ServiceInputConfig = Field(default_factory=ServiceInputConfig)
+    runner: RunnerConfig
+    # Appended to every answer, e.g. "A first draft for review by a professional."
+    disclaimer: str | None = Field(default=None, max_length=500)
+    max_runs_per_day: int = Field(default=200, ge=1, le=100_000)
+
+    @field_validator("price")
+    @classmethod
+    def _price(cls, value: str) -> str:
+        if parse_fet(value) > MAX_PRICE_BASE:
+            raise ValueError(f"price must be at most {format_fet(MAX_PRICE_BASE)} FET")
+        return value
+
+    @property
+    def price_base(self) -> int:
+        return parse_fet(self.price)
+
+
 class ChatConfig(BaseModel):
     model_config = ConfigDict(extra="forbid")
     enable_chat: bool = False
@@ -138,6 +294,8 @@ class BridgeConfig(BaseModel):
     policy: PolicyConfig = Field(default_factory=PolicyConfig)
     logging: LoggingConfig = Field(default_factory=LoggingConfig)
     chat: ChatConfig = Field(default_factory=ChatConfig)
+    payments: PaymentsConfig = Field(default_factory=PaymentsConfig)
+    services: dict[str, ServiceConfig] = Field(default_factory=dict)
 
     @model_validator(mode="after")
     def validate_cross_fields(self) -> BridgeConfig:
@@ -154,6 +312,25 @@ class BridgeConfig(BaseModel):
             )
         if self.agent.mode == "mailbox" and self.agent.dev_random_seed:
             raise ValueError("mailbox mode requires a stable UAGENT_SEED")
+        for name in self.services:
+            if not _SERVICE_NAME_RE.fullmatch(name):
+                raise ValueError(
+                    f"service name {name!r}: use lowercase letters, digits, '_' and '-' "
+                    "(at most 40 characters)"
+                )
+        if self.services and not self.payments.enabled:
+            raise ValueError("services need payments.enabled: true")
+        if self.payments.enabled and self.agent.network != "testnet":
+            raise ValueError("payments run on Fetch's testnet only; set agent.network: testnet")
+        if (
+            self.payments.enabled
+            and self.agent.dev_random_seed
+            and not self.payments.payout_address
+        ):
+            raise ValueError(
+                "with agent.dev_random_seed: true the agent's wallet changes on every start; "
+                "set payments.payout_address or use a stable UAGENT_SEED"
+            )
         if self.agent.seed:
             raise ValueError("agent.seed is not allowed in config; use UAGENT_SEED")
         if not self.agent.dev_random_seed:
@@ -194,23 +371,26 @@ def _looks_like_secret(value: str) -> bool:
     return any(pattern.search(value) for pattern in _SECRET_VALUE_PATTERNS)
 
 
+# Sections keyed by names chosen elsewhere: agent addresses (random strings that
+# can contain a word such as "seed") and service names.
+_NAME_KEYED_SECTIONS = frozenset({"allowed_senders", "services"})
+
+
 def _scan_secret_values(
-    obj: object, *, under_secret_key: bool = False, keys_are_addresses: bool = False
+    obj: object, *, under_secret_key: bool = False, keys_are_names: bool = False
 ) -> None:
     if isinstance(obj, dict):
         for k, v in obj.items():
             key = str(k)
             if _looks_like_secret(key):
                 raise ValueError(_SECRET_MESSAGE)
-            # Agent addresses (keys of policy.allowed_senders) are random strings
-            # that can contain a word such as "seed", so the key-name check skips them.
             secret_key = (
-                not keys_are_addresses
+                not keys_are_names
                 and key not in _NON_SECRET_KEYS
                 and bool(SECRET_KEY_RE.search(key))
             )
             _scan_secret_values(
-                v, under_secret_key=secret_key, keys_are_addresses=key == "allowed_senders"
+                v, under_secret_key=secret_key, keys_are_names=key in _NAME_KEYED_SECTIONS
             )
     elif isinstance(obj, list):
         for v in obj:

@@ -4,7 +4,8 @@ import asyncio
 import contextlib
 import signal
 import uuid
-from collections.abc import Coroutine
+from collections.abc import Callable, Coroutine
+from pathlib import Path
 from typing import Any, TypeVar, cast
 
 import uagents.agent as uagents_agent
@@ -15,8 +16,14 @@ from uagents_adapter.mcp.protocol import CallTool, CallToolResponse, ListTools, 
 from .audit import AuditWriter
 from .config import BridgeConfig
 from .direct_protocol import build_protocol, replay_args
+from .ledger import LcdLedgerReader, LedgerReader
 from .mcp_shim import HermesMCPClientShim
+from .quotes import quote_key
 from .registration_policies import NoopRegistrationPolicy
+from .seller import Seller
+from .services import ServiceDesk, ServiceRunner
+from .store import Store
+from .wallet import agent_address, wallet_address
 
 T = TypeVar("T", bound=Model)
 
@@ -47,14 +54,48 @@ def _no_almanac_contract(network: str = "testnet") -> None:
     return None
 
 
-def build_agent(cfg: BridgeConfig, shim: HermesMCPClientShim | None = None) -> Agent:
+def payment_store_path(cfg: BridgeConfig, seed: str) -> Path:
+    """Where this agent's payment records live: one directory per agent address."""
+    return cfg.payments.state_path / agent_address(seed) / "payments.sqlite3"
+
+
+def build_service_desk(
+    cfg: BridgeConfig,
+    seed: str,
+    *,
+    ledger_factory: Callable[[], LedgerReader] | None = None,
+    runners: dict[str, ServiceRunner] | None = None,
+) -> ServiceDesk:
+    """The seller side of a bridge with ``payments.enabled``: services, payments, records."""
+    payments = cfg.payments
+
+    def lcd() -> LedgerReader:
+        return LcdLedgerReader(payments.ledger_url, payments.ledger_timeout_seconds)
+
+    seller = Seller(
+        payments=payments,
+        store=Store.open(payment_store_path(cfg, seed)),
+        key=quote_key(seed),
+        payout=payments.payout_address or wallet_address(seed),
+        ledger_factory=ledger_factory or lcd,
+    )
+    return ServiceDesk(cfg, seller, runners)
+
+
+def build_agent(
+    cfg: BridgeConfig,
+    shim: HermesMCPClientShim | None = None,
+    *,
+    seed: str | None = None,
+    desk: ServiceDesk | None = None,
+) -> Agent:
     if cfg.chat.enable_chat:
         raise NotImplementedError("chat is out of v1 scope")
 
     kwargs: dict[str, Any] = {
         "name": cfg.agent.name,
         "port": cfg.agent.port,
-        "seed": cfg.effective_seed(),
+        "seed": seed or cfg.effective_seed(),
         "endpoint": cfg.agent.endpoint,
         "agentverse": None,
         "mailbox": cfg.agent.mode == "mailbox",
@@ -76,7 +117,7 @@ def build_agent(cfg: BridgeConfig, shim: HermesMCPClientShim | None = None) -> A
         )
 
     agent.include(
-        build_protocol(shim or HermesMCPClientShim(cfg), cfg, AuditWriter(cfg.audit_path)),
+        build_protocol(shim or HermesMCPClientShim(cfg), cfg, AuditWriter(cfg.audit_path), desk),
         publish_manifest=cfg.agent.publish_manifest,
     )
     return agent
@@ -249,9 +290,15 @@ def run_bridge(cfg: BridgeConfig) -> None:
 
     async def _main() -> None:
         _install_stop_handlers(asyncio.get_running_loop(), stop)
+        seed = cfg.effective_seed()
         async with HermesMCPClientShim(cfg) as shim:
-            agent = build_agent(cfg, shim)
-            await _run_agent_until_stop(agent, stop)
+            desk = build_service_desk(cfg, seed) if cfg.payments.enabled else None
+            try:
+                agent = build_agent(cfg, shim, seed=seed, desk=desk)
+                await _run_agent_until_stop(agent, stop)
+            finally:
+                if desk is not None:
+                    await desk.aclose()
 
     try:
         with contextlib.suppress(KeyboardInterrupt, asyncio.CancelledError):

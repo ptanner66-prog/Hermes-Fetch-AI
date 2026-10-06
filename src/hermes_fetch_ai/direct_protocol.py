@@ -31,11 +31,14 @@ from .policy import (
     replay_retention_seconds,
     visible_tools,
 )
+from .seller import PaymentProof
+from .services import ServiceDesk
 from .tool_names import audit_tool_name, validate_tool_name
 
 _REPLAY_META_KEY = "_hermes_fetch_ai"
 _REQUEST_ID_RE = re.compile(r"^[A-Za-z0-9_.:-]{8,128}$")
-_ALLOWED_REPLAY_META_KEYS = {"request_id", "issued_at_ms"}
+_ALLOWED_REPLAY_META_KEYS = {"request_id", "issued_at_ms", "payment"}
+_MAX_PROOF_CHARS = 128
 BACKEND_UNAVAILABLE = "backend unavailable"
 
 logger = get_logger("hermes_fetch_ai")
@@ -45,30 +48,53 @@ def _now_ms() -> int:
     return int(time.time() * 1000)
 
 
-def replay_args(args: dict[str, Any], request_id: str | None = None) -> dict[str, Any]:
+def replay_args(
+    args: dict[str, Any],
+    request_id: str | None = None,
+    *,
+    payment: dict[str, str] | None = None,
+) -> dict[str, Any]:
     """Return tool args with the bridge's replay-protection metadata attached.
 
     The uAgents MCP `CallTool` model has only `tool` and `args`, so v1 carries
     bridge metadata under a reserved args key. The bridge strips this key before
-    JSON-schema validation and before invoking the Hermes tool.
+    JSON-schema validation and before invoking the Hermes tool. A paid call
+    adds ``payment={"reference": ..., "tx_hash": ...}``.
     """
-    return {
-        **args,
-        _REPLAY_META_KEY: {
-            "request_id": request_id or str(uuid.uuid4()),
-            "issued_at_ms": _now_ms(),
-        },
+    meta: dict[str, Any] = {
+        "request_id": request_id or str(uuid.uuid4()),
+        "issued_at_ms": _now_ms(),
     }
+    if payment is not None:
+        meta["payment"] = payment
+    return {**args, _REPLAY_META_KEY: meta}
+
+
+def _payment_proof(meta: dict[str, Any]) -> PaymentProof | None:
+    payment = meta.get("payment")
+    if payment is None:
+        return None
+    if (
+        not isinstance(payment, dict)
+        or set(payment) != {"reference", "tx_hash"}
+        or not all(
+            isinstance(value, str) and 0 < len(value) <= _MAX_PROOF_CHARS
+            for value in payment.values()
+        )
+    ):
+        raise ValueError("invalid payment proof")
+    return PaymentProof(reference=payment["reference"], tx_hash=payment["tx_hash"])
 
 
 def _split_replay_metadata(
     sender: str, args: dict[str, Any], cfg: BridgeConfig
-) -> tuple[dict[str, Any], str | None]:
-    """Return the tool's own args and the call's replay fingerprint.
+) -> tuple[dict[str, Any], str | None, PaymentProof | None]:
+    """Return the tool's own args, the call's replay fingerprint, and any payment proof.
 
     The fingerprint is None when the call has no replay metadata, which is only
     allowed with ``require_replay_metadata: false``. Such calls cannot be told
-    apart from deliberate repeats, so they get no replay protection.
+    apart from deliberate repeats, so they get no replay protection, and
+    cannot carry a payment.
     """
     if not isinstance(args, dict):
         raise TypeError("tool args must be an object")
@@ -78,7 +104,7 @@ def _split_replay_metadata(
     if meta is None:
         if cfg.policy.require_replay_metadata:
             raise ValueError("missing replay metadata")
-        return clean_args, None
+        return clean_args, None, None
 
     if not isinstance(meta, dict) or set(meta) - _ALLOWED_REPLAY_META_KEYS:
         raise ValueError("invalid replay metadata")
@@ -98,8 +124,9 @@ def _split_replay_metadata(
     if -age_ms > cfg.policy.max_replay_clock_skew_seconds * 1000:
         raise ValueError("future replay metadata")
 
+    proof = _payment_proof(meta)
     material = json.dumps({"sender": sender, "request_id": request_id}, sort_keys=True)
-    return clean_args, hashlib.sha256(material.encode("utf-8")).hexdigest()
+    return clean_args, hashlib.sha256(material.encode("utf-8")).hexdigest(), proof
 
 
 async def handle_list_tools(
@@ -109,6 +136,7 @@ async def handle_list_tools(
     audit: AuditWriter,
     *,
     state: PolicyState,
+    desk: ServiceDesk | None = None,
 ) -> ListToolsResponse:
     trace_id = str(uuid.uuid4())
     start = time.perf_counter()
@@ -148,6 +176,8 @@ async def handle_list_tools(
         )
         return ListToolsResponse(tools=[], error=BACKEND_UNAVAILABLE)
     filtered = visible_tools(sender, tools, cfg.policy)
+    if desk is not None:
+        filtered += desk.tools(sender)
     raw = json.dumps(filtered).encode("utf-8")
     truncated = False
     reason = "ok"
@@ -178,6 +208,7 @@ async def handle_call_tool(
     audit: AuditWriter,
     *,
     state: PolicyState,
+    desk: ServiceDesk | None = None,
 ) -> CallToolResponse:
     trace_id = str(uuid.uuid4())
     start = time.perf_counter()
@@ -186,6 +217,7 @@ async def handle_call_tool(
     reason = ""
     output_bytes = 0
     truncated = False
+    extra: dict[str, Any] = {}
     try:
         ok, reason = consume_call_rate(sender, cfg.policy, state)
         if not ok:
@@ -198,11 +230,44 @@ async def handle_call_tool(
         if args_bytes > cfg.policy.max_args_bytes:
             reason = "args exceed max_args_bytes"
             return CallToolResponse(result=None, error=reason)
+        if desk is not None and desk.has(tool_name):
+            # Services are offered to every sender (paid ones after payment);
+            # the denylist still wins.
+            if tool_name in cfg.policy.denied_tools:
+                reason = "tool denied"
+                return CallToolResponse(result=None, error=reason)
+            try:
+                clean_args, fingerprint, proof = _split_replay_metadata(sender, msg.args, cfg)
+            except (TypeError, ValueError) as exc:
+                reason = str(exc)
+                return CallToolResponse(result=None, error=reason)
+
+            def remember() -> tuple[bool, str]:
+                if fingerprint is None:
+                    return True, "ok"
+                return state.replays.remember(
+                    fingerprint,
+                    replay_retention_seconds(cfg.policy),
+                    cfg.policy.max_replay_entries,
+                )
+
+            outcome = await desk.call(
+                sender=sender,
+                tool_name=tool_name,
+                args=clean_args,
+                proof=proof,
+                remember_replay=remember,
+            )
+            decision, reason = outcome.decision, outcome.reason
+            output_bytes, truncated, extra = outcome.output_bytes, outcome.truncated, outcome.audit
+            if outcome.is_error:
+                return CallToolResponse(result=None, error=outcome.text)
+            return CallToolResponse(result=outcome.text, error=None)
         ok, reason = authorize(sender, tool_name, cfg.policy)
         if not ok:
             return CallToolResponse(result=None, error=reason)
         try:
-            clean_args, replay_fingerprint = _split_replay_metadata(sender, msg.args, cfg)
+            clean_args, replay_fingerprint, _ = _split_replay_metadata(sender, msg.args, cfg)
         except (TypeError, ValueError) as exc:
             reason = str(exc)
             return CallToolResponse(result=None, error=reason)
@@ -268,6 +333,7 @@ async def handle_call_tool(
             truncated=truncated,
             mode=cfg.hermes_mcp.mode,
             send_status="before_send",
+            **extra,
         )
 
 
@@ -313,19 +379,21 @@ async def _send_with_audit(
     )
 
 
-def build_protocol(shim: ToolBackend, cfg: BridgeConfig, audit: AuditWriter) -> Protocol:
+def build_protocol(
+    shim: ToolBackend, cfg: BridgeConfig, audit: AuditWriter, desk: ServiceDesk | None = None
+) -> Protocol:
     """The bridge's MCP protocol, with its own rate-limit and replay state."""
     proto = Protocol(spec=mcp_protocol_spec, role="server")
     state = PolicyState()
 
     @proto.on_message(model=ListTools)
     async def _list(ctx: Context, sender: str, msg: ListTools) -> None:
-        resp = await handle_list_tools(sender, shim, cfg, audit, state=state)
+        resp = await handle_list_tools(sender, shim, cfg, audit, state=state, desk=desk)
         await _send_with_audit(ctx, sender, resp, audit, cfg, "list_tools")
 
     @proto.on_message(model=CallTool)
     async def _call(ctx: Context, sender: str, msg: CallTool) -> None:
-        resp = await handle_call_tool(sender, msg, shim, cfg, audit, state=state)
+        resp = await handle_call_tool(sender, msg, shim, cfg, audit, state=state, desk=desk)
         await _send_with_audit(
             ctx, sender, resp, audit, cfg, "call_tool", audit_tool_name(msg.tool)
         )

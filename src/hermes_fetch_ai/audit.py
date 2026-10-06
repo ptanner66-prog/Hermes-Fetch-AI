@@ -26,6 +26,12 @@ AUDIT_FIELDS = {
     "error_class",
     "mode",
     "send_status",
+    # Paid services: short forms only, the full values live in the payment store.
+    "payment",
+    "credit",
+    "amount_base",
+    "tx_short",
+    "payer_short",
 }
 
 
@@ -65,9 +71,14 @@ class AuditWriter:
             return sum(1 for _ in f)
 
 
-def default_audit_path() -> Path:
+def default_state_dir() -> Path:
+    """Where the bridge keeps its state (audit log, payment records) by default."""
     if os.name == "nt":
         base = os.environ.get("LOCALAPPDATA") or str(Path.home() / "AppData" / "Local")
-        return Path(base) / "HermesFetchAI" / "audit.jsonl"
+        return Path(base) / "HermesFetchAI"
     base = os.environ.get("XDG_STATE_HOME") or str(Path.home() / ".local" / "state")
-    return Path(base) / "hermes-fetch-ai" / "audit.jsonl"
+    return Path(base) / "hermes-fetch-ai"
+
+
+def default_audit_path() -> Path:
+    return default_state_dir() / "audit.jsonl"
