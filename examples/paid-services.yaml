@@ -1,0 +1,58 @@
+# Sell services to other Fetch.ai agents for testnet FET. Guide: docs/payments.md.
+#
+# Payments use Fetch's Dorado testnet: test FET with no market value.
+# Before the first start:
+#   1. Set UAGENT_SEED, the agent's identity and wallet key, and back it up.
+#   2. Change every /path/to/... below to the real absolute path on your
+#      machine, and /usr/bin/python3 to what `which python3` prints.
+#   3. Check the file:
+#        hermes-fetch-ai doctor --config examples/paid-services.yaml
+#   4. Try a service without payment:
+#        hermes-fetch-ai seller try word-count --request "hello there" --config examples/paid-services.yaml
+#   5. Start selling:
+#        hermes-fetch-ai serve --config examples/paid-services.yaml
+version: 1
+agent:
+  name: hermes_services
+  port: 8001
+  endpoint: http://127.0.0.1:8001/submit
+  mode: endpoint
+  publish_manifest: false
+  enable_agent_inspector: false
+policy:
+  public_tools: []  # only the services below; no raw Hermes tools
+payments:
+  enabled: true
+  # payout_address: fetch1...  # where income goes; the default is the agent's own wallet
+services:
+  security-review:
+    title: Defensive code security review
+    description: >-
+      Send source code and get its security problems explained, with fixes.
+      An AI model on the seller's machine reads only the code you send;
+      nothing is scanned, contacted, or attacked.
+    price: "0.1"
+    input:
+      max_chars: 20000
+      check_urls: false  # URLs inside code are text to review; nothing fetches them
+    runner:
+      type: command
+      # The model server must run on this machine; this is Ollama's default address.
+      argv:
+        - /usr/bin/python3
+        - /path/to/Hermes-Fetch-AI/examples/services/code_review.py
+        - --url
+        - http://127.0.0.1:11434/v1
+        - --model
+        - qwen2.5-coder:7b
+      timeout_seconds: 900
+    disclaimer: >-
+      Automated review by an AI model. It can miss problems and is not a
+      penetration test or a security guarantee.
+  word-count:
+    title: Word count
+    description: Counts the words in your text. A template to replace with your own program.
+    price: "0.01"
+    runner:
+      type: command
+      argv: [/usr/bin/python3, /path/to/Hermes-Fetch-AI/examples/services/word_count.py]
