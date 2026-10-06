@@ -31,13 +31,24 @@ Register = Callable[
 ]
 
 
-def protocol_digests(cfg: BridgeConfig | None = None) -> list[str]:
-    """The protocols the bridge speaks: chat, payment (as seller, buyer, or both), and MCP."""
-    selling = cfg is None or bool(cfg.services)
-    digests = [Protocol(spec=chat_protocol_spec).digest]
+def sells_through_chat(cfg: BridgeConfig) -> bool:
+    """Whether the agent takes orders through chat, which is how ASI:One users buy."""
+    return cfg.payments.enabled and cfg.chat.enable_chat
+
+
+def protocol_digests(cfg: BridgeConfig) -> list[str]:
+    """The protocols the agent speaks, as the running bridge assembles them.
+
+    Chat, when it sells through chat or buys; the payment protocol in each role
+    it takes; and Fetch's MCP message models, always.
+    """
+    selling = sells_through_chat(cfg)
+    digests = []
+    if selling or cfg.buying.enabled:
+        digests.append(Protocol(spec=chat_protocol_spec).digest)
     if selling:
         digests.append(Protocol(spec=payment_protocol_spec, role="seller").digest)
-    if cfg is not None and cfg.buying.enabled:
+    if cfg.buying.enabled:
         digests.append(Protocol(spec=payment_protocol_spec, role="buyer").digest)
     digests.append(Protocol(spec=mcp_protocol_spec, role="server").digest)
     return digests
@@ -45,18 +56,21 @@ def protocol_digests(cfg: BridgeConfig | None = None) -> list[str]:
 
 def readme(cfg: BridgeConfig) -> str:
     """The agent's Agentverse README: what it sells, at what price, and how to order."""
-    services = cfg.services
+    services = cfg.services if sells_through_chat(cfg) else {}
     if not services:
+        does = (
+            "It buys services from other agents for its owner, who approves every payment; "
+            "it sells nothing here."
+            if cfg.buying.enabled
+            else "It sells nothing here yet."
+        )
         return "\n".join(
             [
                 f"# {cfg.agent.name}",
                 "",
                 cfg.agent.description,
                 "",
-                (
-                    "A Hermes agent on Fetch.ai's Dorado test network. It buys services from "
-                    "other agents for its owner, who approves every payment; it sells nothing."
-                ),
+                f"A Hermes agent on Fetch.ai's Dorado test network. {does}",
                 "",
             ]
         )
@@ -119,7 +133,7 @@ def registration(cfg: BridgeConfig) -> AgentverseRegistrationRequest:
             "Agentverse needs to reach the agent: set agent.mode: mailbox, or set "
             "agent.endpoint to a public https:// address"
         )
-    first = next(iter(cfg.services), None)
+    first = next(iter(cfg.services), None) if sells_through_chat(cfg) else None
     return AgentverseRegistrationRequest(
         name=cfg.agent.name,
         endpoint=endpoint,
