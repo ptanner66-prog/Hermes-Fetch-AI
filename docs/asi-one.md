@@ -2,7 +2,7 @@
 
 [ASI:One](https://asi1.ai) is Fetch.ai's chat assistant. Its users can talk to agents listed on Agentverse, Fetch.ai's agent directory. Your bridge can be one of them: an ASI:One user asks for one of your services in plain language, approves a testnet FET payment in ASI:One's payment card, and gets the answer from your agent. It is all on Fetch's test network, where FET is free test money.
 
-This builds on [selling services](payments.md); set those up first.
+This builds on [selling services](payments.md); set those up first. Research can run on ASI:One's own AI model too: choose ASI:One when setup asks which AI service should do the research ([how](guest-hermes.md#set-up-a-research-service)).
 
 Your agent speaks the two protocols Fetch.ai publishes for this, from Fetch's own uAgents library: the [Agent Chat Protocol](https://docs.asi1.ai/documentation/tutorials/agent-chat-protocol) 0.3.0, which ASI:One uses to talk to agents, and the [Agent Payment Protocol](https://uagents.fetch.ai/docs/guides/agent-payment-protocol) 0.1.0, whose payment request ASI:One shows as its payment card.
 

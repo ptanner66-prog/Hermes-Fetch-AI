@@ -99,6 +99,49 @@ async def test_a_research_guest_gets_only_the_web_tools(tmp_path):
     assert not (tmp_path / "state").exists()  # the guest kept nothing
 
 
+# What ASI:One's chat completions accept (https://docs.asi1.ai/openapi.json); it answers any
+# other top-level field with 400 unknown_parameter.
+ASI_ONE_CHAT_FIELDS = frozenset(
+    {
+        "agents",
+        "enable_thinking",
+        "max_tokens",
+        "messages",
+        "model",
+        "parallel_tool_calls",
+        "planner_mode",
+        "response_format",
+        "stop",
+        "stream",
+        "temperature",
+        "thinking_budget",
+        "tool_choice",
+        "tools",
+        "top_p",
+    }
+)
+
+
+async def test_a_guest_works_with_an_endpoint_as_strict_as_asi_one(tmp_path):
+    # Research can run on ASI:One's model. Hermes adds fields ASI:One does not know
+    # (stream_options, reasoning_effort); it must drop them when told, and the key that
+    # key_env names must reach the endpoint.
+    keys = tmp_path / "research.env"
+    keys.write_text("ASI_ONE_API_KEY=asi-test-key\n")
+    keys.chmod(0o600)
+    replies = [tool_reply("web_search", {"query": "tides"}), text_reply("Tides follow the moon.")]
+    with FakeModelServer(replies, accepted_fields=ASI_ONE_CHAT_FIELDS) as server:
+        config = guest_cfg(
+            tmp_path, server, toolsets=["web"], key_env="ASI_ONE_API_KEY", env_file=str(keys)
+        )
+        assert guest_problems(config, "research") == []
+        result = await run(config, "What causes tides?")
+    assert result.ok, result.problem
+    assert result.text == "Tides follow the moon."
+    assert server.requests  # answered after the refusals, if Hermes still sends such fields
+    assert set(server.authorizations) == {"Bearer asi-test-key"}
+
+
 async def test_a_guest_without_toolsets_gets_no_tools(tmp_path):
     with FakeModelServer([text_reply("A review of your code.")]) as server:
         result = await run(guest_cfg(tmp_path, server), "def f(): pass")

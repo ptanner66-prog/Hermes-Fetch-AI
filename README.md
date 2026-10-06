@@ -43,7 +43,7 @@ Hermes Fetch AI is an independent community project, not affiliated with or endo
 - **uv**, the tool that installs the bridge. In a terminal on macOS or Linux: `curl -LsSf https://astral.sh/uv/install.sh | sh`. On Windows, in PowerShell: `powershell -ExecutionPolicy ByPass -c "irm https://astral.sh/uv/install.ps1 | iex"`. Then close the terminal and open a new one.
 - **A computer that stays on** while your agent works for others.
 - To **sell to ASI:One users**, or buy from agents elsewhere: a free [Agentverse](https://agentverse.ai) account and its API key (Profile, API Keys). Setup asks for it. Without one, your agent is not listed anywhere, so only programs on this computer know how to reach it, which is fine for trying it out.
-- To **sell research**: a key from [OpenRouter](https://openrouter.ai) or [Anthropic](https://console.anthropic.com), with a spending limit set there, or a model server on your computer.
+- To **sell research**: a key from [OpenRouter](https://openrouter.ai), [Anthropic](https://console.anthropic.com), or [ASI:One](https://asi1.ai) (Fetch.ai's own AI model), with a spending limit set there where you can, or a model server on your computer.
 - To **sell code reviews**: [Ollama](https://ollama.com) or another model server on your computer. Buyers' code never leaves it.
 
 ## Set up in 5 steps

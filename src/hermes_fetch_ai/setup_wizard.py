@@ -46,8 +46,9 @@ RESULT_VAR = "HERMES_FETCH_AI_SETUP_RESULT"
 
 RESEARCH = "research"
 REVIEW = "security-review"
-# Hermes' provider name: its name, how to describe the choice, its key's name in .env,
-# and a model to suggest.
+# Who does the research. Each choice: its name, how to describe it, its key's name in the
+# guest's keys file, and a model to suggest. The choice is Hermes' provider name, except for
+# HOSTED services, which Hermes reaches as provider "custom" at their address.
 PROVIDERS: dict[str, tuple[str, str, str | None, str]] = {
     "openrouter": (
         "OpenRouter",
@@ -61,6 +62,12 @@ PROVIDERS: dict[str, tuple[str, str, str | None, str]] = {
         "ANTHROPIC_API_KEY",
         "claude-sonnet-4-6",
     ),
+    "asi-one": (
+        "ASI:One",
+        "ASI:One: Fetch.ai's own AI model (asi1.ai)",
+        "ASI_ONE_API_KEY",
+        "asi1",
+    ),
     "custom": (
         "your model server",
         "A model server on this computer (Ollama, LM Studio)",
@@ -68,10 +75,23 @@ PROVIDERS: dict[str, tuple[str, str, str | None, str]] = {
         "qwen2.5:7b",
     ),
 }
+HOSTED = {"asi-one": "https://api.asi1.ai/v1"}  # ASI:One's OpenAI-compatible API
 LOCAL_MODEL_URL = "http://127.0.0.1:11434/v1"  # Ollama's default
 # Buyers pay in free test FET, but each research request uses the owner's model account.
 RESEARCH_RUNS_PER_DAY = 20
 REVIEW_MODEL = "qwen2.5-coder:7b"
+
+
+def research_choice(runner: Any) -> str:
+    """Which research choice a saved guest runner is: a HOSTED service is provider custom."""
+    if not isinstance(runner, dict):
+        return ""
+    provider = str(runner.get("provider") or "")
+    if provider == "custom":
+        hosted = [name for name, url in HOSTED.items() if runner.get("base_url") == url]
+        return hosted[0] if hosted else "custom"
+    return provider
+
 
 RESEARCH_SERVICE: dict[str, Any] = {
     "title": "Research a topic",
@@ -602,15 +622,15 @@ class Wizard:
         ):
             return None
         old_runner = old.get("runner", {}) if isinstance(old, dict) else {}
-        old_provider = str(old_runner.get("provider") or "")
-        provider = ask.choose(
+        old_choice = research_choice(old_runner)
+        choice = ask.choose(
             "research.provider",
             "Which AI service should do the research?",
-            {name: choice for name, (_, choice, _, _) in PROVIDERS.items()},
-            old_provider if old_provider in PROVIDERS else "openrouter",
+            {name: text for name, (_, text, _, _) in PROVIDERS.items()},
+            old_choice if old_choice in PROVIDERS else "openrouter",
         )
-        label, _, key_name, suggested = PROVIDERS[provider]
-        if old_provider == provider and old_runner.get("model"):
+        label, _, key_name, suggested = PROVIDERS[choice]
+        if old_choice == choice and old_runner.get("model"):
             suggested = str(old_runner["model"])
         model = ask.ask(
             "research.model",
@@ -621,13 +641,16 @@ class Wizard:
         runner: dict[str, Any] = {
             "type": "hermes",
             "toolsets": ["web"],
-            "provider": provider,
+            "provider": "custom" if choice in HOSTED else choice,
             "model": model,
             "instructions": old_runner.get("instructions") or RESEARCH_INSTRUCTIONS,
             "max_turns": old_runner.get("max_turns", 8),
             "timeout_seconds": old_runner.get("timeout_seconds", 300),
         }
-        if provider == "custom":
+        if choice in HOSTED:
+            runner["base_url"] = HOSTED[choice]
+            runner["key_env"] = key_name
+        elif choice == "custom":
             runner["base_url"] = ask.ask(
                 "research.url",
                 "The model server's address",
@@ -645,8 +668,8 @@ class Wizard:
         )
         if key_name:
             say("Buyers pay in test FET, which is free, but each research request uses your")
-            say(f"{label} account, which costs real money. Set a spending limit with {label},")
-            say("and choose how many requests a day to take.")
+            say(f"{label} account, which costs real money. Set a spending limit with {label} if")
+            say("it offers one, and choose how many requests a day to take.")
         per_day = ask.ask(
             "research.per_day",
             "Most research requests a day",
