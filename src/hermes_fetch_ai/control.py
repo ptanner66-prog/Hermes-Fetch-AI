@@ -246,15 +246,16 @@ class ControlServer:
         view = purchase_view(paid)
         replies: list[InboxEntry] = []
         if paid.status in ("committed", "completed"):
-            # The seller answers once it has checked the payment and done the work;
-            # its confirmation of the payment alone is not the answer. (A payment
-            # left `paid` was not announced to the seller, so no answer is coming.)
+            # The seller answers once it has checked the payment and done the work, and
+            # may say so first ("payment confirmed, working on it"): the answer is complete
+            # when it ends the conversation, or cancels; otherwise this waits it out. (A
+            # payment left `paid` was not announced to the seller, so no answer is coming.)
             replies = await self.buyer.wait_for_reply(
                 paid.peer,
                 paid.session,
                 after_id=mark,
                 timeout=wait,
-                answers=lambda entry: entry.kind != "payment_complete",
+                answers=lambda entry: entry.kind in ("end", "payment_cancelled"),
             )
             latest = store.purchase(purchase_id)
             if latest is not None:

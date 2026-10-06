@@ -224,8 +224,9 @@ async def test_hermes_buys_a_service_from_another_agent(market):
     assert commit.metadata == {"buyer_fet_wallet": BUYING_WALLET, "fet_network": "stable-testnet"}
     assert market.buyer_store.purchase(shown.id).status == "completed"
     after = market.buyer_store.inbox(peer=SELLER, session=session, after_id=entries[-1].id)
-    assert [e.kind for e in after] == ["payment_complete", "text", "end"]
-    assert after[1].body.startswith("tides")
+    assert [e.kind for e in after] == ["payment_complete", "text", "text", "end"]
+    assert after[1].body.startswith("Payment confirmed. Working on")
+    assert after[2].body.startswith("tides")
     assert market.buyer_store.spent_since(0) == shown.amount_base
 
 

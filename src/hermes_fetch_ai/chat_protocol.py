@@ -46,6 +46,7 @@ from .chat_menu import ask_for_request, menu, pick_service, price_text
 from .config import BridgeConfig
 from .money import format_fet
 from .policy import PolicyState, consume_call_rate
+from .quotes import PREFIX as QUOTE_PREFIX
 from .quotes import request_digest
 from .seller import PaymentProof, PaymentRefused, short_reference
 from .services import BUSY, ServiceDesk, credit_audit, service_tool_name
@@ -273,6 +274,8 @@ class ChatDesk:
                     "mainnet": "false",
                     "service": name,
                     "agent": self.cfg.agent.name,
+                    # What the payment card says, as in Fetch's own payment example.
+                    "content": f"Please complete the payment to start {svc.title}.",
                 },
             ),
         )
@@ -313,12 +316,13 @@ class ChatDesk:
             order.tx_hash = msg.transaction_id
             await self._settle(ctx, sender, order, msg.transaction_id)
             return
-        if msg.reference:
+        if msg.reference and msg.reference.startswith(QUOTE_PREFIX):
             # A reference this bridge issued but no longer holds (it restarted).
             await self._recover(ctx, sender, msg.reference, msg.transaction_id)
             return
-        # No reference: the payment belongs to one of this buyer's orders,
-        # and its exact amount (order code included) says which.
+        # No reference of ours (none, or one the buyer's wallet made up): the payment
+        # belongs to one of this buyer's orders, and its exact amount (order code
+        # included) says which.
         candidates = self.orders.of(sender, str(ctx.session))[:_MAX_ORDERS_TRIED]
         for order in candidates:
             try:
@@ -389,6 +393,10 @@ class ChatDesk:
                 "will run without another payment.",
             )
             return
+        # ASI:One waits about a minute for an agent's reply, and up to four once it starts
+        # replying: say the work has begun, since the answer can take longer than a minute.
+        title = self.desk.cfg.services[order.service].title
+        await self._say(ctx, order.sender, f"Payment confirmed. Working on **{title}** now.")
         await self._deliver(ctx, order.sender, order.service, order.request, credit)
 
     async def _refused(
