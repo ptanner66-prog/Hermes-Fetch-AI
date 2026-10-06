@@ -41,6 +41,7 @@ from uagents_core.contrib.protocols.payment import (
 )
 
 from .audit import AuditWriter
+from .buyer import Buyer
 from .chat_menu import ask_for_request, menu, pick_service, price_text
 from .config import BridgeConfig
 from .money import format_fet
@@ -438,27 +439,72 @@ class ChatDesk:
 
 
 def build_chat_protocols(
-    cfg: BridgeConfig, desk: ServiceDesk, audit: AuditWriter
-) -> tuple[Protocol, Protocol]:
-    """The chat protocol and the payment protocol (seller role) for a selling bridge."""
-    chat_desk = ChatDesk(cfg, desk, audit)
+    cfg: BridgeConfig,
+    desk: ServiceDesk | None,
+    audit: AuditWriter,
+    buyer: Buyer | None = None,
+) -> list[Protocol]:
+    """Fetch's chat protocol, and the payment protocol for each side the bridge takes.
+
+    A selling bridge answers chat with its services and takes the payment
+    protocol's seller role; a buying bridge keeps the replies to the
+    conversations Hermes started and takes the buyer role. Replies in a
+    conversation Hermes started go to the buyer; everything else goes to
+    the sales desk (or, on a bridge that does not sell through chat, is only
+    acknowledged).
+    """
+    chat_desk = ChatDesk(cfg, desk, audit) if desk is not None and cfg.chat.enable_chat else None
     chat = Protocol(spec=chat_protocol_spec)
-    payment = Protocol(spec=payment_protocol_spec, role="seller")
+    protocols = [chat]
+
+    def for_buyer(ctx: Context, sender: str) -> bool:
+        if buyer is None:
+            return False
+        # A seller may answer in a new session; without a sales desk, it is still a reply.
+        return buyer.expects(sender, str(ctx.session)) or (
+            chat_desk is None and buyer.expects(sender)
+        )
 
     @chat.on_message(model=ChatMessage)
     async def _chat(ctx: Context, sender: str, msg: ChatMessage) -> None:
-        await chat_desk.on_chat(ctx, sender, msg)
+        if buyer is not None and for_buyer(ctx, sender):
+            await buyer.on_chat(ctx, sender, msg)
+        elif chat_desk is not None:
+            await chat_desk.on_chat(ctx, sender, msg)
+        else:
+            await ctx.send(sender, ChatAcknowledgement(acknowledged_msg_id=msg.msg_id))
 
     @chat.on_message(model=ChatAcknowledgement)
     async def _ack(ctx: Context, sender: str, msg: ChatAcknowledgement) -> None:
-        """Buyers acknowledge our replies; nothing to do."""
+        """The other side acknowledges our messages; nothing to do."""
 
-    @payment.on_message(model=CommitPayment)
-    async def _commit(ctx: Context, sender: str, msg: CommitPayment) -> None:
-        await chat_desk.on_commit(ctx, sender, msg)
+    if chat_desk is not None:
+        selling = Protocol(spec=payment_protocol_spec, role="seller")
 
-    @payment.on_message(model=RejectPayment)
-    async def _reject(ctx: Context, sender: str, msg: RejectPayment) -> None:
-        await chat_desk.on_reject(ctx, sender, msg)
+        @selling.on_message(model=CommitPayment)
+        async def _commit(ctx: Context, sender: str, msg: CommitPayment) -> None:
+            await chat_desk.on_commit(ctx, sender, msg)
 
-    return chat, payment
+        @selling.on_message(model=RejectPayment)
+        async def _reject(ctx: Context, sender: str, msg: RejectPayment) -> None:
+            await chat_desk.on_reject(ctx, sender, msg)
+
+        protocols.append(selling)
+
+    if buyer is not None:
+        buying = Protocol(spec=payment_protocol_spec, role="buyer")
+
+        @buying.on_message(model=RequestPayment)
+        async def _request(ctx: Context, sender: str, msg: RequestPayment) -> None:
+            await buyer.on_request_payment(ctx, sender, msg)
+
+        @buying.on_message(model=CompletePayment)
+        async def _complete(ctx: Context, sender: str, msg: CompletePayment) -> None:
+            await buyer.on_complete(ctx, sender, msg)
+
+        @buying.on_message(model=CancelPayment)
+        async def _cancel(ctx: Context, sender: str, msg: CancelPayment) -> None:
+            await buyer.on_cancel(ctx, sender, msg)
+
+        protocols.append(buying)
+    return protocols

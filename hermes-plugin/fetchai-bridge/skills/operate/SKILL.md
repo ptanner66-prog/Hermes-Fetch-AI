@@ -24,8 +24,9 @@ messaging, or approvals.
 - The user asks to put Hermes tools on Fetch.ai, Agentverse, or uAgents.
 - The user asks to check, demo, or serve the Fetch.ai bridge.
 - The user asks to sell services for FET, see payments, or pause selling.
-- Do not use this skill to move funds: the bridge only receives payments and
-  never sends them, and refunds are the user's to make.
+- Do not use this skill to move funds. Paying other agents goes only through
+  the `fetchai_pay` tool (the `buy` skill), which asks the user every time;
+  refunds are the user's to make.
 
 ## Prerequisites
 

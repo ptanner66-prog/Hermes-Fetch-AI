@@ -2,8 +2,9 @@
 
 uAgents derives two different keys from ``UAGENT_SEED``: the agent identity
 (``agent1...``, signs messages) and a wallet (``fetch1...``, holds FET). The
-wallet at index 0 is the one uAgents itself uses; buying from other agents
-will use a separate index so spending never touches the income wallet.
+wallet at index 0 is the one uAgents itself uses, and where income goes;
+buying from other agents spends from the wallet at index 1, so spending never
+touches the income wallet.
 """
 
 from __future__ import annotations
@@ -14,6 +15,7 @@ from uagents_core.identity import Identity, derive_key_from_seed
 
 LEDGER_PREFIX = "fetch"
 INCOME_WALLET_INDEX = 0
+BUYING_WALLET_INDEX = 1
 
 
 def agent_address(seed: str) -> str:

@@ -217,6 +217,55 @@ Listing the bridge for ASI:One users: see the table of problems in [`asi-one.md`
 
 Run it by hand with `hermes-fetch-ai seller try <service> --request "..." --config <file>`, which shows the program's error output. Buyers keep their payment for a retry; after `payments.max_attempts` failures it is listed as `failed` by `seller credits` and needs a refund.
 
+## Buying from other agents
+
+[`buying.md`](buying.md) explains the states a payment goes through.
+
+### `buyer ...: FAIL: the bridge is not running with buying enabled ...`
+
+The `buyer` commands (and Hermes' buying tools) work through the running bridge. Start it with `hermes fetchai-bridge serve --config <your config>`, with `buying.enabled: true`. If your config sets `payments.state_dir`, pass the same `--config` to the `buyer` commands (or set the plugin's "Bridge config" setting).
+
+### `buyer ...: FAIL: the bridge is not answering ...`
+
+`control.json` is left from a bridge that stopped without cleaning up. Start the bridge again; it replaces the file.
+
+### `serve` fails with `another bridge is already buying with the records in ...`
+
+Another `serve` with buying on is using the same state folder. Stop it, or give this bridge its own `payments.state_dir`.
+
+### Hermes says `Turn off YOLO mode to work with other agents`
+
+The buying tools refuse while YOLO mode is on (`--yolo`, `/yolo`, `HERMES_YOLO_MODE`, or `approvals.mode: off`). Turn it off for this session to work with other agents.
+
+### Hermes says `this Hermes cannot ask you to approve a payment ...`
+
+This Hermes has no confirmation prompt the plugin can use, so Hermes will not pay. Pay from a terminal instead: `hermes fetchai-bridge buyer show <id>`, then the `buyer pay` command it prints.
+
+### `buyer pay: FAIL: ...`
+
+| Message | What to do |
+|---------|------------|
+| `this approval does not match the payment request shown` | Run `buyer show <id>` again and use the new code; each `show` makes a new one, and each code pays once. |
+| `the amount differs ...`, `the recipient differs ...` | Copy them exactly as `show` printed them. |
+| `... would go over the daily limit ...` | Wait, or raise `buying.max_per_day` (or the per-seller limit) in your config and restart the bridge. |
+| `the amount is more than the limit for one payment` | Raise `buying.max_payment`, if you meant to. |
+| `this seller is not on the list of agents Hermes may pay` | Add it to `buying.allowed_sellers`, if you trust it. |
+| `this payment request has expired; ask the seller again` | Ask the seller for a new payment request. |
+
+A payment shown as `failed` with `could not prepare the payment` usually means the buying wallet has no test FET: run `wallet --config <your config> --fund`.
+
+### Hermes paid, but the seller's answer has not come
+
+Some work takes minutes. Paying waits for the answer as long as `buying.reply_wait_seconds` (60 seconds by default); after that the answer waits in the bridge. Hermes reads it with `fetchai_read_replies`; from a terminal, `hermes-fetch-ai buyer inbox --agent <agent> --session <conversation> --wait 120` waits for it. If the seller cancelled after you paid, the payment shows as `cancelled`: ask the seller for a refund.
+
+### `buyer ...: FAIL: the bridge stopped before it answered ...`
+
+The bridge was stopped while it worked on the request. On a stop, requests waiting for replies answer at once with what they have, and a payment being sent gets 20 seconds to finish. Run `hermes-fetch-ai buyer purchases`: a payment that was still being sent shows as `needs_review` (see below).
+
+### A payment is `needs_review`
+
+The bridge could not tell whether it went through, or was stopped while sending it. It is never resent on its own. Run `hermes-fetch-ai buyer check <id>`: it looks the payment up on the ledger and marks it paid (and tells the seller) or failed. A payment that never appears is marked failed after an hour.
+
 ## Windows
 
 Use an absolute path for `hermes_mcp.command`, and quote paths that contain spaces. To find Hermes' interpreter, run `Get-Command hermes` in PowerShell (`where` means `Where-Object` there). The bridge passes child processes only an environment allowlist that includes the Windows essentials, and keeps their stderr away from the protocol stream.

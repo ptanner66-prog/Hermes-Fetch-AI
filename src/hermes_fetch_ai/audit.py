@@ -32,6 +32,8 @@ AUDIT_FIELDS = {
     "amount_base",
     "tx_short",
     "payer_short",
+    # Buying: the purchase's id; amounts and hashes use the fields above.
+    "purchase",
 }
 
 

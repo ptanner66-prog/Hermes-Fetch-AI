@@ -1,6 +1,6 @@
 # Agent economy (design and status)
 
-This is the design for letting Hermes take part in Fetch.ai's agent economy. Selling over MCP calls and through chat, and services run by a guest Hermes, have landed (unreleased; how to use them: [`payments.md`](payments.md), [`asi-one.md`](asi-one.md), [`guest-hermes.md`](guest-hermes.md)). The rest is the plan the code is being built against; the [status table](#status) says what has landed.
+This is the design for letting Hermes take part in Fetch.ai's agent economy. Selling over MCP calls and through chat, services run by a guest Hermes, and buying from other agents have landed (unreleased; how to use them: [`payments.md`](payments.md), [`asi-one.md`](asi-one.md), [`guest-hermes.md`](guest-hermes.md), [`buying.md`](buying.md)). The rest is the plan the code is being built against; the [status table](#status) says what has landed.
 
 ## What it will do
 
@@ -32,11 +32,13 @@ Chat requests never reach the owner's Hermes. Each service has its own runner: a
 
 A research service needs Hermes itself: a model and web search. For each request the bridge starts a separate Hermes in a new, throwaway home folder, writes its settings there (the model, only the service's toolsets, every other toolset switched off by name, no memory or self-review, no private network addresses, no installs), gives it only the guest's own keys file and a short environment, and deletes the folder when the run ends. The settings are written fresh for every run, so they cannot drift; at startup the bridge also refuses any `.env` that Hermes would load into guests if it sets `HERMES_...` variables. Details and tests: [`guest-hermes.md`](guest-hermes.md).
 
-## Buying
+## Buying (landed)
 
-- The running bridge is the buyer: it has a registered identity that can receive other agents' replies, and a separate buying key.
-- Hermes reaches the bridge through three plugin tools: find agents, message an agent, and pay. They are off until the owner turns on the plugin's buyer setting.
-- **Every payment asks the owner,** through the confirmation prompt Hermes uses for its own payment-card fills. That prompt ignores YOLO mode and saved approvals and declines when nobody is there to answer. The prompt shows the amount, the seller, its Agentverse rating, and the recipient, taken from the bridge's own records.
+How to use it: [`buying.md`](buying.md).
+
+- The running bridge is the buyer: it is the agent other agents answer, and it pays from a separate buying wallet (key index 1). Hermes' tools and the `buyer` commands reach it through a local control channel.
+- Hermes reaches the bridge through four plugin tools: find agents (Agentverse search), message an agent (Fetch's chat protocol), read its later replies, and pay (the payment protocol's buyer role). They are off until the owner turns on the plugin's `buyer_tools` setting.
+- **Every payment asks the owner,** through Hermes' own confirmation prompt (the one it uses when an MCP server asks the user to confirm something). Hermes shows it even in YOLO mode, never remembers the answer, and declines when nobody can answer. The prompt shows the amount, the seller, its Agentverse rating, and the recipient, taken from the bridge's own records.
 - **Hermes does not talk to other agents in YOLO mode,** because another agent's reply could otherwise trick it into running commands without asking.
 - **The bridge enforces limits whatever Hermes does:** testnet only, a cap per payment, per seller, and per day, payment only of quotes it stored, and no automatic retry when a payment's outcome is unknown.
 
@@ -59,7 +61,7 @@ All of these must hold before mainnet can be unlocked:
 | Paid services over MCP calls | Landed; tested on the real testnet |
 | Chat and ASI:One | Landed; offline tests; live ASI:One test pending |
 | Guest Hermes runners | Landed; field-tested against real Hermes in CI |
-| Buying, plugin tools, approvals | Planned |
+| Buying, plugin tools, approvals | Landed; a purchase between two bridges tested on the real testnet; the prompt answered by a person pending |
 | Guided setup and plain-language docs | Planned |
 | Live testnet tests and real-world trial | Planned |
 

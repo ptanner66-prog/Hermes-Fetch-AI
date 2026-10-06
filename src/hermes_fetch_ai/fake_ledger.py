@@ -9,8 +9,10 @@ from __future__ import annotations
 import hashlib
 import itertools
 import time
+from collections.abc import Callable
 
 from .ledger import Transfer, TxRecord
+from .sender import SendOutcome
 
 FAKE_CHAIN_ID = "dorado-1"
 
@@ -74,3 +76,52 @@ class FakeLedger:
             )
         )
         return tx_hash
+
+
+class FakeSender:
+    """Pays on a FakeLedger, for the offline demos and the tests.
+
+    ``outcome`` picks what happens: "included" (paid), "rejected" (nothing
+    sent), "unknown" (nothing known, nothing sent), or "lost" (the outcome is
+    unknown to the sender, but the payment did reach the ledger).
+    """
+
+    def __init__(self, ledger: FakeLedger, address: str, *, outcome: str = "included") -> None:
+        self.ledger = ledger
+        self._address = address
+        self.outcome = outcome
+        self.sent: list[tuple[str, int, str]] = []
+        self._count = itertools.count(1)
+
+    def address(self) -> str:
+        return self._address
+
+    async def send(
+        self,
+        *,
+        recipient: str,
+        amount_base: int,
+        memo: str,
+        before_broadcast: Callable[[str], None],
+    ) -> SendOutcome:
+        seed = f"{self._address}|{recipient}|{amount_base}|{memo}|{next(self._count)}"
+        tx_hash = hashlib.sha256(seed.encode("utf-8")).hexdigest().upper()
+        before_broadcast(tx_hash)
+        if self.outcome == "rejected":
+            return SendOutcome("rejected", tx_hash, "the ledger refused the payment")
+        if self.outcome in ("included", "lost"):
+            self.sent.append((recipient, amount_base, memo))
+            self.ledger.add(
+                TxRecord(
+                    hash=tx_hash,
+                    height=next(self.ledger._heights),
+                    code=0,
+                    time_ms=int(time.time() * 1000),
+                    memo=memo,
+                    transfers=(Transfer(self._address, recipient, "atestfet", amount_base),),
+                    other_messages=(),
+                )
+            )
+        if self.outcome == "included":
+            return SendOutcome("included", tx_hash)
+        return SendOutcome("unknown", tx_hash, "the broadcast may not have arrived")

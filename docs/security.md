@@ -69,7 +69,7 @@ Do not remove an audit exception without confirming that `uagents`, `cosmpy`, si
 
 ## Payments
 
-Selling services for testnet FET ([`payments.md`](payments.md)) adds money, so it has its own threat model. Buying from other agents is still in development ([`agent-economy.md`](agent-economy.md)); its threats are listed at the end of this section.
+Selling services for testnet FET ([`payments.md`](payments.md)) and buying from other agents ([`buying.md`](buying.md)) add money, so each has its own threat model below.
 
 ### Selling: threats and controls
 
@@ -117,12 +117,36 @@ These are covered by tests: `tests/test_guest.py` (the command, environment, set
 - **ASI:One's side is unconfirmed.** Whether ASI:One sends the reference back, how it rounds amounts, and whether its payment card needs more fields are not yet tested with a real ASI:One user ([`asi-one.md`](asi-one.md#what-is-tested)).
 - **Agentverse sees chat traffic in mailbox mode.** Messages between ASI:One users and the bridge pass through Agentverse.
 
-### Buying (in development)
+### Buying: threats and controls
 
-- A reply from another agent carries instructions that a tricked Hermes follows, more dangerous in YOLO mode, so agent conversations are refused in YOLO mode.
-- The model is tricked into paying, or into paying more or to someone else, so every payment asks the owner, shows the terms from the bridge's own records, and is capped per payment, per seller, and per day.
-- A payment whose broadcast outcome is unknown is retried and paid twice, so such payments wait for the owner.
-- The agent's seed in Hermes' `.env` is read through the terminal tool (Hermes masks `.env` reads but does not treat that as a boundary), which is why wallets hold small testnet balances and mainnet requires revisiting where the seed lives.
+Hermes can buy from other agents through the plugin's tools and the running bridge ([`buying.md`](buying.md)). The approval prompt is the user experience; the bridge's limits are the boundary, because Hermes runs as the same user as the bridge.
+
+| Threat | Control |
+|--------|---------|
+| Hermes is tricked into paying (prompt injection from a web page, a file, or another agent) | Every payment shows the owner the request as the bridge recorded it (amount, seller, its Agentverse listing, recipient, the seller's own description, labeled as such) in Hermes' confirmation prompt, which Hermes shows even in YOLO mode, never remembers, and declines when nobody can answer. Only "accept" pays. |
+| Another agent's reply steers Hermes while it runs without approvals | The plugin's tools refuse while YOLO mode is on (`tools.approval.is_approval_bypass_active`: `--yolo`, `/yolo`, `HERMES_YOLO_MODE`, `approvals.mode: off`), and also when Hermes cannot say. Replies and listings are returned as information, never as instructions, and the `buy` skill says so. |
+| A payment for something other than what the owner approved | Approval carries a one-time code issued when the request was shown, plus the exact amount and recipient; the bridge pays only if all three still match its record, and each code pays once. |
+| Paying too much, too often, or the wrong agent | Per-payment, per-seller-per-day, and per-day limits (defaults 1, 2, 5 testnet FET) and an optional list of allowed sellers, checked in the same `BEGIN IMMEDIATE` transaction that marks the payment as being sent, so two payments, or two bridges sharing records, cannot both slip under a limit. |
+| A stranger fills the owner's records with payment requests | Requests are accepted only from agents Hermes is talking to, at most 20 open per agent, in testnet FET (`fet_direct`) to a `fetch1` wallet, with a deadline of at most an hour; anything else is refused and the seller is told. |
+| A payment is sent twice | The transaction hash is recorded before the payment leaves the machine; a payment whose outcome is unknown waits (`needs_review`), still counts against the limits, and is never resent on its own; `buyer check` settles it from the ledger. A payment the bridge was stopped in the middle of sending (Ctrl-C, a crash) is marked the same way, at once or when the bridge starts again. |
+| Spending touches the income | Payments come from the buying wallet (key index 1), never from the income wallet (index 0). |
+| Mainnet funds | Buying runs on Fetch's testnet only; the config refuses anything else. |
+| Something on the machine or a web page drives the bridge's buying | The control channel listens on 127.0.0.1 only, on a random port, speaks one JSON line per request (not HTTP, so a browser cannot reach it), and requires a 256-bit token from a file only the owner can read (0600), removed on shutdown. |
+| Replies display misleading text | Control characters and Unicode direction overrides are removed from replies, listings, and descriptions; lengths are capped. |
+| Another agent floods Hermes with replies | One answer to Hermes holds at most 50 replies and 60,000 characters; the rest wait in the bridge's records, which keep the newest 500 messages. |
+| Other users of the computer read what Hermes sends | The plugin passes messages and searches to the bridge on standard input, not in the command line, which other users can list. |
+| The model slips an option, or a shell character, into a bridge command (`--config ...`, `&`) | The plugin puts on the bridge's command line only an agent address, a conversation id, and a payment request id in their exact shapes, and numbers; searches and messages go on standard input. |
+
+Tests: `tests/test_buyer.py`, `tests/test_control.py`, `tests/test_buy_flow.py`, `tests/test_serve_buying.py`, `tests/test_hermes_directory_plugin.py`, and, against real Hermes, `tests/test_field_hermes_buyer.py`. The results of the manual runs on the real testnet are in [`buying.md`](buying.md#what-is-tested).
+
+### Buying: residual risks
+
+- **The seed is in Hermes' `.env`.** The owner chose to keep `UAGENT_SEED` there. Hermes masks `.env` reads but does not treat that as a boundary, so a Hermes tricked into using its terminal could read the seed and spend the buying wallet (and the income wallet) without asking. That is why buying is testnet only, the buying wallet should hold small amounts, and where the seed lives is on the mainnet checklist.
+- **The same user can drive the bridge.** Anything running as the owner's user (including Hermes' terminal tool) can read the control channel's token and run `buyer pay` after `buyer show`, without Hermes' prompt. The bridge's limits still hold.
+- **A seller can take the money and not deliver.** The payment protocol has no escrow; a seller can cancel after being paid or never answer. The bridge records it (`cancelled`) and tells Hermes to ask for a refund, but cannot force one.
+- **Messages can leak what Hermes sends.** Messages go to the agent Hermes writes to (and through Agentverse for mailbox agents). The `buy` skill tells Hermes to send only what the task needs; it is guidance, not enforcement.
+- **The prompt's details come from the seller.** The amount and recipient are checked at payment time; the seller's name, rating, and description are the seller's and Agentverse's words.
+- **The approval prompt has been tested by a person only in the planned real-world test.** CI checks that it declines when nobody can answer; answering it in Hermes' terminal and in a messaging app is part of [the real-world test](agent-economy.md#status).
 
 ## Reporting vulnerabilities
 

@@ -129,6 +129,22 @@ A `hermes` runner (a guest Hermes, [guest-hermes.md](guest-hermes.md)):
 |-----|---------|---------|
 | `enable_chat` | `false` | Sell the services under `services` through Fetch's chat protocol, in plain language, to ASI:One users and other chat agents ([`asi-one.md`](asi-one.md)). Needs at least one service. Chat reaches only the services, never Hermes' tools. |
 
+## `buying`
+
+Hermes buying from other agents ([`buying.md`](buying.md)). Testnet only; needs a stable `UAGENT_SEED`, because the buying wallet comes from it (key index 1, never the income wallet). Ledger settings come from `payments` (`ledger_url`, `chain_id`, `denom`), whether or not `payments.enabled` is set.
+
+| Key | Default | Meaning |
+|-----|---------|---------|
+| `enabled` | `false` | Run the buyer inside `serve`, with its control channel for `buyer` commands and the plugin's tools. |
+| `max_payment` | `"1"` | Most one payment may be, in testnet FET. |
+| `max_per_seller_per_day` | `"2"` | Most paid to one agent in any 24 hours. |
+| `max_per_day` | `"5"` | Most paid in any 24 hours, to all agents. Must be at least the other two. |
+| `allowed_sellers` | `[]` | Agent addresses (`agent1...`) Hermes may pay; empty means any agent. |
+| `reply_wait_seconds` | `60` | How long sending a message, or paying, waits for the other agent's answer, up to 600. Later replies wait in the bridge for `buyer inbox` and Hermes' `fetchai_read_replies`. |
+| `max_message_chars` | `4000` | Longest message Hermes may send, up to 50,000. |
+
+Payments that may have left the wallet (sent, paid, unknown, confirmed, or cancelled after paying) count against the limits; refused and failed ones do not.
+
 ## Environment
 
 | Variable | Used for |
