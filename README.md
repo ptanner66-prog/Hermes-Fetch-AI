@@ -119,6 +119,7 @@ Under `plugins.isolation: host`, Hermes skips plugin CLI commands; use `hermes-f
 - Audit records omit raw arguments, raw outputs, full sender addresses, seeds, tokens, and keys.
 - Production seeds must come from `UAGENT_SEED` and be at least 32 characters; YAML seed/mailbox key material and other credential-shaped config values are rejected.
 - If the Hermes backend cannot start, `serve` exits non-zero instead of serving an empty tool list.
+- With `publish_manifest: false` (the examples' default), the bridge makes no outbound calls of its own: no Almanac registration, contract lookup, or status reports. Replying to a remote agent can look up that agent's endpoint in the Almanac.
 - The bridge consumes the Hermes **tools** MCP server only. The Hermes conversations/messaging MCP surface is explicitly out of scope.
 - Chat protocol is out of v1 scope.
 
@@ -159,8 +160,8 @@ Deployment notes, including a systemd unit, are in [`docs/production.md`](docs/p
 ## Development
 
 - License: MIT. Supported Python: 3.11 and 3.12.
-- Required local gate (the same checks CI runs): `doctor`, contamination scan, ruff, mypy, pytest, local demo, package build, twine check, wheel smoke, and dependency audit. Commands are in [`CONTRIBUTING.md`](CONTRIBUTING.md).
-- CI: OS/Python matrix, dependency audit, build verification, CodeQL, Dependabot. Ruff and mypy are pinned to a minor series so tool releases cannot change the rules underneath CI.
+- Required local gate (the same checks CI runs): `doctor`, contamination scan, ruff (lint and format), mypy (strict for the package), pytest with coverage, local demo, package build, twine check, wheel smoke, and dependency audit. Commands are in [`CONTRIBUTING.md`](CONTRIBUTING.md).
+- CI: tests on Linux, macOS, and Windows with Python 3.11 and 3.12; an 85% branch-coverage gate that counts the CLI and `serve` subprocesses; the Hermes plugin checks and stdio field test against real Hermes; dependency audit, build verification, CodeQL, and Dependabot. Ruff and mypy are pinned to a minor series so tool releases cannot change the rules underneath CI.
 
 ## Scope
 

@@ -27,8 +27,9 @@ Run the full gate before opening a PR:
 uv run python -m hermes_fetch_ai.cli doctor
 uv run python -m hermes_fetch_ai.cli doctor --contamination-scan
 uv run ruff check .
+uv run ruff format --check .
 uv run mypy src tests
-uv run pytest -q
+uv run pytest -q --cov
 uv run python -m hermes_fetch_ai.cli demo local
 rm -rf dist build
 uv run python -m build
@@ -40,7 +41,7 @@ Changes to `hermes-plugin/fetchai-bridge` must keep it stdlib-only. If you have 
 
 The `PyNaCl` and `ecdsa` ignores are tracked upstream dependency exceptions. Do not add new ignores without documenting the reason in `docs/security.md`.
 
-`ruff` and `mypy` are pinned to a minor series so a new release cannot change the lint or type-check rules underneath CI. Dependabot proposes the bumps; fix any new findings in that PR.
+`ruff` and `mypy` are pinned to a minor series so a new release cannot change the lint or type-check rules underneath CI. Dependabot proposes the bumps; fix any new findings in that PR. The package type-checks under `mypy --strict`; tests use relaxed settings (see `pyproject.toml`). CI's coverage job fails below 85% branch coverage, counting the CLI and `serve` subprocesses.
 
 ## Testing expectations
 

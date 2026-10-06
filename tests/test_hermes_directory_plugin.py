@@ -14,6 +14,7 @@ import re
 import sys
 import tomllib
 from pathlib import Path
+from typing import Any
 
 import yaml
 
@@ -22,12 +23,22 @@ from hermes_fetch_ai import config as bridge_config
 PLUGIN_DIR = Path("hermes-plugin/fetchai-bridge")
 CATALOG_ENTRY = Path("upstream/hermes-pr/plugin-catalog/fetchai-bridge.yaml")
 STDLIB_IMPORTS = {
-    "__future__", "argparse", "collections", "os", "pathlib", "shutil", "subprocess", "sys", "typing",
+    "__future__",
+    "argparse",
+    "collections",
+    "os",
+    "pathlib",
+    "shutil",
+    "subprocess",
+    "sys",
+    "typing",
 }
 
 
 def _load_plugin():
-    spec = importlib.util.spec_from_file_location("fetchai_bridge_plugin", PLUGIN_DIR / "__init__.py")
+    spec = importlib.util.spec_from_file_location(
+        "fetchai_bridge_plugin", PLUGIN_DIR / "__init__.py"
+    )
     assert spec and spec.loader
     module = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(module)
@@ -60,10 +71,11 @@ class CurrentHermesCtx(OlderHermesCtx):
         return self.settings.get(key, default)
 
 
-def _frontmatter(path: Path) -> dict:
+def _frontmatter(path: Path) -> dict[str, Any]:
     match = re.match(r"^---\n(.*?)\n---\n", path.read_text(encoding="utf-8"), re.DOTALL)
     assert match, f"{path} must start with YAML frontmatter"
-    return yaml.safe_load(match.group(1))
+    meta: dict[str, Any] = yaml.safe_load(match.group(1))
+    return meta
 
 
 def test_manifest_is_catalog_ready():
@@ -91,7 +103,10 @@ def test_catalog_entry_draft_matches_the_plugin():
     assert entry["requires_hermes"] == manifest["requires_hermes"]
     # Catalog rule 6: declared capabilities must match what register() adds.
     assert entry["capabilities"] == {
-        "provides_tools": [], "provides_hooks": [], "provides_middleware": [], "requires_env": [],
+        "provides_tools": [],
+        "provides_hooks": [],
+        "provides_middleware": [],
+        "requires_env": [],
     }
 
 
@@ -126,7 +141,9 @@ def test_register_works_on_hermes_without_plugin_skills_or_settings():
 
 def test_cli_arguments_pass_through_unchanged(monkeypatch):
     seen = []
-    monkeypatch.setattr(plugin, "run_bridge", lambda argv, configured="": seen.append((argv, configured)) or 7)
+    monkeypatch.setattr(
+        plugin, "run_bridge", lambda argv, configured="": seen.append((argv, configured)) or 7
+    )
     ctx = CurrentHermesCtx(settings={"command": "/opt/bridge/bin/hermes-fetch-ai"})
     plugin.register(ctx)
     command = ctx.commands["fetchai-bridge"]
@@ -150,7 +167,13 @@ def test_run_bridge_returns_exit_code_and_hands_over_a_clean_environment(monkeyp
     monkeypatch.setenv("VIRTUAL_ENV", "/hermes/venv")
     monkeypatch.setenv("UAGENT_SEED", "seed-for-tests-" + "0123456789abcdef0123456789")
     seen_file = tmp_path / "seen.json"
-    names = ["PYTHONPATH", "VIRTUAL_ENV", "UAGENT_SEED", plugin.HERMES_PYTHON_VAR, plugin.HERMES_PYTHONPATH_VAR]
+    names = [
+        "PYTHONPATH",
+        "VIRTUAL_ENV",
+        "UAGENT_SEED",
+        plugin.HERMES_PYTHON_VAR,
+        plugin.HERMES_PYTHONPATH_VAR,
+    ]
     code = (
         "import json, os, sys\n"
         f"seen = {{'argv': sys.argv[1:], 'env': {{k: os.environ.get(k) for k in {names!r}}}}}\n"

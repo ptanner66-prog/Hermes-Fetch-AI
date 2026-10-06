@@ -49,3 +49,23 @@ def test_serve_exits_nonzero_when_hermes_backend_cannot_start(tmp_path):
     assert "hermes backend: FAIL" in res.stderr
     assert "command not found" in res.stderr
     assert "Traceback" not in res.stderr
+
+
+def test_demo_local_runs_the_quickstart_round_trip(monkeypatch, tmp_path, capsys):
+    # The demo config writes its audit log to the platform state directory.
+    monkeypatch.setenv("XDG_STATE_HOME", str(tmp_path))
+    monkeypatch.setenv("LOCALAPPDATA", str(tmp_path))
+    assert cli.main(["demo", "local"]) == 0
+    out = capsys.readouterr().out
+    assert "visible tool count: 1" in out
+    assert "echo result: hello" in out
+
+
+def test_doctor_contamination_scan_passes_on_this_tree(capsys):
+    assert cli.main(["doctor", "--contamination-scan"]) == 0
+    assert "contamination: ok" in capsys.readouterr().out
+
+
+def test_probe_hermes_reports_fake_mode(capsys):
+    assert cli.main(["probe-hermes"]) == 0
+    assert "fake_mode: ok" in capsys.readouterr().out

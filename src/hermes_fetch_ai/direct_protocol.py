@@ -225,7 +225,9 @@ async def handle_call_tool(
         try:
             inventory = await shim.list_tools()
         except Exception as exc:  # noqa: BLE001 - see handle_list_tools
-            logger.error("Hermes MCP backend unavailable for call_tool (%s)", exc.__class__.__name__)
+            logger.error(
+                "Hermes MCP backend unavailable for call_tool (%s)", exc.__class__.__name__
+            )
             decision = "error"
             reason = BACKEND_UNAVAILABLE
             return CallToolResponse(result=None, error=reason)

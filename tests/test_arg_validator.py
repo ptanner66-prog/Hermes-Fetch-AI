@@ -47,6 +47,36 @@ def test_private_urls_rejected(url):
         validate_args({"name": "t"}, {"url": url}, cfg())
 
 
+@pytest.mark.parametrize(
+    "url",
+    [
+        "http://0177.0.0.1/",  # octal octets
+        "http://0177.1/",  # shortened octal form
+        "http://0x7f.0.0.1/",  # hex octet
+        "http://0x7f000001/",  # one hex number
+        "http://0251.0376.0251.0376/",  # cloud metadata address, octal
+        "http://[::ffff:127.0.0.1]/",  # IPv4-mapped IPv6
+        "http://[::ffff:a9fe:a9fe]/",  # cloud metadata address, IPv4-mapped
+    ],
+)
+def test_alternate_encodings_of_private_addresses_are_rejected(url):
+    # Rejected from the address itself, before any DNS lookup.
+    with pytest.raises(ValueError, match="private or local"):
+        validate_args({"name": "t"}, {"url": url}, cfg())
+
+
+@pytest.mark.parametrize(
+    "args",
+    [
+        {"urls": ["notes", "http://10.0.0.1/"]},
+        {"options": {"targets": [{"href": "http://169.254.169.254/latest/meta-data"}]}},
+    ],
+)
+def test_urls_nested_in_lists_and_objects_are_checked(args):
+    with pytest.raises(ValueError, match="private or local"):
+        validate_args({"name": "t"}, args, cfg())
+
+
 def test_dns_private_resolution_guard(monkeypatch):
     monkeypatch.setattr(
         socket,
@@ -160,10 +190,12 @@ def test_query_strings_need_a_trusted_tool(monkeypatch):
     url = "https://example.com/search?q=1&page=2"
     with pytest.raises(ValueError, match="shell metacharacters"):
         validate_args({"name": "fetch"}, {"url": url}, cfg())
-    trusted = BridgeConfig(agent={"dev_random_seed": True}, policy={"trusted_shell_tools": ["fetch"]})
+    trusted = BridgeConfig(
+        agent={"dev_random_seed": True}, policy={"trusted_shell_tools": ["fetch"]}
+    )
     assert validate_args({"name": "fetch"}, {"url": url}, trusted) == {"url": url}
 
 
 def test_non_object_args_raise_type_error():
     with pytest.raises(TypeError):
-        validate_args({"name": "t"}, ["not", "an", "object"], cfg())  # type: ignore[arg-type]
+        validate_args({"name": "t"}, ["not", "an", "object"], cfg())

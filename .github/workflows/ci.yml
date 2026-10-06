@@ -48,6 +48,9 @@ jobs:
       - name: Lint (ruff)
         run: python -m ruff check .
 
+      - name: Format check (ruff)
+        run: python -m ruff format --check .
+
       - name: Type check (mypy)
         run: python -m mypy src tests
 
@@ -87,6 +90,28 @@ jobs:
           hermes-fetch-ai --version
           hermes-fetch-ai doctor
           hermes-fetch-ai demo local
+
+  coverage:
+    name: test coverage
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+
+      - name: Set up Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: pyproject.toml
+
+      - name: Install package with dev extras
+        run: |
+          python -m pip install -U pip
+          python -m pip install -e ".[dev]"
+
+      - name: Tests with branch coverage, including CLI and serve subprocesses
+        run: python -m pytest -q --cov --cov-fail-under=85
 
   dependency-audit:
     name: dependency audit

@@ -119,7 +119,8 @@ def _write(tmp_path, body):
     "body",
     [
         # A credential inside a list (previously never scanned).
-        'hermes_mcp:\n  mode: stdio\n  command: python\n  args: ["s' + 'k-live-abcdefghijklmnop12"]\n',
+        'hermes_mcp:\n  mode: stdio\n  command: python\n  args: ["s'
+        + 'k-live-abcdefghijklmnop12"]\n',
         # A command-line flag that introduces a secret.
         'hermes_mcp:\n  mode: stdio\n  command: python\n  args: ["--api-' + 'key", "x"]\n',
         # key=value assignments anywhere in a value.

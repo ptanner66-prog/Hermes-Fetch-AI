@@ -212,7 +212,9 @@ async def test_unstarted_shim_does_not_pretend_to_have_no_tools():
 def test_explicit_stdio_command_wins_over_the_plugin_handover(monkeypatch):
     monkeypatch.setenv(HERMES_PYTHON_VAR, "/hermes/venv/bin/python")
     monkeypatch.setenv(HERMES_PYTHONPATH_VAR, "/hermes/checkout")
-    params = stdio_parameters(cfg(hermes_mcp={"mode": "stdio", "command": "cmd", "args": ["--serve"]}))
+    params = stdio_parameters(
+        cfg(hermes_mcp={"mode": "stdio", "command": "cmd", "args": ["--serve"]})
+    )
     assert (params.command, params.args) == ("cmd", ["--serve"])
     assert params.env is not None and "PYTHONPATH" not in params.env
     assert params.env["HERMES_QUIET"] == "1" and params.env["HERMES_REDACT_SECRETS"] == "true"

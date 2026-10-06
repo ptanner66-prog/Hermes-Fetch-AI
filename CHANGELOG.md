@@ -34,6 +34,7 @@ Set the date and push the `v1.0.0` tag to release.
 
 ### Security
 
+- A bridge with `publish_manifest: false` no longer contacts the Almanac. uAgents looks up the Almanac contract on the Fetch ledger whenever an agent is created and reports every agent's status to Agentverse at startup and shutdown, even with registration disabled; the bridge now skips both, so it makes no outbound calls of its own and the local demo makes no network calls.
 - Bump `mcp` to 1.28.1 (PYSEC-2026-3483), with `uagents` 0.25.3 and `uagents-core` 0.4.8.
 - Require `UAGENT_SEED` to be at least 32 characters.
 - Check URLs embedded anywhere in argument strings and bare local/literal-IP hosts (`localhost:8080`, `169.254.169.254/latest`); run DNS checks off the event loop.
@@ -59,6 +60,8 @@ Set the date and push the `v1.0.0` tag to release.
 ### Open source readiness
 
 - Add stronger CI matrix, security audit, package verification, CodeQL, and Dependabot.
+- CI enforces 85% branch coverage, counting the CLI and `serve` subprocesses. New tests cover alternate encodings of private addresses, URLs nested in lists and objects, audit log rotation, and the CLI demo.
+- The package type-checks under `mypy --strict`, and the code is formatted with `ruff format` (checked in CI).
 - Add native Hermes plugin documentation and founder/open-source governance docs.
 - Verify wheel build, twine metadata, and the installed CLI (`--version`, `doctor`, `demo local`).
 - Release workflow can publish to PyPI through trusted publishing (opt-in via the `PUBLISH_TO_PYPI` repository variable).

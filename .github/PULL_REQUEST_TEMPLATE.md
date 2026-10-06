@@ -17,8 +17,9 @@ Paste the commands you ran and their results:
 uv run python -m hermes_fetch_ai.cli doctor
 uv run python -m hermes_fetch_ai.cli doctor --contamination-scan
 uv run ruff check .
+uv run ruff format --check .
 uv run mypy src tests
-uv run pytest -q
+uv run pytest -q --cov
 uv run python -m hermes_fetch_ai.cli demo local
 rm -rf dist build
 uv run python -m build

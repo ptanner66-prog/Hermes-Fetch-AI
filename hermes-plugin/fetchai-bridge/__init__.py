@@ -31,7 +31,13 @@ SHUTDOWN_GRACE_SECONDS = 30.0
 # Hermes runs inside its own Python environment and exports variables that point
 # any Python child at Hermes' packages (PYTHONPATH includes its checkout and
 # site-packages). The bridge has its own interpreter, so these must not leak in.
-HERMES_PYTHON_ENV = ("PYTHONPATH", "PYTHONHOME", "PYTHONEXECUTABLE", "__PYVENV_LAUNCHER__", "VIRTUAL_ENV")
+HERMES_PYTHON_ENV = (
+    "PYTHONPATH",
+    "PYTHONHOME",
+    "PYTHONEXECUTABLE",
+    "__PYVENV_LAUNCHER__",
+    "VIRTUAL_ENV",
+)
 # Instead, tell the bridge how this Hermes runs Python, so `serve` can start
 # Hermes' tools MCP server the way Hermes itself does: with its own interpreter
 # and import path. Names shared with hermes_fetch_ai.config.
