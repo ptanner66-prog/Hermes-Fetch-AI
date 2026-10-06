@@ -88,7 +88,8 @@ def research_choice(runner: Any) -> str:
         return ""
     provider = str(runner.get("provider") or "")
     if provider == "custom":
-        hosted = [name for name, url in HOSTED.items() if runner.get("base_url") == url]
+        saved = str(runner.get("base_url") or "").rstrip("/")
+        hosted = [name for name, url in HOSTED.items() if saved == url.rstrip("/")]
         return hosted[0] if hosted else "custom"
     return provider
 
