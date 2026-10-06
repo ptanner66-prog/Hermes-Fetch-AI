@@ -57,6 +57,9 @@ jobs:
       - name: Local end-to-end demo (in-process uAgent round trip)
         run: python -m hermes_fetch_ai.cli demo local
 
+      - name: Paid service demo (offline, simulated testnet ledger)
+        run: python -m hermes_fetch_ai.cli demo paid
+
   package:
     name: package smoke
     runs-on: ubuntu-latest
@@ -87,6 +90,7 @@ jobs:
           hermes-fetch-ai --version
           hermes-fetch-ai doctor
           hermes-fetch-ai demo local
+          hermes-fetch-ai demo paid
 
   coverage:
     name: test coverage

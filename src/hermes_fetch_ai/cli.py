@@ -64,8 +64,29 @@ def doctor(args: argparse.Namespace) -> int:
     seed_warning = cfg.ignored_seed_warning()
     if seed_warning:
         print(f"seed: WARN: {seed_warning}")
+    if cfg.payments.enabled:
+        from .money import format_fet
+
+        prices = ", ".join(
+            f"{name} {format_fet(svc.price_base)} FET" for name, svc in cfg.services.items()
+        )
+        p = cfg.payments
+        print(f"payments: on ({p.network}, {p.chain_id}); services: {prices or 'none'}")
+    else:
+        print("payments: off")
+    if not _programs_ok(cfg):
+        return 1
     print("doctor: ok")
     return 0
+
+
+def _programs_ok(cfg: BridgeConfig) -> bool:
+    from .services import program_problems
+
+    problems = program_problems(cfg)
+    for problem in problems:
+        print(f"services: FAIL: {problem}", file=sys.stderr)
+    return not problems
 
 
 def probe_hermes(args: argparse.Namespace) -> int:
@@ -97,7 +118,195 @@ def demo(args: argparse.Namespace) -> int:
             return 1
         print(f"mailbox demo is a manual hosted setup; follow {MAILBOX_GUIDE}")
         return 0
+    if args.kind == "paid":
+        return _demo_paid()
     return asyncio.run(_demo_local())
+
+
+def _demo_paid() -> int:
+    from .paid_demo import run_paid_demo
+
+    with tempfile.TemporaryDirectory(prefix="hermes-fetch-ai-paid-demo-") as tmp:
+        lines = asyncio.run(run_paid_demo(Path(tmp)))
+    for line in lines:
+        print(line)
+    return 0 if any(line.startswith("answer: hello") for line in lines) else 1
+
+
+def _stable_seed(cfg: BridgeConfig, what: str) -> str | None:
+    """The config's seed, or None (with a message) if it changes on every start."""
+    if cfg.agent.dev_random_seed:
+        print(
+            f"{what}: FAIL: this config has agent.dev_random_seed: true, so the agent's "
+            "identity and wallet change on every start; set it to false and set UAGENT_SEED",
+            file=sys.stderr,
+        )
+        return None
+    return cfg.effective_seed()
+
+
+def wallet(args: argparse.Namespace) -> int:
+    from .ledger import LcdLedgerReader, LedgerUnavailable
+    from .money import format_fet
+    from .wallet import agent_address, wallet_address
+
+    cfg = _load_or_report(args.config)
+    if cfg is None:
+        return 1
+    seed = _stable_seed(cfg, "wallet")
+    if seed is None:
+        return 1
+    income = cfg.payments.payout_address or wallet_address(seed)
+    source = "payments.payout_address" if cfg.payments.payout_address else "the agent's own wallet"
+    print(f"agent address: {agent_address(seed)}")
+    print(f"income wallet: {income} ({source})")
+    if not args.balance:
+        return 0
+
+    async def balance() -> int:
+        reader = LcdLedgerReader(cfg.payments.ledger_url, cfg.payments.ledger_timeout_seconds)
+        try:
+            return await reader.balance(income, cfg.payments.denom)
+        finally:
+            await reader.aclose()
+
+    try:
+        amount = asyncio.run(balance())
+    except LedgerUnavailable as exc:
+        print(f"balance: FAIL: {exc}", file=sys.stderr)
+        return 1
+    print(f"balance: {format_fet(amount)} testnet FET")
+    return 0
+
+
+def ledger(args: argparse.Namespace) -> int:
+    from .ledger import LcdLedgerReader, LedgerUnavailable
+
+    cfg = _load_or_report(args.config)
+    if cfg is None:
+        return 1
+    payments = cfg.payments
+
+    async def check() -> str:
+        reader = LcdLedgerReader(payments.ledger_url, payments.ledger_timeout_seconds)
+        try:
+            return await reader.chain_id()
+        finally:
+            await reader.aclose()
+
+    try:
+        chain = asyncio.run(check())
+    except LedgerUnavailable as exc:
+        print(f"ledger: FAIL: {payments.ledger_url}: {exc}", file=sys.stderr)
+        return 1
+    if chain != payments.chain_id:
+        print(
+            f"ledger: FAIL: {payments.ledger_url} is {chain!r}, not {payments.chain_id!r}",
+            file=sys.stderr,
+        )
+        return 1
+    print(f"ledger: ok: {chain} at {payments.ledger_url}")
+    return 0
+
+
+def _try_service(cfg: BridgeConfig, name: str | None, request: str | None) -> int:
+    """Run one service on this machine, unpaid, to check it works before selling it."""
+    from .services import build_runner
+
+    if not name or name not in cfg.services:
+        known = ", ".join(cfg.services) or "none"
+        print(f"seller: FAIL: try needs a service name (configured: {known})", file=sys.stderr)
+        return 2
+    if not request:
+        print("seller: FAIL: try needs --request, what a buyer would ask", file=sys.stderr)
+        return 2
+    if not _programs_ok(cfg):
+        return 1
+    svc = cfg.services[name]
+    result = asyncio.run(build_runner(svc.runner, show_errors=True).run(request))
+    if not result.ok:
+        print(f"seller: FAIL: {name}: {result.problem}", file=sys.stderr)
+        return 1
+    print(result.text.rstrip())
+    if svc.disclaimer:
+        print(f"\n— {svc.disclaimer}")
+    return 0
+
+
+def seller(args: argparse.Namespace) -> int:
+    from .money import format_fet
+    from .seller import short_tx
+    from .store import Store
+    from .uagent_app import payment_store_path
+
+    cfg = _load_or_report(args.config)
+    if cfg is None:
+        return 1
+    if not cfg.payments.enabled:
+        print("seller: FAIL: payments are off in this config (payments.enabled)", file=sys.stderr)
+        return 1
+    if args.action == "try":
+        return _try_service(cfg, args.target, args.request)
+    if args.action in ("ban", "unban") and not args.target:
+        print(f"seller: FAIL: {args.action} needs the agent address", file=sys.stderr)
+        return 2
+    if args.action == "backup" and not args.to:
+        print("seller: FAIL: backup needs --to, the file to write", file=sys.stderr)
+        return 2
+    seed = _stable_seed(cfg, "seller")
+    if seed is None:
+        return 1
+    store = Store.open(payment_store_path(cfg, seed))
+    try:
+        if args.action == "backup":
+            try:
+                store.backup(Path(args.to).expanduser())
+            except (FileExistsError, OSError) as exc:
+                print(f"seller: FAIL: {exc}", file=sys.stderr)
+                return 1
+            print(f"seller: payment records copied to {args.to}")
+        elif args.action == "pause":
+            store.set_paused(True)
+            print("seller: paused; services are hidden and calls are refused until 'resume'")
+        elif args.action == "resume":
+            store.set_paused(False)
+            print("seller: selling again")
+        elif args.action == "ban":
+            store.ban(args.target, reason=args.reason or "banned by the owner", now_ms=_now_ms())
+            print(f"seller: {args.target} can no longer use your services")
+        elif args.action == "unban":
+            found = store.unban(args.target)
+            print(f"seller: {args.target} " + ("unbanned" if found else "was not banned"))
+        else:
+            print(f"selling: {'paused' if store.paused() else 'on'}")
+            now = _now_ms()
+            store.lapse(older_than_ms=now - cfg.payments.redeem_window_seconds * 1000, now_ms=now)
+            credits = store.credits(args.status)
+            if not credits:
+                print(
+                    "no payments recorded" + (f" with status {args.status}" if args.status else "")
+                )
+            for credit in credits:
+                print(
+                    f"{credit.status:8} {format_fet(credit.amount_base):>10} FET  "
+                    f"{credit.subject:20} tx {short_tx(credit.tx_hash)}  payer {credit.payer}"
+                )
+            for extra in store.extra_payments():
+                print(
+                    f"extra payment, refund it: {format_fet(extra.amount_base)} FET  "
+                    f"tx {short_tx(extra.tx_hash)}  payer {extra.payer}"
+                )
+            for sender, reason in store.banned():
+                print(f"banned: {sender} ({reason})")
+    finally:
+        store.close()
+    return 0
+
+
+def _now_ms() -> int:
+    import time
+
+    return int(time.time() * 1000)
 
 
 def serve(args: argparse.Namespace) -> int:
@@ -110,6 +319,8 @@ def serve(args: argparse.Namespace) -> int:
     seed_warning = cfg.ignored_seed_warning()
     if seed_warning:
         print(f"seed: WARN: {seed_warning}", file=sys.stderr)
+    if not _programs_ok(cfg):
+        return 1
     try:
         run_bridge(cfg)
     except HermesBackendError as exc:
@@ -135,9 +346,35 @@ def build_parser() -> argparse.ArgumentParser:
     s = sub.add_parser("serve", help="run the bridge uAgent until interrupted")
     s.add_argument("--config", required=True)
     s.set_defaults(func=serve)
-    dm = sub.add_parser("demo", help="run the local demo, or check the mailbox demo setup")
-    dm.add_argument("kind", choices=["local", "mailbox"])
+    dm = sub.add_parser(
+        "demo", help="run the local or paid demo (offline), or check the mailbox demo setup"
+    )
+    dm.add_argument("kind", choices=["local", "paid", "mailbox"])
     dm.set_defaults(func=demo)
+    w = sub.add_parser("wallet", help="show the agent's address and income wallet")
+    w.add_argument("--config", required=True)
+    w.add_argument("--balance", action="store_true", help="also ask the ledger for the balance")
+    w.set_defaults(func=wallet)
+    lg = sub.add_parser("ledger", help="check that the configured ledger answers as testnet")
+    lg.add_argument("--config", required=True)
+    lg.set_defaults(func=ledger)
+    sl = sub.add_parser(
+        "seller", help="see payments, try a service, pause selling, ban an agent, or back up"
+    )
+    sl.add_argument(
+        "action", choices=["credits", "try", "pause", "resume", "ban", "unban", "backup"]
+    )
+    sl.add_argument(
+        "target", nargs="?", help="the service name (try) or the agent address (ban, unban)"
+    )
+    sl.add_argument("--config", required=True)
+    sl.add_argument("--status", default=None, help="only payments with this status (credits)")
+    sl.add_argument("--reason", default=None, help="why, for ban")
+    sl.add_argument("--request", default=None, help="what a buyer would ask, for try")
+    sl.add_argument(
+        "--to", default=None, help="the new file to copy payment records to, for backup"
+    )
+    sl.set_defaults(func=seller)
     return p
 
 
