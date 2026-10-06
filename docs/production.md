@@ -66,7 +66,7 @@ Point `logging.audit_path` at `/var/lib/hermes-fetch-ai/audit.jsonl`. The writer
 
 ## Network egress
 
-- Local/endpoint mode with `publish_manifest: false`: no mandatory egress for local tests. uAgents may probe the configured network at startup; failures are logged and non-fatal in local mode.
+- Endpoint mode with `publish_manifest: false`: the bridge makes no outbound calls of its own (no Almanac registration, contract lookup, or status reports; `tests/test_uagent_direct_protocol.py` checks this). Replying to a remote agent can need egress to Agentverse's Almanac API or the Fetch ledger, to look up that agent's endpoint.
 - Hosted mode (mailbox/manifest): allow egress to Agentverse and the configured Fetch network (Almanac REST/gRPC, mailbox HTTPS).
 
 ## Who can reach the bridge

@@ -37,10 +37,11 @@ def test_build_agent_wires_noop_registration_policy_when_not_publishing(monkeypa
             captured["included_protocol"] = protocol
             captured["include_publish_manifest"] = publish_manifest
 
-    monkeypatch.setattr("hermes_fetch_ai.uagent_app.Agent", FakeAgent)
+    monkeypatch.setattr("hermes_fetch_ai.uagent_app.PrivateAgent", FakeAgent)
     c = cfg()
     build_agent(c, object())
     assert isinstance(captured["registration_policy"], NoopRegistrationPolicy)
+    assert captured["mark_inactive_on_shutdown"] is False
     assert captured["network"] == "testnet"
     assert captured["enable_agent_inspector"] is False
     assert captured["publish_agent_details"] is False
@@ -67,6 +68,28 @@ def test_build_agent_keeps_ledger_registration_policy_when_publishing(monkeypatc
     # policy so a funded wallet can pay Almanac registration.
     assert "registration_policy" not in captured
     assert captured["include_publish_manifest"] is True
+
+
+async def _start_and_stop(agent):
+    try:
+        await agent.run_startup_tasks()
+        await agent._shutdown([])
+    finally:
+        dispatcher.unregister(agent.address, agent)
+
+
+@pytest.mark.asyncio
+async def test_private_bridge_never_contacts_the_almanac(almanac_calls):
+    await _start_and_stop(build_agent(cfg(), object()))
+    assert almanac_calls == []
+
+
+@pytest.mark.asyncio
+async def test_published_bridge_uses_the_almanac(almanac_calls):
+    c = cfg()
+    c.agent.publish_manifest = True
+    await _start_and_stop(build_agent(c, object()))
+    assert almanac_calls == ["contract lookup", "active", "inactive"]
 
 
 def test_protocol_signed_handlers_and_no_adapter_or_chat():

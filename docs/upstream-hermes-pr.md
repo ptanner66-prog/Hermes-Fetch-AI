@@ -93,8 +93,10 @@ Disclosures (rule 13):
 - `hermes fetchai-bridge serve` is long-running: it listens on the configured port, starts
   `python -m agent.transports.hermes_tools_mcp_server` with Hermes' interpreter as a child
   process with an allowlisted environment (`PATH`, `HOME`, `TMPDIR`, `HERMES_HOME`,
-  locale), and contacts the Fetch.ai network or Agentverse only when its config enables
-  that.
+  locale). With `publish_manifest: false`, as in the example config, it makes no outbound
+  calls of its own; replying to a remote agent can look up that agent's endpoint in the
+  Almanac (Agentverse's API, falling back to the Fetch ledger). With `publish_manifest:
+  true` or mailbox mode, it also registers with the Almanac and Agentverse.
 - Remote uAgents see only `skills_list` by default; every other tool is denylisted. Calls
   need replay metadata and pass argument checks (URL/SSRF and shell guards), size limits,
   and a redacted JSONL audit log.

@@ -7,7 +7,7 @@ python -m hermes_fetch_ai.cli doctor
 python -m hermes_fetch_ai.cli demo local
 ```
 
-This uses fake MCP tools and an in-process direct call path. It must not require Agentverse, Almanac, ASI, mailbox setup, hosted accounts, or a real Hermes install. The local demo sends replay metadata and exercises the same policy path as production calls.
+This uses fake MCP tools and an in-process direct call path. It needs no Agentverse, Almanac, ASI, mailbox setup, hosted account, or real Hermes install, and it makes no network calls (`tests/test_security_defaults.py` checks that it never contacts the Almanac). The local demo sends replay metadata and exercises the same policy path as production calls.
 
 ## Hermes-backed local demo
 

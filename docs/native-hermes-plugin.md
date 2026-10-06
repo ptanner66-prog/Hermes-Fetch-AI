@@ -70,7 +70,7 @@ What a user should know before installing (catalog rule 13; also in the plugin R
 
 - One subprocess, without a shell: the `hermes-fetch-ai` executable, only when the user runs `hermes fetchai-bridge ...`. It inherits the environment, including `UAGENT_SEED`, minus Hermes' Python variables.
 - No tools, hooks, or middleware; one read-only skill. The agent reaches the bridge only through Hermes' terminal tool, under Hermes' normal approvals. The skill tells the agent not to start `serve` unless asked.
-- `serve` is long-running. It listens on the configured port, starts Hermes' tools MCP server as a child process, and contacts the Fetch.ai network or Agentverse only when its config enables that. By default remote agents see only `skills_list`.
+- `serve` is long-running. It listens on the configured port, starts Hermes' tools MCP server as a child process, With `publish_manifest: false`, as in the example config, it makes no outbound calls of its own; replying to a remote agent can look up that agent's endpoint in the Almanac (Agentverse's API, falling back to the Fetch ledger). With `publish_manifest: true` or mailbox mode, it also registers with the Almanac and Agentverse. By default remote agents see only `skills_list`.
 - Nothing prompts or waits for input, so unattended runs do not hang. No telemetry, no self-updates, and no credentials other than `UAGENT_SEED`.
 
 ## Verification

@@ -36,6 +36,7 @@ Remote senders may:
 - Tool responses returned to callers are normalized and size-capped. They are not a DLP redaction boundary; only expose tools whose outputs are safe for the intended sender.
 - Audit/log records never store raw arguments, raw outputs, full sender addresses, seeds, tokens, or keys.
 - Stdio uses `shell=False`, a filtered environment, and stderr separated from protocol stdout.
+- With `publish_manifest: false`, the bridge makes no outbound calls of its own. uAgents looks up the Almanac contract on the Fetch ledger whenever an agent is created and reports every agent as active or inactive to Agentverse's Almanac API, even with registration disabled; the bridge's `PrivateAgent` skips both. Replying to a remote agent can still look up that agent's endpoint in the Almanac.
 - Production agent seeds must come from `UAGENT_SEED` and be at least 32 characters; YAML seed and mailbox key values are rejected.
 - Config files are scanned for credential-shaped values anywhere, including inside lists such as `hermes_mcp.args`: bearer tokens, `sk-`/`pk-` keys, JWTs, long hex keys, `token=...`-style assignments, and secret flags such as `--api-key`. Ordinary words such as "token" in a description are allowed.
 - In mailbox mode, the uAgents Agent Inspector endpoints (`/connect`, `/disconnect`) are unauthenticated. Keep the port firewalled to localhost and disable the inspector after connecting; see `docs/agentverse-mailbox.md`.

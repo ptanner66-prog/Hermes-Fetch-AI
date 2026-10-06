@@ -144,3 +144,5 @@ async def test_serve_http_roundtrip_and_graceful_shutdown(bridge_proc):
     output = proc.stdout.read() if proc.stdout else ""
     assert rc == 0, f"serve did not shut down cleanly (rc={rc}):\n{output[-2000:]}"
     assert LOCAL_IDENTITY_TEXT not in output
+    # publish_manifest: false, so the bridge never reports itself to the Almanac API.
+    assert "registration status" not in output

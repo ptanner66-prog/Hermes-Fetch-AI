@@ -5,6 +5,7 @@ import pytest
 
 from hermes_fetch_ai.audit import AuditWriter
 from hermes_fetch_ai.config import HERMES_PYTHON_VAR, load_config
+from hermes_fetch_ai.uagent_app import run_local_roundtrip
 
 
 def test_hermes_backed_example_exposes_only_skills_list_publicly():
@@ -64,12 +65,10 @@ def test_publish_manifest_defaults_false_in_local_configs():
     assert load_config("examples/local-direct.yaml").agent.publish_manifest is False
 
 
-def test_no_hosted_network_call_in_local_demo_path(monkeypatch):
-    res = subprocess.run(
-        [sys.executable, "-m", "hermes_fetch_ai.cli", "demo", "local"],
-        text=True,
-        capture_output=True,
-        check=False,
-    )
-    assert res.returncode == 0
-    assert "echo result: hello" in res.stdout
+@pytest.mark.asyncio
+async def test_local_demo_never_contacts_the_almanac(almanac_calls, tmp_path):
+    demo_cfg = load_config("examples/local-direct.yaml")
+    demo_cfg.logging.audit_path = str(tmp_path / "audit.jsonl")
+    _, visible_tools, echo_result, _ = await run_local_roundtrip(demo_cfg)
+    assert (visible_tools, echo_result) == (1, "hello")
+    assert almanac_calls == []
