@@ -11,7 +11,19 @@ requires_hermes: ">=0.21.5"
 # The bridge pins uAgents and mcp 1.x and runs on Python 3.11/3.12, so it lives in
 # its own environment. This plugin is stdlib-only and installs nothing into Hermes.
 python_runtime: external
+# Registered always, usable only when the buyer_tools setting is on.
+provides_tools: [fetchai_find_agents, fetchai_message_agent, fetchai_pay]
 config_schema:
+  buyer_tools:
+    type: bool
+    default: false
+    label: Let Hermes buy from other agents
+    description: Gives Hermes tools to find other agents on Fetch.ai, message them, and pay them in testnet FET from the bridge's buying wallet. Every payment asks you first, and the tools refuse while YOLO mode is on. Needs a running bridge with buying.enabled.
+  config:
+    type: str
+    default: ""
+    label: Bridge config
+    description: Path to the config file `serve` runs with. Needed only if it keeps its records outside the default folder (payments.state_dir).
   command:
     type: str
     default: ""

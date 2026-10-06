@@ -232,3 +232,9 @@ jobs:
           unset HERMES_HOME
           HERMES_FETCH_FIELD_TEST=1 HERMES_FETCH_HERMES_PYTHON="$RUNNER_TEMP/hermes-venv/bin/python" \
             python -m pytest tests/test_field_guest_hermes.py -q -rs
+
+      - name: Field test of the buying guards (YOLO check and payment prompt)
+        run: |
+          unset HERMES_HOME
+          HERMES_FETCH_FIELD_TEST=1 HERMES_FETCH_HERMES_PYTHON="$RUNNER_TEMP/hermes-venv/bin/python" \
+            python -m pytest tests/test_field_hermes_buyer.py -q -rs

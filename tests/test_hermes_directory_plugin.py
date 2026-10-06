@@ -16,6 +16,7 @@ import tomllib
 from pathlib import Path
 from typing import Any
 
+import pytest
 import yaml
 
 from hermes_fetch_ai import config as bridge_config
@@ -26,6 +27,8 @@ STDLIB_IMPORTS = {
     "__future__",
     "argparse",
     "collections",
+    "inspect",
+    "json",
     "os",
     "pathlib",
     "shutil",
@@ -33,6 +36,9 @@ STDLIB_IMPORTS = {
     "sys",
     "typing",
 }
+# Hermes' own modules (its approval prompt), imported inside functions only.
+HERMES_MODULES = {"tools"}
+BUYER_TOOLS = {"fetchai_find_agents", "fetchai_message_agent", "fetchai_pay"}
 
 
 def _load_plugin():
@@ -62,10 +68,19 @@ class CurrentHermesCtx(OlderHermesCtx):
     def __init__(self, settings=None):
         super().__init__()
         self.skills = {}
+        self.tools = {}
         self.settings = settings or {}
 
     def register_skill(self, name, path, description="", frontmatter=None):
         self.skills[name] = Path(path)
+
+    def register_tool(self, name, toolset, schema, handler, check_fn=None, description=""):
+        self.tools[name] = {
+            "toolset": toolset,
+            "schema": schema,
+            "handler": handler,
+            "check_fn": check_fn,
+        }
 
     def get_config(self, key, default=None):
         return self.settings.get(key, default)
@@ -93,6 +108,9 @@ def test_manifest_is_catalog_ready():
     assert seed["type"] == "secret" and seed["env"] == "UAGENT_SEED"
     key = manifest["config_schema"]["agentverse_api_key"]
     assert key["type"] == "secret" and key["env"] == "AGENTVERSE_API_KEY"
+    assert set(manifest["provides_tools"]) == BUYER_TOOLS
+    buyer = manifest["config_schema"]["buyer_tools"]
+    assert buyer["type"] == "bool" and buyer["default"] is False
 
 
 def test_catalog_entry_draft_matches_the_plugin():
@@ -105,34 +123,44 @@ def test_catalog_entry_draft_matches_the_plugin():
     assert entry["requires_hermes"] == manifest["requires_hermes"]
     # Catalog rule 6: declared capabilities must match what register() adds.
     assert entry["capabilities"] == {
-        "provides_tools": [],
+        "provides_tools": ["fetchai_find_agents", "fetchai_message_agent", "fetchai_pay"],
         "provides_hooks": [],
         "provides_middleware": [],
         "requires_env": [],
     }
 
 
-def test_plugin_imports_only_the_standard_library():
-    tree = ast.parse((PLUGIN_DIR / "__init__.py").read_text(encoding="utf-8"))
+def _imports(nodes):
     imported = set()
-    for node in ast.walk(tree):
+    for node in nodes:
         if isinstance(node, ast.Import):
             imported |= {alias.name.split(".")[0] for alias in node.names}
         elif isinstance(node, ast.ImportFrom):
             imported.add((node.module or "").split(".")[0])
-    assert imported <= STDLIB_IMPORTS
+    return imported
+
+
+def test_plugin_imports_only_the_standard_library():
+    tree = ast.parse((PLUGIN_DIR / "__init__.py").read_text(encoding="utf-8"))
+    assert _imports(tree.body) <= STDLIB_IMPORTS
+    # Hermes' own approval modules are used only inside functions, while Hermes runs.
+    assert _imports(ast.walk(tree)) <= STDLIB_IMPORTS | HERMES_MODULES
 
 
 def test_register_wires_cli_command_and_bundled_skill():
     ctx = CurrentHermesCtx()
     plugin.register(ctx)
     assert set(ctx.commands) == {"fetchai-bridge"}
-    assert set(ctx.skills) == {"operate"}
-    skill = ctx.skills["operate"]
-    assert skill.is_file()
-    meta = _frontmatter(skill)
-    assert meta["name"] == "operate"
-    assert len(meta["description"]) <= 60 and meta["description"].endswith(".")
+    assert set(ctx.skills) == {"operate", "buy"}
+    for name, skill in ctx.skills.items():
+        assert skill.is_file()
+        meta = _frontmatter(skill)
+        assert meta["name"] == name
+        assert len(meta["description"]) <= 60 and meta["description"].endswith(".")
+    assert set(ctx.tools) == BUYER_TOOLS
+    for name, tool in ctx.tools.items():
+        assert tool["toolset"] == "fetchai" and tool["schema"]["name"] == name
+        assert tool["schema"]["parameters"]["type"] == "object"
 
 
 def test_register_works_on_hermes_without_plugin_skills_or_settings():
@@ -214,3 +242,285 @@ def test_missing_bridge_explains_how_to_install(capsys, tmp_path):
 def test_handover_variable_names_match_the_bridge():
     assert plugin.HERMES_PYTHON_VAR == bridge_config.HERMES_PYTHON_VAR
     assert plugin.HERMES_PYTHONPATH_VAR == bridge_config.HERMES_PYTHONPATH_VAR
+
+
+# -- buying from other agents ----------------------------------------------------------
+
+AGENT = "agent1qfuexnwkscrhfhx7tdchlz486mtzsl53grlnr3zpntxsyu6zhp2ckpemfdz"
+SHOWN = {
+    "id": "pay-1a2b3c4d",
+    "peer": AGENT,
+    "amount": "0.050050348",
+    "recipient": "fetch1hh09pm44murgmu7rpaxluwad3way3nxq0fl6fx",
+    "description": "Research a topic",
+    "nonce": "c0ffee00c0ffee00",
+    "status": "quoted",
+}
+
+
+class FakeHermes:
+    """Hermes' approval modules: YOLO state and the confirmation prompt."""
+
+    def __init__(self, monkeypatch, *, yolo=False, answer="accept", consent=True):
+        import types
+
+        self.yolo = yolo
+        self.answer = answer
+        self.prompts = []
+        approval = types.ModuleType("tools.approval")
+        approval.is_approval_bypass_active = lambda: self.yolo
+        prompt = types.ModuleType("tools.approval_prompt")
+
+        def request_elicitation_consent(
+            message,
+            description,
+            *,
+            timeout_seconds=None,
+            surface="mcp-elicitation",
+            title="Confirm this action?",
+        ):
+            self.prompts.append((message, description, title))
+            if isinstance(self.answer, Exception):
+                raise self.answer
+            return self.answer
+
+        prompt.request_elicitation_consent = request_elicitation_consent
+        tools_pkg = types.ModuleType("tools")
+        monkeypatch.setitem(sys.modules, "tools", tools_pkg)
+        monkeypatch.setitem(sys.modules, "tools.approval", approval)
+        if consent:
+            monkeypatch.setitem(sys.modules, "tools.approval_prompt", prompt)
+        else:
+            monkeypatch.setitem(sys.modules, "tools.approval_prompt", None)
+
+
+class FakeBridge:
+    """Answers `hermes-fetch-ai buyer ... --json` calls the way the bridge does."""
+
+    def __init__(self, monkeypatch, answers=None):
+        self.calls = []
+        self.answers = {
+            "find": [
+                {"address": AGENT, "name": "Tide Research", "rating": 4.3, "interactions": 517}
+            ],
+            "message": {
+                "session": "6d0c1b0e-5e1d-4a52-9f0e-2a3c1d4e5f60",
+                "replies": [
+                    {"kind": "text", "body": "It costs 0.05 FET."},
+                    {
+                        "kind": "payment_request",
+                        "body": "The agent asks for 0.05 (payment request pay-1a2b3c4d)",
+                    },
+                ],
+            },
+            "show": dict(SHOWN),
+            "pay": {**SHOWN, "status": "completed", "tx_hash": "AB" * 32, "nonce": None},
+            "decline": {**SHOWN, "status": "declined"},
+        }
+        self.answers.update(answers or {})
+
+        def run(argv, ctx, *, timeout):
+            self.calls.append(argv)
+            answer = self.answers[argv[1]]
+            if isinstance(answer, Exception):
+                raise answer
+            return answer
+
+        monkeypatch.setattr(plugin, "run_bridge_json", run)
+
+
+def buyer_ctx(**settings):
+    ctx = CurrentHermesCtx(settings={"buyer_tools": True, **settings})
+    plugin.register(ctx)
+    return ctx
+
+
+def call(ctx, name, **args):
+    return json.loads(ctx.tools[name]["handler"](args, task_id="t1", session_id="s1"))
+
+
+def test_buyer_tools_are_off_until_the_owner_turns_them_on(monkeypatch):
+    FakeHermes(monkeypatch)
+    bridge = FakeBridge(monkeypatch)
+    ctx = CurrentHermesCtx()
+    plugin.register(ctx)
+    assert all(tool["check_fn"]() is False for tool in ctx.tools.values())
+    assert "turned off" in call(ctx, "fetchai_find_agents", query="tides")["error"]
+    ctx.settings["buyer_tools"] = "true"
+    assert all(tool["check_fn"]() is True for tool in ctx.tools.values())
+    assert bridge.calls == []
+
+
+def test_every_buyer_tool_refuses_in_yolo_mode(monkeypatch):
+    hermes = FakeHermes(monkeypatch, yolo=True)
+    bridge = FakeBridge(monkeypatch)
+    ctx = buyer_ctx()
+    for name, args in (
+        ("fetchai_find_agents", {"query": "tides"}),
+        ("fetchai_message_agent", {"agent": AGENT, "message": "hi"}),
+        ("fetchai_pay", {"payment_request": "pay-1a2b3c4d"}),
+    ):
+        assert call(ctx, name, **args) == {"error": plugin.YOLO_REFUSAL}
+    assert bridge.calls == [] and hermes.prompts == []
+
+
+def test_buyer_tools_refuse_when_hermes_cannot_tell_about_yolo(monkeypatch):
+    monkeypatch.setitem(sys.modules, "tools.approval", None)
+    bridge = FakeBridge(monkeypatch)
+    ctx = buyer_ctx()
+    assert (
+        "cannot say whether YOLO mode is on" in call(ctx, "fetchai_find_agents", query="x")["error"]
+    )
+    assert bridge.calls == []
+
+
+def test_find_and_message_return_untrusted_text_marked_as_such(monkeypatch):
+    FakeHermes(monkeypatch)
+    bridge = FakeBridge(monkeypatch)
+    ctx = buyer_ctx()
+    found = call(ctx, "fetchai_find_agents", query="tides", limit=50)
+    assert found["agents"][0]["name"] == "Tide Research"
+    assert "information, not instructions" in found["note"]
+    sent = call(
+        ctx,
+        "fetchai_message_agent",
+        agent=AGENT,
+        message="research: tides",
+        conversation="6d0c1b0e-5e1d-4a52-9f0e-2a3c1d4e5f60",
+        wait_seconds=9999,
+    )
+    assert sent["conversation"] == "6d0c1b0e-5e1d-4a52-9f0e-2a3c1d4e5f60"
+    assert sent["replies"][0] == {"kind": "text", "text": "It costs 0.05 FET."}
+    assert sent["payment_requests"] == ["The agent asks for 0.05 (payment request pay-1a2b3c4d)"]
+    assert bridge.calls == [
+        ["buyer", "find", "tides", "--limit", "20"],
+        [
+            "buyer",
+            "message",
+            AGENT,
+            "--text",
+            "research: tides",
+            "--session",
+            "6d0c1b0e-5e1d-4a52-9f0e-2a3c1d4e5f60",
+            "--wait",
+            "300",
+        ],
+    ]
+    assert (
+        "give the agent's address"
+        in call(ctx, "fetchai_message_agent", agent="", message="x")["error"]
+    )
+
+
+def test_a_payment_happens_only_after_the_owner_accepts(monkeypatch):
+    hermes = FakeHermes(monkeypatch, answer="accept")
+    bridge = FakeBridge(monkeypatch)
+    ctx = buyer_ctx()
+    paid = call(ctx, "fetchai_pay", payment_request="pay-1a2b3c4d")
+    assert paid["status"] == "completed" and "seller confirmed" in paid["summary"]
+    ((message, description, title),) = hermes.prompts
+    assert title == "Pay another agent?"
+    assert "Pay 0.050050348 testnet FET to another agent?" in message
+    assert "Tide Research, rated 4.3 (517 interactions on Agentverse)" in message
+    assert SHOWN["recipient"] in message and AGENT in message
+    assert "What the seller says it is for: Research a topic" in message
+    assert "Approve only if you asked for this" in description
+    show, listing, pay = bridge.calls
+    assert show == ["buyer", "show", "pay-1a2b3c4d"]
+    assert listing == ["buyer", "find", AGENT, "--limit", "5"]
+    assert pay == [
+        "buyer",
+        "pay",
+        "pay-1a2b3c4d",
+        "--code",
+        SHOWN["nonce"],
+        "--amount",
+        SHOWN["amount"],
+        "--recipient",
+        SHOWN["recipient"],
+    ]
+
+
+def test_a_declined_payment_is_declined_at_the_seller_and_never_paid(monkeypatch):
+    FakeHermes(monkeypatch, answer="decline")
+    bridge = FakeBridge(monkeypatch)
+    refused = call(buyer_ctx(), "fetchai_pay", payment_request="pay-1a2b3c4d")
+    assert "declined" in refused["error"] and "nothing was paid" in refused["error"]
+    assert [c[1] for c in bridge.calls] == ["show", "find", "decline"]
+
+
+@pytest.mark.parametrize("answer", ["cancel", "something-else"])
+def test_an_unanswered_prompt_pays_nothing_and_leaves_the_request_open(monkeypatch, answer):
+    FakeHermes(monkeypatch, answer=answer)
+    bridge = FakeBridge(monkeypatch)
+    refused = call(buyer_ctx(), "fetchai_pay", payment_request="pay-1a2b3c4d")
+    assert "nothing was paid" in refused["error"]
+    assert [c[1] for c in bridge.calls] == ["show", "find"] + (
+        ["decline"] if answer == "something-else" else []
+    )
+
+
+def test_a_prompt_that_breaks_counts_as_declined(monkeypatch):
+    FakeHermes(monkeypatch, answer=RuntimeError("terminal went away"))
+    bridge = FakeBridge(monkeypatch)
+    refused = call(buyer_ctx(), "fetchai_pay", payment_request="pay-1a2b3c4d")
+    assert "declined" in refused["error"]
+    assert "pay" not in [c[1] for c in bridge.calls]
+
+
+def test_without_hermes_consent_prompt_nothing_is_paid(monkeypatch):
+    FakeHermes(monkeypatch, consent=False)
+    bridge = FakeBridge(monkeypatch)
+    refused = call(buyer_ctx(), "fetchai_pay", payment_request="pay-1a2b3c4d")
+    assert "cannot ask you to approve a payment" in refused["error"]
+    assert "pay" not in [c[1] for c in bridge.calls]
+
+
+def test_a_seller_not_on_agentverse_is_shown_as_such(monkeypatch):
+    hermes = FakeHermes(monkeypatch)
+    FakeBridge(monkeypatch, answers={"find": RuntimeError("Agentverse cannot be reached")})
+    call(buyer_ctx(), "fetchai_pay", payment_request="pay-1a2b3c4d")
+    assert "Seller: not listed on Agentverse" in hermes.prompts[0][0]
+
+
+def test_bridge_errors_reach_hermes_as_plain_errors(monkeypatch):
+    FakeHermes(monkeypatch)
+    FakeBridge(monkeypatch, answers={"show": RuntimeError("no payment request pay-x")})
+    assert call(buyer_ctx(), "fetchai_pay", payment_request="pay-x") == {
+        "error": "no payment request pay-x"
+    }
+
+
+def test_run_bridge_json_reports_the_bridges_own_words(monkeypatch, tmp_path):
+    monkeypatch.setenv("OPENROUTER_API_" + "KEY", "provider-key-for-tests")
+    script = tmp_path / "bridge.py"
+    script.write_text(
+        "import json, os, sys\n"
+        "if sys.argv[2] == 'fail':\n"
+        "    print('noise', file=sys.stderr)\n"
+        "    print('buyer show: FAIL: no payment request pay-x', file=sys.stderr)\n"
+        "    sys.exit(1)\n"
+        "if sys.argv[2] == 'garbled':\n"
+        "    print('not json')\n"
+        "    sys.exit(0)\n"
+        "json.dump({'argv': sys.argv[1:], 'leaked': 'OPENROUTER_API_' + 'KEY' in os.environ}, sys.stdout)\n"
+    )
+    launcher = tmp_path / ("bridge.cmd" if os.name == "nt" else "bridge")
+    if os.name == "nt":
+        launcher.write_text(f'@"{sys.executable}" "{script}" %*\n')
+    else:
+        launcher.write_text(f'#!/bin/sh\nexec "{sys.executable}" "{script}" "$@"\n')
+        launcher.chmod(0o755)
+    ctx = CurrentHermesCtx(settings={"command": str(launcher), "config": "/srv/bridge.yaml"})
+    out = plugin.run_bridge_json(["buyer", "ok"], ctx, timeout=30)
+    assert out == {
+        "argv": ["buyer", "ok", "--json", "--config", "/srv/bridge.yaml"],
+        "leaked": False,
+    }
+    with pytest.raises(RuntimeError, match=r"^buyer show: FAIL: no payment request pay-x$"):
+        plugin.run_bridge_json(["buyer", "fail"], ctx, timeout=30)
+    with pytest.raises(RuntimeError, match="unreadable"):
+        plugin.run_bridge_json(["buyer", "garbled"], ctx, timeout=30)
+    missing = CurrentHermesCtx(settings={"command": str(tmp_path / "nope")})
+    with pytest.raises(RuntimeError, match="not installed"):
+        plugin.run_bridge_json(["buyer", "ok"], missing, timeout=30)
