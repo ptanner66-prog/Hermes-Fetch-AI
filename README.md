@@ -7,22 +7,39 @@
 
 - **sell** work to other agents and to people who use [ASI:One](https://asi1.ai), Fetch.ai's chat assistant: research on a topic, a security review of code, or a program of your own, paid in FET;
 - **buy** work from other agents, with you approving every payment;
-- let other agents use a few Hermes tools you choose.
+- let other agents use a few Hermes tools you choose (for advanced users; setup does not do this, see [docs/hermes-tools.md](docs/hermes-tools.md)).
 
 **It runs on Fetch's test network for now.** Payments use test FET, which is free and has no value, so you can try all of this without risking money. Real money stays locked until the payment code has had a security review.
 
-**Who it is for:** Hermes users who want their agent to earn from, or pay, other agents. You do not need to know crypto or programming: setup is a few commands and plain questions.
+**Some of it is brand new.** Selling to ASI:One users, and Hermes' payment prompt answered by a real person, are tested in code but not yet live (see [Status](#status)).
 
-**What it costs:** nothing. The software is free and open source (MIT), and so are test FET and an Agentverse account. If you sell research, the AI model that does it is billed by your model provider as usual.
+**Who it is for:** Hermes users who want their agent to earn from, or pay, other agents. You do not need to know crypto or programming: setup is a few commands, typed in a terminal, and plain questions.
+
+**What it costs:** the software is free and open source (MIT), and so are test FET and an Agentverse account. The one real cost is research, if you sell it: buyers pay in free test FET, but the AI model that does the work is billed to your model account in real money. Setup limits research to 20 requests a day unless you choose otherwise.
 
 Hermes Fetch AI is an independent community project, not affiliated with or endorsed by Fetch.ai or Nous Research.
+
+## Words you will see
+
+- **Terminal:** the window where you type commands. Terminal on macOS, PowerShell on Windows, any terminal on Linux. Every command below is typed there.
+- **Agent:** a program on Fetch.ai's network that can talk to other agents. Yours has an **address** that starts with `agent1`.
+- **Wallet:** where FET is kept. Your agent has two, an income wallet and a buying wallet; their addresses start with `fetch1`.
+- **FET, test FET:** Fetch.ai's currency. On the **testnet**, Fetch's test network, it is free and worth nothing. The **faucet** is Fetch's free source of test FET.
+- **Ledger:** the public record of every payment on Fetch's network. Your agent checks payments there.
+- **Agentverse:** Fetch.ai's directory of agents, at agentverse.ai. Its **mailbox** passes messages to agents like yours that are not reachable from the internet directly.
+- **ASI:One:** Fetch.ai's chat assistant. Its users can find your agent on Agentverse and pay it.
+- **API key:** a password-like code a service gives you so programs can use your account, such as an Agentverse or OpenRouter key.
+- **Model server:** a program that runs an AI model on your own computer, such as [Ollama](https://ollama.com).
+- **Secret key (seed):** the secret behind your agent's identity and wallets, kept as `UAGENT_SEED` in Hermes' `.env` file.
+- **YOLO mode:** Hermes' mode that skips its safety prompts. While it is on, Hermes does not work with other agents at all.
 
 ## What you need
 
 - **Hermes** 0.21.5 or later, on Linux, macOS, or Windows.
+- **uv**, the tool that installs the bridge. In a terminal on macOS or Linux: `curl -LsSf https://astral.sh/uv/install.sh | sh`. On Windows, in PowerShell: `powershell -ExecutionPolicy ByPass -c "irm https://astral.sh/uv/install.ps1 | iex"`. Then close the terminal and open a new one.
 - **A computer that stays on** while your agent works for others.
-- To **sell to ASI:One users**, or buy from agents elsewhere: a free [Agentverse](https://agentverse.ai) account and its API key (Profile, API Keys). Setup asks for it; without one, your agent works on this computer only, which is fine for trying it out.
-- To **sell research**: a key from [OpenRouter](https://openrouter.ai) or [Anthropic](https://console.anthropic.com), or a model running on your computer.
+- To **sell to ASI:One users**, or buy from agents elsewhere: a free [Agentverse](https://agentverse.ai) account and its API key (Profile, API Keys). Setup asks for it. Without one, your agent is not listed anywhere, so only programs on this computer know how to reach it, which is fine for trying it out.
+- To **sell research**: a key from [OpenRouter](https://openrouter.ai) or [Anthropic](https://console.anthropic.com), with a spending limit set there, or a model server on your computer.
 - To **sell code reviews**: [Ollama](https://ollama.com) or another model server on your computer. Buyers' code never leaves it.
 
 ## Set up in 5 steps
@@ -34,25 +51,25 @@ Hermes Fetch AI is an independent community project, not affiliated with or endo
    hermes plugins enable fetchai-bridge
    ```
 
-2. **Install the bridge**, the program that does the work. It asks before installing anything, and keeps it separate from Hermes:
+2. **Install the bridge**, the program that does the work. It shows what it will run and asks first, and keeps the bridge separate from Hermes. It ends with `Installed. Next: hermes fetchai-bridge setup`:
 
    ```bash
    hermes fetchai-bridge install
    ```
 
-3. **Answer a few questions.** Setup makes your agent's secret key, asks what to sell and at what price, and whether Hermes may buy. Run it again any time to change your answers:
+3. **Answer a few questions.** Setup makes your agent's secret key and asks what to sell, at what price, and whether Hermes may buy. It may also ask for your Agentverse API key, a key for research, and whether to list your agent on Agentverse, which shows its name, services, and prices to everyone. It ends with `Saved your choices to ...`. Run it again any time to change your answers:
 
    ```bash
    hermes fetchai-bridge setup
    ```
 
-4. **Start your agent.** It keeps running in the background:
+4. **Start your agent.** It keeps running in the background and says `Your agent is running`:
 
    ```bash
    hermes fetchai-bridge start
    ```
 
-5. **Check on it:**
+5. **Check on it.** It shows your agent's address, what it sells, and what it earned:
 
    ```bash
    hermes fetchai-bridge status
@@ -64,9 +81,9 @@ To see how a sale and a purchase work before you set anything up, run `hermes fe
 
 Setup offers three kinds of service. You choose which, and the price of each:
 
-- **Research a topic.** A buyer asks a question and gets a short answer with its sources. A separate, throwaway Hermes does the work with web search only: it never sees your own Hermes, files, accounts, or terminal ([how](docs/guest-hermes.md)).
-- **Defensive code security review.** A buyer sends code and gets its security problems explained, with fixes. An AI model on your computer reads only the code it was sent. It cannot scan, contact, or attack anything, and it never writes working exploits.
-- **Your own program.** Anything you can run on your computer, such as a drafting tool you built. Setup asks for its path, a name, a price, and a note to add to every answer (for example "a first draft for review by a licensed attorney; not legal advice"). Your program stays on your computer: only its answers leave it ([details](docs/payments.md#your-own-program)).
+- **Research a topic.** A buyer asks a question and gets a short answer with its sources. A separate, throwaway Hermes does the work with web search only: it never sees your own Hermes, files, accounts, or terminal ([how](docs/guest-hermes.md)). It uses your model account, so setup asks how many requests a day to take (20 unless you say otherwise).
+- **Defensive code security review.** A buyer sends code and gets its security problems explained, with fixes. An AI model on your computer reads only the code it was sent. It cannot scan, contact, or attack anything, and it is told never to write working exploits.
+- **Your own program.** A program on your computer that reads the buyer's request and prints an answer, such as a drafting tool you built. Setup asks for its path, a name, a price, and a note to add to every answer (for example "a first draft for review by a licensed attorney; not legal advice"). Your program stays on your computer: only its answers leave it ([how to write one](docs/payments.md#your-own-program)).
 
 ## How you get paid
 
@@ -76,32 +93,33 @@ Setup offers three kinds of service. You choose which, and the price of each:
 4. Your agent checks the payment on Fetch's ledger itself; it never takes the buyer's word for it.
 5. It does the work and sends the answer.
 
-Each payment buys one answer. A payment cannot be used twice, not even after a restart. If the work fails on your side, the buyer can try again without paying again. `status` shows what you earned in the last day. More: [docs/payments.md](docs/payments.md) and, for ASI:One, [docs/asi-one.md](docs/asi-one.md).
+Each payment buys one answer. A payment cannot be used twice, not even after a restart. If the work fails on your side, the buyer can try again without paying again; if it keeps failing, `status` tells you the buyer is owed a refund, which you send back by hand ([refunds](docs/payments.md#refunds)). `status` shows what you earned in the last day. More: [docs/payments.md](docs/payments.md) and, for ASI:One, [docs/asi-one.md](docs/asi-one.md).
 
 ## How Hermes pays other agents, and why it always asks you first
 
-If you say yes to buying in setup, Hermes gets tools to find agents on Agentverse, message them, and pay them. When a seller asks for money, Hermes shows you the amount, who is asking, how they are rated, and where the money goes, in its own confirmation prompt. **Nothing is paid unless you say yes**, every single time:
+If you say yes to buying in setup, Hermes gets tools to find agents on Agentverse, message them, and pay them. When a seller asks for money, Hermes shows you the amount, who is asking, how they are rated, and where the money goes, in its own confirmation prompt, and pays only if you say yes:
 
-- Hermes asks even in YOLO mode, and never remembers your answer for next time.
+- It asks every time, and never remembers your answer for next time.
 - A run where nobody can answer, such as a scheduled job, never pays.
-- While YOLO mode is on, Hermes does not talk to other agents at all.
-- Your agent enforces limits whatever Hermes asks for: at most 1 test FET per payment and 5 per day, unless you change them.
+- YOLO mode cannot skip this: while it is on, the buying tools switch off, and Hermes does not talk to other agents at all.
+- Your agent enforces limits whatever Hermes asks for: at most 1 test FET per payment and 5 per day (setup lets you change both), and 2 per seller.
 - Other agents' replies are treated as information, never as instructions.
 
-More: [docs/buying.md](docs/buying.md).
+One gap to know about: Hermes can use a terminal, and the payment commands work from a terminal too. A Hermes tricked into typing them could pay without showing you the prompt. The limits above still hold, which is one reason the buying wallet should hold only a little test FET. More: [docs/buying.md](docs/buying.md).
 
 ## Is my money safe?
 
-- **There is no real money involved.** Your agent works only on Fetch's test network, where FET is free test money. Mainnet is locked in the code.
-- **Payments have limits.** Each payment, each seller, and each day has a cap, and every payment needs your yes.
+- **No real FET is involved.** Selling and buying work only on Fetch's test network, where FET is free test money; the code refuses anything else.
+- **The one real cost is research.** Buyers pay in free test FET, but each research request uses your OpenRouter or Anthropic account. Setup caps research at 20 requests a day unless you choose otherwise; also set a spending limit with your provider. The code review runs on your computer and costs nothing extra.
+- **Payments have limits.** Each payment, each seller, and each day has a cap, and each payment needs your yes in Hermes' prompt.
 - **Spending and earning are separate.** Payments go out of a separate buying wallet, never out of the wallet your income goes to.
-- **Your agent's secret key is in Hermes' `.env` file**, as `UAGENT_SEED`. Back it up somewhere private: without it, your agent's address, its ratings, and its wallets are gone. Anyone who has it controls your agent. Hermes hides the file from its own tools, but that is not a hard wall. A Hermes tricked into misusing its terminal could read the key, so keep only small amounts in the wallets. This is one reason real money stays locked.
+- **Your agent's secret key is in Hermes' `.env` file**, as `UAGENT_SEED`: `~/.hermes/.env` on macOS and Linux (`.hermes` is a hidden folder in your home folder), `%LOCALAPPDATA%\hermes\.env` on Windows. Back it up: copy the line that starts with `UAGENT_SEED=` into a password manager. Without it, your agent's address, its ratings, and its wallets are gone. Anyone who has it controls your agent, so never paste it into a chat, Hermes included. Hermes hides the file from its own tools, but that is not a hard wall: a Hermes tricked into misusing its terminal could read the key, so keep only small amounts in the wallets. This is one reason real money stays locked.
 
 Details: [docs/security.md](docs/security.md).
 
 ## Keeping your agent online
 
-`hermes fetchai-bridge start` keeps your agent running in the background while your computer is on, even after you close the terminal. After a restart of the computer, run it again. To start it automatically, run it as a service ([docs/production.md](docs/production.md) has a systemd example).
+`hermes fetchai-bridge start` keeps your agent running in the background while your computer is on, even after you close the terminal. After the computer restarts, run it again. Starting it automatically when the computer starts is a technical setup, written up for Linux only for now ([docs/production.md](docs/production.md#running-in-the-background)).
 
 ## Everyday commands
 
@@ -112,29 +130,23 @@ Details: [docs/security.md](docs/security.md).
 | `hermes fetchai-bridge stop` / `restart` | Stop it; or stop and start it, after changing your setup |
 | `hermes fetchai-bridge setup` | Change what you sell, prices, buying, and limits |
 | `hermes fetchai-bridge seller pause` / `resume` | Stop selling at once, or start again |
+| `hermes fetchai-bridge seller credits` | Payments you received, and any you owe back |
 | `hermes fetchai-bridge wallet --fund` | Get free test FET for the buying wallet |
 | `hermes fetchai-bridge buyer purchases` | What Hermes bought, and the state of each payment |
-
-## Words you will see
-
-- **Agent:** a program on Fetch.ai's network that can talk to other agents. Yours has an **address** that starts with `agent1`.
-- **Wallet:** where FET is kept. Your agent has two, an income wallet and a buying wallet; their addresses start with `fetch1`.
-- **FET, test FET:** Fetch.ai's currency. On the **testnet**, Fetch's test network, it is free and worth nothing.
-- **Agentverse:** Fetch.ai's directory of agents, at agentverse.ai. Its **mailbox** passes messages to agents like yours that are not reachable from the internet directly.
-- **ASI:One:** Fetch.ai's chat assistant. Its users can find your agent on Agentverse and pay it.
-- **Secret key (seed):** the secret behind your agent's identity and wallets, kept as `UAGENT_SEED` in Hermes' `.env`.
-- **YOLO mode:** Hermes' mode that skips its safety prompts. Payment prompts still appear, and Hermes does not work with other agents while it is on.
 
 ## If something goes wrong
 
 | You see | What to do |
 |---------|------------|
-| `'hermes-fetch-ai' not found` | Install the bridge: `hermes fetchai-bridge install` |
-| `no config yet; run hermes fetchai-bridge setup` | Run setup |
+| `'hermes-fetch-ai' not found` | Install the bridge: `hermes fetchai-bridge install`. If install said `Installed, but your terminal cannot find hermes-fetch-ai yet`, run the command it named, open a new terminal, and go on |
+| `To install the bridge, first install uv` | Install uv as shown under [What you need](#what-you-need), open a new terminal, and run install again |
+| `config: FAIL: no config yet` | Run setup: `hermes fetchai-bridge setup` |
 | `Your agent could not start` | Read the log lines it shows; `hermes fetchai-bridge logs` has more |
-| `Turn off YOLO mode to work with other agents` | Turn YOLO mode off for this Hermes session |
-| A research service that never answers | Its model key may be missing: run setup again |
-| `nothing answers at http://127.0.0.1:11434/v1` | Start your model server (`ollama serve`) and pull the model setup named |
+| `Turn off YOLO mode to work with other agents` | Type `/yolo` again in Hermes, or start Hermes without `--yolo` |
+| `your agent is not running with buying on` | Start your agent: `hermes fetchai-bridge start` (say yes to buying in setup first) |
+| A research service that never answers | Run `hermes fetchai-bridge seller try research --request "test"`. It shows the real error, such as a wrong key, no credit left, or a model name your provider does not know; fix it, or run setup again |
+| `nothing answers at http://127.0.0.1:11434/v1` | Open the Ollama app (or run `ollama serve`), then download the model once: `ollama pull qwen2.5-coder:7b`, or the model you chose in setup |
+| `the buyers are owed refunds` in `status` | A paid request failed on your side. Send the test FET back by hand to the payer `hermes fetchai-bridge seller credits --status failed` shows ([refunds](docs/payments.md#refunds)) |
 | An empty buying wallet | `hermes fetchai-bridge wallet --fund` |
 
 Everything else, error by error: [docs/troubleshooting.md](docs/troubleshooting.md).
