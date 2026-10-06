@@ -60,6 +60,7 @@ jobs:
           python -m hermes_fetch_ai.cli demo local
           python -m hermes_fetch_ai.cli demo paid
           python -m hermes_fetch_ai.cli demo chat
+          python -m hermes_fetch_ai.cli demo buy
 
       - name: Dependency audit
         run: |
@@ -86,6 +87,7 @@ jobs:
           hermes-fetch-ai demo local
           hermes-fetch-ai demo paid
           hermes-fetch-ai demo chat
+          hermes-fetch-ai demo buy
 
       - name: Attest build provenance
         uses: actions/attest-build-provenance@v4

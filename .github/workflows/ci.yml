@@ -63,6 +63,9 @@ jobs:
       - name: Chat sale demo (offline, the way an ASI:One user buys)
         run: python -m hermes_fetch_ai.cli demo chat
 
+      - name: Buying demo (offline, the way Hermes buys from another agent)
+        run: python -m hermes_fetch_ai.cli demo buy
+
   package:
     name: package smoke
     runs-on: ubuntu-latest
@@ -95,6 +98,7 @@ jobs:
           hermes-fetch-ai demo local
           hermes-fetch-ai demo paid
           hermes-fetch-ai demo chat
+          hermes-fetch-ai demo buy
 
   coverage:
     name: test coverage

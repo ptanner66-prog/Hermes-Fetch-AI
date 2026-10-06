@@ -15,17 +15,20 @@ from uagents.registration import AlmanacApiRegistrationPolicy
 from uagents_adapter.mcp.protocol import CallTool, CallToolResponse, ListTools, ListToolsResponse
 
 from .audit import AuditWriter
+from .buyer import Buyer, SendInSession
 from .chat_protocol import build_chat_protocols
 from .config import BridgeConfig
+from .control import ControlServer, control_path
 from .direct_protocol import build_protocol, replay_args
 from .ledger import LcdLedgerReader, LedgerReader
 from .mcp_shim import HermesMCPClientShim
 from .quotes import quote_key
 from .registration_policies import NoopRegistrationPolicy
 from .seller import Seller
+from .sender import CosmpySender, PaymentSender
 from .services import ServiceDesk, ServiceRunner
 from .store import Store
-from .wallet import agent_address, wallet_address
+from .wallet import BUYING_WALLET_INDEX, agent_address, wallet_address, wallet_for
 
 T = TypeVar("T", bound=Model)
 
@@ -70,27 +73,66 @@ def payment_store_path(cfg: BridgeConfig, seed: str) -> Path:
     return cfg.payments.state_path / agent_address(seed) / "payments.sqlite3"
 
 
+def _lcd(cfg: BridgeConfig) -> Callable[[], LedgerReader]:
+    payments = cfg.payments
+
+    def lcd() -> LedgerReader:
+        return LcdLedgerReader(payments.ledger_url, payments.ledger_timeout_seconds)
+
+    return lcd
+
+
 def build_service_desk(
     cfg: BridgeConfig,
     seed: str,
     *,
     ledger_factory: Callable[[], LedgerReader] | None = None,
     runners: dict[str, ServiceRunner] | None = None,
+    store: Store | None = None,
 ) -> ServiceDesk:
     """The seller side of a bridge with ``payments.enabled``: services, payments, records."""
     payments = cfg.payments
-
-    def lcd() -> LedgerReader:
-        return LcdLedgerReader(payments.ledger_url, payments.ledger_timeout_seconds)
-
     seller = Seller(
         payments=payments,
-        store=Store.open(payment_store_path(cfg, seed)),
+        store=store or Store.open(payment_store_path(cfg, seed)),
         key=quote_key(seed),
         payout=payments.payout_address or wallet_address(seed),
-        ledger_factory=ledger_factory or lcd,
+        ledger_factory=ledger_factory or _lcd(cfg),
     )
     return ServiceDesk(cfg, seller, runners)
+
+
+def build_buyer(
+    cfg: BridgeConfig,
+    seed: str,
+    store: Store,
+    *,
+    sender: PaymentSender | None = None,
+    ledger_factory: Callable[[], LedgerReader] | None = None,
+) -> Buyer:
+    """The buying side of a bridge with ``buying.enabled``; it pays from the buying wallet."""
+    return Buyer(
+        cfg,
+        store,
+        AuditWriter(cfg.audit_path),
+        sender=sender or CosmpySender(wallet_for(seed, BUYING_WALLET_INDEX), cfg.payments),
+        ledger_factory=ledger_factory or _lcd(cfg),
+    )
+
+
+def session_sender(agent: Agent) -> SendInSession:
+    """Send a message from ``agent`` in a given chat session, outside any handler.
+
+    uAgents builds the same kind of context for its interval tasks; the
+    session it carries is the one the other agent replies in.
+    """
+
+    async def send(to: str, message: Model, session: str) -> None:
+        ctx = agent._build_context()
+        ctx._session = uuid.UUID(session)
+        await ctx.send(to, message)
+
+    return send
 
 
 def build_agent(
@@ -99,6 +141,7 @@ def build_agent(
     *,
     seed: str | None = None,
     desk: ServiceDesk | None = None,
+    buyer: Buyer | None = None,
 ) -> Agent:
     kwargs: dict[str, Any] = {
         "name": cfg.agent.name,
@@ -115,7 +158,7 @@ def build_agent(
         # uAgents handles one message at a time by default. A paid service can
         # run for minutes, so a seller handles each message in its own task;
         # each service's run slots bound the work.
-        "handle_messages_concurrently": cfg.payments.enabled,
+        "handle_messages_concurrently": cfg.payments.enabled or buyer is not None,
     }
     if cfg.agent.publish_manifest and cfg.agent.ledger_registration:
         # uAgents' default policy: the Almanac API, then the Almanac contract,
@@ -135,9 +178,11 @@ def build_agent(
         build_protocol(shim or HermesMCPClientShim(cfg), cfg, audit, desk),
         publish_manifest=cfg.agent.publish_manifest,
     )
-    if cfg.chat.enable_chat and desk is not None:
-        for protocol in build_chat_protocols(cfg, desk, audit):
+    if (cfg.chat.enable_chat and desk is not None) or buyer is not None:
+        for protocol in build_chat_protocols(cfg, desk, audit, buyer):
             agent.include(protocol, publish_manifest=cfg.agent.publish_manifest)
+    if buyer is not None:
+        buyer.send = session_sender(agent)
     return agent
 
 
@@ -313,13 +358,33 @@ def run_bridge(cfg: BridgeConfig) -> None:
         _install_stop_handlers(asyncio.get_running_loop(), stop)
         seed = cfg.effective_seed()
         async with HermesMCPClientShim(cfg) as shim:
-            desk = build_service_desk(cfg, seed) if cfg.payments.enabled else None
+            store = (
+                Store.open(payment_store_path(cfg, seed))
+                if cfg.payments.enabled or cfg.buying.enabled
+                else None
+            )
+            desk = buyer = control = None
             try:
-                agent = build_agent(cfg, shim, seed=seed, desk=desk)
+                if cfg.payments.enabled:
+                    assert store is not None
+                    desk = build_service_desk(cfg, seed, store=store)
+                if cfg.buying.enabled:
+                    assert store is not None
+                    buyer = build_buyer(cfg, seed, store)
+                agent = build_agent(cfg, shim, seed=seed, desk=desk, buyer=buyer)
+                if buyer is not None:
+                    control = ControlServer(buyer, control_path(cfg), agent_address=agent.address)
+                    await control.start()
                 await _run_agent_until_stop(agent, stop)
             finally:
+                if control is not None:
+                    await control.stop()
+                if buyer is not None:
+                    await buyer.aclose()
                 if desk is not None:
                     await desk.aclose()
+                if store is not None:
+                    store.close()
 
     try:
         with contextlib.suppress(KeyboardInterrupt, asyncio.CancelledError):
