@@ -5,13 +5,15 @@ Skipped unless both env vars are set (see tests/test_field_hermes_stdio.py):
   HERMES_FETCH_FIELD_TEST=1
   HERMES_FETCH_HERMES_PYTHON=/path/to/hermes-venv/bin/python
 
-The plugin reads two of Hermes' own functions: whether YOLO mode is on
-(`tools.approval.is_approval_bypass_active`), and the confirmation prompt
-(`tools.approval_prompt.request_elicitation_consent`). This loads the plugin
-inside Hermes' Python and checks both still behave as the plugin relies on:
-YOLO is seen however it was turned on, and the prompt declines when nobody
-can answer. CI runs it against Hermes 0.21.5 and a pinned main; it is the
-canary for a Hermes change that would break the payment approval.
+The plugin uses three of Hermes' own functions: whether YOLO mode is on
+(`tools.approval.is_approval_bypass_active`), the confirmation prompt
+(`tools.approval_prompt.request_elicitation_consent`), and the .env writer
+setup keeps the agent's key with (`hermes_cli.config.save_env_value`). This
+loads the plugin inside Hermes' Python and checks each still behaves as the
+plugin relies on: YOLO is seen however it was turned on, the prompt declines
+when nobody can answer, and the key lands in Hermes' .env. CI runs it
+against Hermes 0.21.5 and a pinned main; it is the canary for a Hermes
+change that would break the payment approval or setup.
 """
 
 import json
@@ -39,12 +41,14 @@ PROBE = textwrap.dedent(
     out = {"yolo": plugin.yolo_active()}
     if sys.argv[2:] == ["ask"]:
         out["consent"] = plugin.ask_owner("Pay 0.05 testnet FET to another agent?", "field test")
+    if sys.argv[2:] == ["save"]:
+        out["saved"] = plugin.save_secret("UAGENT_SEED", "f" * 64)
     print(json.dumps(out))
     """
 )
 
 
-def probe(tmp_path, *, ask=False, settings="", **env):
+def probe(tmp_path, *, ask=False, save=False, settings="", **env):
     home = tmp_path / "hermes-home"
     home.mkdir(exist_ok=True)
     (home / "config.yaml").write_text(settings)
@@ -59,6 +63,7 @@ def probe(tmp_path, *, ask=False, settings="", **env):
             str(script),
             str(PLUGIN),
             *(["ask"] if ask else []),
+            *(["save"] if save else []),
         ],
         env={**base, **env},
         stdin=subprocess.DEVNULL,
@@ -82,3 +87,12 @@ def test_the_payment_prompt_declines_when_nobody_can_answer(tmp_path):
     # A one-shot run (`hermes chat -q`), and a process with no session or terminal.
     assert probe(tmp_path, ask=True, HERMES_SINGLE_QUERY_SESSION="1")["consent"] == "decline"
     assert probe(tmp_path, ask=True)["consent"] == "decline"
+
+
+def test_setup_keeps_the_agents_key_in_hermes_env(tmp_path):
+    # `hermes fetchai-bridge setup` stores UAGENT_SEED with Hermes' own .env writer.
+    assert probe(tmp_path, save=True)["saved"] is True
+    env_file = tmp_path / "hermes-home" / ".env"
+    assert "UAGENT_SEED=" + "f" * 64 in env_file.read_text()
+    if sys.platform != "win32":
+        assert oct(env_file.stat().st_mode & 0o777) == "0o600"

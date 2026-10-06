@@ -682,8 +682,28 @@ def build_parser() -> argparse.ArgumentParser:
     return p
 
 
+# Set by the fetchai-bridge plugin to its own version.
+PLUGIN_VERSION_VAR = "HERMES_FETCH_AI_PLUGIN_VERSION"
+
+
+def _version_note() -> None:
+    """Say when the bridge and the Hermes plugin that runs it are different versions."""
+    import os
+
+    from . import __version__
+
+    plugin = os.environ.get(PLUGIN_VERSION_VAR)
+    if plugin and plugin != __version__:
+        print(
+            f"note: this bridge is version {__version__} and the fetchai-bridge plugin is "
+            f"{plugin}; to match them: hermes fetchai-bridge install",
+            file=sys.stderr,
+        )
+
+
 def main(argv: list[str] | None = None) -> int:
     args = build_parser().parse_args(argv)
+    _version_note()
     try:
         return int(args.func(args))
     except BrokenPipeError:

@@ -41,6 +41,8 @@ HEADER = (
 )
 DEFAULT_PORT = 8000
 HANDLE_HINT = "3 to 20 lowercase letters, digits, - or _, starting with a letter or digit"
+# Set by the fetchai-bridge plugin: where to tell it what was chosen.
+RESULT_VAR = "HERMES_FETCH_AI_SETUP_RESULT"
 
 RESEARCH = "research"
 REVIEW = "security-review"
@@ -434,7 +436,19 @@ class Wizard:
         self._check(cfg)
         self._after(cfg, seed)
         self._next_steps(cfg)
+        self._report(cfg)
         return 0
+
+    def _report(self, cfg: BridgeConfig) -> None:
+        """Tell the plugin what was chosen, so it can line up its own settings."""
+        target = self.environ.get(RESULT_VAR)
+        if target:
+            result = {
+                "config": str(self.path),
+                "selling": bool(cfg.services),
+                "buying": cfg.buying.enabled,
+            }
+            Path(target).write_text(json.dumps(result), encoding="utf-8")
 
     def _load_old(self) -> bool:
         if not self.path.exists():
@@ -853,7 +867,7 @@ class Wizard:
         say("Next:")
         say("  hermes fetchai-bridge start    start your agent; it keeps running in the background")
         say("  hermes fetchai-bridge status   see what it is doing")
-        if cfg.buying.enabled:
+        if cfg.buying.enabled and not self.environ.get(RESULT_VAR):
             say('  In Hermes\' plugin settings, turn on "Let Hermes buy from other agents".')
 
 
