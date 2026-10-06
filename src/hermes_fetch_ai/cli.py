@@ -47,6 +47,8 @@ def _contamination_scan() -> tuple[bool, str]:
         ROOT / "src",
         ROOT / "docs",
         ROOT / "examples",
+        ROOT / "hermes-plugin",
+        ROOT / "upstream",
         ROOT / "README.md",
         ROOT / ".env.example",
         ROOT / "pyproject.toml",

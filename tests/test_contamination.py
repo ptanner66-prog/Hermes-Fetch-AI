@@ -6,6 +6,8 @@ def test_public_tree_has_no_forbidden_contamination():
         Path("src"),
         Path("docs"),
         Path("examples"),
+        Path("hermes-plugin"),
+        Path("upstream"),
         Path("README.md"),
         Path(".env.example"),
         Path("pyproject.toml"),

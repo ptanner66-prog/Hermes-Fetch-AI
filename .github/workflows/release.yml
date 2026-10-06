@@ -79,12 +79,9 @@ jobs:
           source /tmp/hfa-release-smoke/bin/activate
           python -m pip install -U pip
           python -m pip install dist/*.whl
+          hermes-fetch-ai --version
           hermes-fetch-ai doctor
-          python - <<'PY'
-          import importlib.metadata
-          eps = importlib.metadata.entry_points().select(group='hermes_agent.plugins')
-          assert any(ep.name == 'fetchai' for ep in eps)
-          PY
+          hermes-fetch-ai demo local
 
       - name: Attest build provenance
         uses: actions/attest-build-provenance@v4

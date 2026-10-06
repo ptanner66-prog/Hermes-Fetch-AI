@@ -9,6 +9,6 @@ include .env.example
 recursive-include docs *.md
 recursive-include examples *.yaml
 recursive-include tests *.py
-recursive-include upstream *.md
-recursive-include upstream SKILL.md
+recursive-include hermes-plugin *.py *.yaml *.md
+recursive-include upstream *.md *.yaml
 recursive-include .github *.md *.yml *.yaml

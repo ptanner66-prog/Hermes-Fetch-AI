@@ -1,0 +1,17 @@
+name: fetchai-bridge
+repo: https://github.com/ptanner66-prog/Hermes-Fetch-AI
+sha: REPLACE_WITH_THE_40_CHARACTER_COMMIT_SHA
+subdir: hermes-plugin/fetchai-bridge
+description: "Lets Fetch.ai uAgents call a default-deny, allowlisted subset of Hermes tools (only skills_list by default) through the hermes-fetch-ai bridge, with replay protection, argument checks and a redacted audit log. Adds `hermes fetchai-bridge`, which runs the separately installed bridge in its own Python environment (nothing is installed into Hermes), and an operate skill. Community project, not affiliated with Fetch.ai. Disclosure — `hermes fetchai-bridge` runs the hermes-fetch-ai executable (no shell) with the user's environment, including UAGENT_SEED from $HERMES_HOME/.env; `serve` is a long-running process that listens on the configured port, starts Hermes' tools MCP server as a child process with an allowlisted environment, and contacts the Fetch.ai network or Agentverse only when its config enables that; no telemetry."
+maintainer: ptanner66-prog
+tier: community
+category: tools
+requires_hermes: ">=0.21.5"
+docs_url: https://github.com/ptanner66-prog/Hermes-Fetch-AI/blob/main/docs/native-hermes-plugin.md
+version: "1.0.0"
+platforms: []
+capabilities:
+  provides_tools: []
+  provides_hooks: []
+  provides_middleware: []
+  requires_env: []

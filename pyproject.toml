@@ -53,9 +53,6 @@ dev = [
 [project.scripts]
 hermes-fetch-ai = "hermes_fetch_ai.cli:main"
 
-[project.entry-points."hermes_agent.plugins"]
-fetchai = "hermes_fetch_ai.hermes_plugin"
-
 [tool.setuptools.packages.find]
 where = ["src"]
 
@@ -70,6 +67,10 @@ pythonpath = ["src"]
 [tool.ruff]
 line-length = 100
 target-version = "py311"
+
+[tool.ruff.lint.per-file-ignores]
+# Hermes loads directory plugins by path and names them like `fetchai-bridge`.
+"hermes-plugin/*/__init__.py" = ["N999"]
 
 [tool.mypy]
 python_version = "3.11"

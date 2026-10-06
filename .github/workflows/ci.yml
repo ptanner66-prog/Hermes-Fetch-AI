@@ -77,20 +77,16 @@ jobs:
           python -m build
           python -m twine check dist/*
 
-      - name: Install built wheel and run native plugin smoke
+      - name: Install built wheel and run CLI smoke
         shell: bash
         run: |
           python -m venv /tmp/hfa-wheel-smoke
           source /tmp/hfa-wheel-smoke/bin/activate
           python -m pip install -U pip
           python -m pip install dist/*.whl
+          hermes-fetch-ai --version
           hermes-fetch-ai doctor
-          python - <<'PY'
-          import importlib.metadata
-          eps = importlib.metadata.entry_points().select(group='hermes_agent.plugins')
-          names = {ep.name for ep in eps}
-          assert 'fetchai' in names, names
-          PY
+          hermes-fetch-ai demo local
 
   dependency-audit:
     name: dependency audit
