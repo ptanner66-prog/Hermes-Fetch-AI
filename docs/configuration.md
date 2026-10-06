@@ -2,7 +2,7 @@
 
 The bridge reads one YAML file (`--config`). Unknown keys are errors, and so are credential-shaped values: secrets come from the environment. [`src/hermes_fetch_ai/config.py`](../src/hermes_fetch_ai/config.py) is the source of truth for everything below; `hermes-fetch-ai doctor --config <file>` checks a file without starting anything.
 
-The examples in [`examples/`](../examples) are complete configs: `local-direct.yaml` (fake tools), `hermes-stdio.yaml` (real Hermes tools, the production shape), `hermes-local.yaml` (Hermes in the same environment, v0.16.x only), and `agentverse-mailbox.yaml` (manual, unverified).
+The examples in [`examples/`](../examples) are complete configs: `local-direct.yaml` (fake tools), `hermes-stdio.yaml` (real Hermes tools, the production shape), `hermes-local.yaml` (Hermes in the same environment, v0.16.x only), `agentverse-mailbox.yaml` (manual, unverified), and `paid-services.yaml` (selling services for testnet FET).
 
 ## `agent`
 
@@ -10,7 +10,7 @@ The examples in [`examples/`](../examples) are complete configs: `local-direct.y
 |-----|---------|---------|
 | `name` | `hermes_fetch_bridge` | The agent's name in logs. |
 | `port` | `8000` | HTTP port. uAgents listens on all interfaces (`0.0.0.0`) and has no bind-address setting, so firewall the port. |
-| `network` | `testnet` | `testnet` or `mainnet`: the Fetch network for the agent's address and the Almanac. |
+| `network` | `testnet` | `testnet` or `mainnet`: the Fetch network for the agent's address and the Almanac. Selling services needs `testnet`. |
 | `mode` | `endpoint` | How remote agents reach the bridge: `endpoint` (directly, at `endpoint`), `mailbox` (through an Agentverse mailbox; manual and unverified), or `proxy` (through Agentverse's proxy; untested). |
 | `endpoint` | none | The URL other agents use to reach the bridge, such as `https://bridge.example.com/submit`. Needed for Almanac registration. |
 | `publish_manifest` | `false` | Register the bridge in the Almanac and publish its protocol manifest. With `false` the bridge makes no outbound calls of its own; with `true`, registration can spend fees from the agent's wallet. |
@@ -57,11 +57,57 @@ Tool names in these lists may contain only letters, digits, `_`, `.` and `-`, up
 |-----|---------|---------|
 | `audit_path` | per platform | The JSONL audit log. Default: `$XDG_STATE_HOME/hermes-fetch-ai/audit.jsonl` (`~/.local/state/...` when unset) on Linux and macOS, `%LOCALAPPDATA%\HermesFetchAI\audit.jsonl` on Windows. `~` is expanded. The file rotates at 25 MB and keeps five old files. |
 
+## `payments`
+
+How buyers pay for services ([`payments.md`](payments.md)). Fetch's testnet only.
+
+| Key | Default | Meaning |
+|-----|---------|---------|
+| `enabled` | `false` | Sell the services under `services`. Needs `agent.network: testnet`. |
+| `network` | `testnet` | The only accepted value; `mainnet` is locked until a security review. |
+| `chain_id` | `dorado-1` | The testnet chain. The bridge checks that the ledger reports it before verifying any payment, and refuses payments otherwise. |
+| `denom` | `atestfet` | The testnet unit: 1 FET = 10^18 `atestfet`. |
+| `ledger_url` | `https://rest-dorado.fetch.ai` | The Cosmos REST endpoint the bridge reads transactions from. `https://`, or `http://` on this machine only; no credentials or query. |
+| `ledger_timeout_seconds` | `8` | Limit for one ledger lookup, retries included. |
+| `payout_address` | the agent's wallet | The `fetch1...` wallet buyers pay. Unset, it is the wallet derived from `UAGENT_SEED` (key index 0). Required with `agent.dev_random_seed: true`, whose wallet changes on every start. |
+| `state_dir` | per platform | Where payment records live, in a folder per agent address: `$XDG_STATE_HOME/hermes-fetch-ai` (`~/.local/state/...` when unset) on Linux and macOS, `%LOCALAPPDATA%\HermesFetchAI` on Windows. `~` is expanded. |
+| `quote_ttl_seconds` | `600` | How long a price quote can be paid. |
+| `redeem_window_seconds` | `86400` | How long after a quote expires its payment can still be presented, and how long a verified payment stays usable before it lapses. |
+| `max_attempts` | `3` | Runs a paid request gets when the service fails on the seller's side; after that the payment is `failed` and needs a refund. |
+| `max_verifications_per_minute_per_sender` | `6` | Ledger lookups one buyer can cause per minute. |
+| `max_global_verifications_per_minute` | `60` | Ledger lookups all buyers together can cause per minute. |
+
+## `services`
+
+The services this agent sells, by name: `services: {<name>: {...}}`. Each appears to other agents as the tool `service.<name>`, with one string argument, `request`. Names use lowercase letters, digits, `_` and `-`, start with a letter or digit, and are at most 40 characters. Services need `payments.enabled: true`.
+
+| Key | Default | Meaning |
+|-----|---------|---------|
+| `title` | required | A short name buyers see, up to 80 characters. |
+| `description` | required | What the service does, up to 500 characters. |
+| `price` | `"0"` | Testnet FET per request, as a string (`"0.05"`): up to 18 decimal places, at most 1000. `"0"` is free. |
+| `input.max_chars` | `4000` | Longest request accepted. |
+| `input.check_urls` | `true` | Reject requests that contain URLs to local or private addresses. Turn it off only for a service that never fetches anything, such as a code review. |
+| `runner` | required | What does the work: `{type: command, ...}` (below), or `{type: echo}`, which answers with the request (demos and tests). |
+| `disclaimer` | none | Added to the end of every answer, up to 500 characters. |
+| `max_runs_per_day` | `200` | Runs per 24 hours across all buyers. |
+
+A `command` runner:
+
+| Key | Default | Meaning |
+|-----|---------|---------|
+| `argv` | required | The program and its arguments, as a list. The program must be an absolute path; no shell is used. |
+| `timeout_seconds` | `300` | The program is stopped after this long, and the run counts as a failure on the seller's side. |
+| `max_output_chars` | `20000` | Longer answers are cut off with a note. |
+| `pass_env` | `[]` | Names of environment variables the program may see, besides a short fixed list. Values never go in the config. |
+
+`doctor` and `serve` fail if a program, or a file named by absolute path in `argv`, does not exist, so the bridge never takes payments for a service that cannot run. `seller try` runs a service once without payment.
+
 ## `chat`
 
 | Key | Default | Meaning |
 |-----|---------|---------|
-| `enable_chat` | `false` | Must stay `false`: the chat protocol is out of scope. |
+| `enable_chat` | `false` | Must stay `false` for now; chat and ASI:One support is planned ([`agent-economy.md`](agent-economy.md)). |
 
 ## Environment
 

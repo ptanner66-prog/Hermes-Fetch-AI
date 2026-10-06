@@ -1,6 +1,6 @@
-# Agent economy (design, in development)
+# Agent economy (design and status)
 
-This is the design for letting Hermes take part in Fetch.ai's agent economy. Nothing here is released yet. Each section says what has landed; the rest is the plan the code is being built against.
+This is the design for letting Hermes take part in Fetch.ai's agent economy. Selling over MCP calls has landed (unreleased; how to use it: [`payments.md`](payments.md)). The rest is the plan the code is being built against; the [status table](#status) says what has landed.
 
 ## What it will do
 
@@ -12,13 +12,15 @@ This is the design for letting Hermes take part in Fetch.ai's agent economy. Not
 
 Fetch's Agent Payment Protocol defines the messages (`RequestPayment`, `CommitPayment`, `CompletePayment`, `CancelPayment`, `RejectPayment`) but leaves checking the payment to the seller. Fetch's own examples are labeled demo-only, and the public example seller trusts the amount the buyer claims, accepts the same transaction more than once, and converts amounts with floating point. The bridge closes each of these.
 
-## Selling over MCP calls
+## Selling over MCP calls (landed)
 
 1. A buyer calls a priced service. All of the bridge's normal checks run first (rate limits, policy, replay protection, argument checks).
 2. Without payment, the reply is an error that starts with `payment required:` followed by JSON terms: price, recipient, network, chain id, and a reference. The reference is a signed token that carries the terms, so a flood of quote requests stores nothing.
 3. The buyer sends testnet FET to the recipient with the reference as the transaction memo, then repeats the call with the reference and the transaction hash.
 4. The bridge reads the transaction from the ledger itself and checks: it succeeded; it sends the right denomination to the right address; the amount is at least the price (exact integers); the memo matches the reference; it was made inside the quote's time window; the hash has never been used. The check and the record of the hash happen in one database transaction that survives restarts.
 5. The service runs once. If the runner fails for an infrastructure reason, the payment stays as a credit the buyer can retry.
+
+Services run through a `command` runner: the owner's program gets the request on stdin and its output is the answer ([`payments.md`](payments.md#your-own-program)). The "bug bounty with a local AI" service is built this way: [`examples/services/code_review.py`](../examples/services/code_review.py) sends the buyer's code only to a model server on the seller's machine and gives the model no tools. This was planned for a guest Hermes runner; a plain program is smaller and depends on no Hermes internals, so the guest runner is now for services that need Hermes' tools, such as research.
 
 ## Selling through chat (ASI:One)
 
@@ -50,11 +52,11 @@ All of these must hold before mainnet can be unlocked:
 | Part | State |
 |------|-------|
 | Scope, threat model, and test-network guard | Landed |
-| Paid services over MCP calls | Planned |
+| Paid services over MCP calls | Landed; tested on the real testnet |
 | Chat and ASI:One | Planned |
 | Guest Hermes runners | Planned |
 | Buying, plugin tools, approvals | Planned |
 | Guided setup and plain-language docs | Planned |
 | Live testnet tests and real-world trial | Planned |
 
-The threats this design addresses are listed in [`security.md`](security.md#payments-in-development).
+The threats this design addresses, and the controls that have landed, are in [`security.md`](security.md#payments).
