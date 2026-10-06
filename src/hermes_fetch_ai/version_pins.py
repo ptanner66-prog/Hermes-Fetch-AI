@@ -12,7 +12,7 @@ from importlib import metadata
 
 DISTRIBUTION = "hermes-fetch-ai"
 
-# Exact pins such as ``uagents==0.25.3`` or ``uagents-adapter[mcp]==0.6.2``.
+# Exact pins such as ``uagents==0.25.5`` or ``uagents-adapter[mcp]==0.6.2``.
 # Ranges and optional extras (which carry an ``; extra == ...`` marker) are skipped.
 _EXACT_PIN = re.compile(r"^([A-Za-z0-9][A-Za-z0-9._-]*)(?:\[[^\]]*\])?==([^\s;,]+)$")
 
