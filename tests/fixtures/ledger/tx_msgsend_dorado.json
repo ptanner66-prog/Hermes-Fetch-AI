@@ -1,0 +1,326 @@
+{
+  "tx": {
+    "auth_info": {
+      "fee": {
+        "amount": [
+          {
+            "amount": "421085000000000",
+            "denom": "atestfet"
+          }
+        ],
+        "gas_limit": "84217",
+        "granter": "",
+        "payer": ""
+      },
+      "signer_infos": [
+        {
+          "mode_info": {
+            "single": {
+              "mode": "SIGN_MODE_DIRECT"
+            }
+          },
+          "public_key": {
+            "@type": "/cosmos.crypto.secp256k1.PubKey",
+            "key": "AnbCjzwozzVzIfMB8aomrcxTWQdAy1ZsmpPFS6Es1GGM"
+          },
+          "sequence": "264565"
+        }
+      ],
+      "tip": null
+    },
+    "body": {
+      "extension_options": [],
+      "memo": "",
+      "messages": [
+        {
+          "@type": "/cosmos.bank.v1beta1.MsgSend",
+          "amount": [
+            {
+              "amount": "10000000000000000",
+              "denom": "atestfet"
+            }
+          ],
+          "from_address": "fetch1lnnckuv69jj6qzh5mz7w4uzex9tcsjcckndw0l",
+          "to_address": "fetch1dcsuqllhyntgenx5wye3jp367vqkv7ax3dae9f"
+        }
+      ],
+      "non_critical_extension_options": [],
+      "timeout_height": "0",
+      "timeout_timestamp": null,
+      "unordered": false
+    },
+    "signatures": [
+      "+zwxeYUSKm+N9nx5k9DKnqPC2uMiTIaYtTq1/HM72g9f+7eE4tPzRwGbwlRJlJ4p6w7gsAAENBNuD6eufQ2zFQ=="
+    ]
+  },
+  "tx_response": {
+    "code": 0,
+    "codespace": "",
+    "data": "12260A242F636F736D6F732E62616E6B2E763162657461312E4D736753656E64526573706F6E7365",
+    "events": [
+      {
+        "attributes": [
+          {
+            "index": true,
+            "key": "spender",
+            "value": "fetch1lnnckuv69jj6qzh5mz7w4uzex9tcsjcckndw0l"
+          },
+          {
+            "index": true,
+            "key": "amount",
+            "value": "421085000000000atestfet"
+          }
+        ],
+        "type": "coin_spent"
+      },
+      {
+        "attributes": [
+          {
+            "index": true,
+            "key": "receiver",
+            "value": "fetch17xpfvakm2amg962yls6f84z3kell8c5lry2yf2"
+          },
+          {
+            "index": true,
+            "key": "amount",
+            "value": "421085000000000atestfet"
+          }
+        ],
+        "type": "coin_received"
+      },
+      {
+        "attributes": [
+          {
+            "index": true,
+            "key": "recipient",
+            "value": "fetch17xpfvakm2amg962yls6f84z3kell8c5lry2yf2"
+          },
+          {
+            "index": true,
+            "key": "sender",
+            "value": "fetch1lnnckuv69jj6qzh5mz7w4uzex9tcsjcckndw0l"
+          },
+          {
+            "index": true,
+            "key": "amount",
+            "value": "421085000000000atestfet"
+          }
+        ],
+        "type": "transfer"
+      },
+      {
+        "attributes": [
+          {
+            "index": true,
+            "key": "sender",
+            "value": "fetch1lnnckuv69jj6qzh5mz7w4uzex9tcsjcckndw0l"
+          }
+        ],
+        "type": "message"
+      },
+      {
+        "attributes": [
+          {
+            "index": true,
+            "key": "fee",
+            "value": "421085000000000atestfet"
+          },
+          {
+            "index": true,
+            "key": "fee_payer",
+            "value": "fetch1lnnckuv69jj6qzh5mz7w4uzex9tcsjcckndw0l"
+          }
+        ],
+        "type": "tx"
+      },
+      {
+        "attributes": [
+          {
+            "index": true,
+            "key": "acc_seq",
+            "value": "fetch1lnnckuv69jj6qzh5mz7w4uzex9tcsjcckndw0l/264565"
+          }
+        ],
+        "type": "tx"
+      },
+      {
+        "attributes": [
+          {
+            "index": true,
+            "key": "signature",
+            "value": "+zwxeYUSKm+N9nx5k9DKnqPC2uMiTIaYtTq1/HM72g9f+7eE4tPzRwGbwlRJlJ4p6w7gsAAENBNuD6eufQ2zFQ=="
+          }
+        ],
+        "type": "tx"
+      },
+      {
+        "attributes": [
+          {
+            "index": true,
+            "key": "action",
+            "value": "/cosmos.bank.v1beta1.MsgSend"
+          },
+          {
+            "index": true,
+            "key": "sender",
+            "value": "fetch1lnnckuv69jj6qzh5mz7w4uzex9tcsjcckndw0l"
+          },
+          {
+            "index": true,
+            "key": "module",
+            "value": "bank"
+          },
+          {
+            "index": true,
+            "key": "msg_index",
+            "value": "0"
+          }
+        ],
+        "type": "message"
+      },
+      {
+        "attributes": [
+          {
+            "index": true,
+            "key": "spender",
+            "value": "fetch1lnnckuv69jj6qzh5mz7w4uzex9tcsjcckndw0l"
+          },
+          {
+            "index": true,
+            "key": "amount",
+            "value": "10000000000000000atestfet"
+          },
+          {
+            "index": true,
+            "key": "msg_index",
+            "value": "0"
+          }
+        ],
+        "type": "coin_spent"
+      },
+      {
+        "attributes": [
+          {
+            "index": true,
+            "key": "receiver",
+            "value": "fetch1dcsuqllhyntgenx5wye3jp367vqkv7ax3dae9f"
+          },
+          {
+            "index": true,
+            "key": "amount",
+            "value": "10000000000000000atestfet"
+          },
+          {
+            "index": true,
+            "key": "msg_index",
+            "value": "0"
+          }
+        ],
+        "type": "coin_received"
+      },
+      {
+        "attributes": [
+          {
+            "index": true,
+            "key": "recipient",
+            "value": "fetch1dcsuqllhyntgenx5wye3jp367vqkv7ax3dae9f"
+          },
+          {
+            "index": true,
+            "key": "sender",
+            "value": "fetch1lnnckuv69jj6qzh5mz7w4uzex9tcsjcckndw0l"
+          },
+          {
+            "index": true,
+            "key": "amount",
+            "value": "10000000000000000atestfet"
+          },
+          {
+            "index": true,
+            "key": "msg_index",
+            "value": "0"
+          }
+        ],
+        "type": "transfer"
+      },
+      {
+        "attributes": [
+          {
+            "index": true,
+            "key": "sender",
+            "value": "fetch1lnnckuv69jj6qzh5mz7w4uzex9tcsjcckndw0l"
+          },
+          {
+            "index": true,
+            "key": "msg_index",
+            "value": "0"
+          }
+        ],
+        "type": "message"
+      }
+    ],
+    "gas_used": "73704",
+    "gas_wanted": "84217",
+    "height": "25557161",
+    "info": "",
+    "logs": [],
+    "raw_log": "",
+    "timestamp": "2026-10-06T05:39:11Z",
+    "tx": {
+      "@type": "/cosmos.tx.v1beta1.Tx",
+      "auth_info": {
+        "fee": {
+          "amount": [
+            {
+              "amount": "421085000000000",
+              "denom": "atestfet"
+            }
+          ],
+          "gas_limit": "84217",
+          "granter": "",
+          "payer": ""
+        },
+        "signer_infos": [
+          {
+            "mode_info": {
+              "single": {
+                "mode": "SIGN_MODE_DIRECT"
+              }
+            },
+            "public_key": {
+              "@type": "/cosmos.crypto.secp256k1.PubKey",
+              "key": "AnbCjzwozzVzIfMB8aomrcxTWQdAy1ZsmpPFS6Es1GGM"
+            },
+            "sequence": "264565"
+          }
+        ],
+        "tip": null
+      },
+      "body": {
+        "extension_options": [],
+        "memo": "",
+        "messages": [
+          {
+            "@type": "/cosmos.bank.v1beta1.MsgSend",
+            "amount": [
+              {
+                "amount": "10000000000000000",
+                "denom": "atestfet"
+              }
+            ],
+            "from_address": "fetch1lnnckuv69jj6qzh5mz7w4uzex9tcsjcckndw0l",
+            "to_address": "fetch1dcsuqllhyntgenx5wye3jp367vqkv7ax3dae9f"
+          }
+        ],
+        "non_critical_extension_options": [],
+        "timeout_height": "0",
+        "timeout_timestamp": null,
+        "unordered": false
+      },
+      "signatures": [
+        "+zwxeYUSKm+N9nx5k9DKnqPC2uMiTIaYtTq1/HM72g9f+7eE4tPzRwGbwlRJlJ4p6w7gsAAENBNuD6eufQ2zFQ=="
+      ]
+    },
+    "txhash": "9EDD34AB91C3D45DAB43A0B2A25125519AED7EA1BB30F3D5B2D8E58F9FACB496"
+  }
+}
