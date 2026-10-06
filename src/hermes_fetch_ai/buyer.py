@@ -25,6 +25,7 @@ none of it is ever followed as an instruction by the bridge.
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import secrets
 import time
 import uuid
@@ -71,6 +72,12 @@ MAX_OPEN_QUOTES_PER_SELLER = 20
 MAX_DEADLINE_SECONDS = 3600
 # A payment that never showed up on the ledger after this long is given up on.
 GIVE_UP_AFTER_MS = 3_600_000
+# Quiet seconds after which a burst of replies counts as complete.
+SETTLE_SECONDS = 1.5
+# Most replies, and most characters of them, handed back at once; the rest
+# wait in the inbox for the next read.
+MAX_REPLIES_AT_ONCE = 50
+MAX_REPLIES_CHARS = 60_000
 
 SendInSession = Callable[[str, Model, str], Awaitable[None]]
 
@@ -139,6 +146,18 @@ def text_of(msg: ChatMessage) -> str:
     return "\n".join(item.text for item in msg.content if isinstance(item, TextContent))
 
 
+def first_replies(entries: list[InboxEntry]) -> list[InboxEntry]:
+    """The oldest of ``entries`` that fit in one answer (always at least one)."""
+    kept: list[InboxEntry] = []
+    chars = 0
+    for entry in entries[:MAX_REPLIES_AT_ONCE]:
+        chars += len(entry.body)
+        if kept and chars > MAX_REPLIES_CHARS:
+            break
+        kept.append(entry)
+    return kept
+
+
 class Buyer:
     """The buying side of the bridge: talking to other agents and paying them."""
 
@@ -163,7 +182,8 @@ class Buyer:
         self._new_id = new_id
         # Set by the agent once it runs: sends a message in a given chat session.
         self.send: SendInSession | None = None
-        self._arrivals: dict[tuple[str, str], asyncio.Event] = {}
+        # One event per waiting caller, set when its conversation gets a message.
+        self._arrivals: dict[tuple[str, str], set[asyncio.Event]] = {}
 
     def _now_ms(self) -> int:
         return int(self._clock() * 1000)
@@ -180,8 +200,7 @@ class Buyer:
         )
 
     def _arrived(self, peer: str, session: str) -> None:
-        event = self._arrivals.get((peer, session))
-        if event is not None:
+        for event in self._arrivals.get((peer, session), ()):
             event.set()
 
     # -- talking ------------------------------------------------------------
@@ -214,23 +233,52 @@ class Buyer:
         return session, mark
 
     async def wait_for_reply(
-        self, peer: str, session: str, *, after_id: int, timeout: float
+        self,
+        peer: str,
+        session: str,
+        *,
+        after_id: int,
+        timeout: float,
+        settle: float = SETTLE_SECONDS,
+        answers: Callable[[InboxEntry], bool] = lambda entry: True,
     ) -> list[InboxEntry]:
-        """New messages in a conversation, waiting up to ``timeout`` seconds for the first."""
+        """New messages in a conversation, waiting up to ``timeout`` seconds for an answer.
+
+        An answer is a message ``answers`` accepts (by default, any message).
+        Agents often answer with several messages at once (a price, then a
+        payment request), so once an answer arrives this keeps collecting until
+        the conversation has been quiet for ``settle`` seconds, or until there
+        is more than one reply can hold (``first_replies``); the rest wait in
+        the inbox.
+        """
         key = (peer, session)
-        event = self._arrivals.setdefault(key, asyncio.Event())
+        event = asyncio.Event()
+        waiting = self._arrivals.setdefault(key, set())
+        waiting.add(event)
+        loop = asyncio.get_running_loop()
+        deadline = loop.time() + timeout
         try:
             entries = self.store.inbox(peer=peer, session=session, after_id=after_id)
-            if not entries:
+            while len(first_replies(entries)) == len(entries):
+                answered = any(answers(entry) for entry in entries)
+                left = deadline - loop.time()
+                wait = min(settle, left) if answered else left
+                if wait <= 0:
+                    break
                 event.clear()
-                try:
-                    await asyncio.wait_for(event.wait(), timeout)
-                except TimeoutError:
-                    return []
-                entries = self.store.inbox(peer=peer, session=session, after_id=after_id)
-            return entries
+                with contextlib.suppress(TimeoutError):
+                    await asyncio.wait_for(event.wait(), wait)
+                more = self.store.inbox(
+                    peer=peer, session=session, after_id=entries[-1].id if entries else after_id
+                )
+                if answered and not more:
+                    break  # quiet for `settle` seconds
+                entries += more
+            return first_replies(entries)
         finally:
-            self._arrivals.pop(key, None)
+            waiting.discard(event)
+            if not waiting:
+                self._arrivals.pop(key, None)
 
     def expects(self, peer: str, session: str | None = None) -> bool:
         """True for an agent Hermes started talking to (in this session, if given)."""

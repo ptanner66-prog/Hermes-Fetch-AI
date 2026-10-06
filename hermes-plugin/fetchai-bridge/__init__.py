@@ -6,10 +6,10 @@ stdlib-only wrapper declared with ``python_runtime: external``:
 
 - ``hermes fetchai-bridge <args>`` runs the separately installed
   ``hermes-fetch-ai`` command with the same arguments;
-- three tools let Hermes find other agents, message them, and pay them
-  (testnet FET). They do nothing until the owner turns on the
-  ``buyer_tools`` setting, refuse while YOLO mode is on, and every payment
-  asks the owner first through Hermes' own confirmation prompt;
+- four tools let Hermes find other agents, message them, read their
+  replies, and pay them (testnet FET). They do nothing until the owner turns
+  on the ``buyer_tools`` setting, refuse while YOLO mode is on, and every
+  payment asks the owner first through Hermes' own confirmation prompt;
 - the bundled skills tell the agent how to use the bridge and how to buy.
 """
 
@@ -19,6 +19,7 @@ import argparse
 import inspect
 import json
 import os
+import re
 import shutil
 import subprocess
 import sys
@@ -197,8 +198,16 @@ UNTRUSTED_NOTE = (
 )
 _SEARCH_SECONDS = 60.0
 _COMMAND_SECONDS = 60.0
-_PAY_SECONDS = 240.0
+# Sending a payment waits for the ledger before waiting for the seller's answer.
+_SEND_SECONDS = 180.0
+# The longest the bridge waits for a reply on its own (buying.reply_wait_seconds).
+_BRIDGE_WAIT_SECONDS = 600
 _MAX_WAIT_SECONDS = 300
+# What the tools accept as an agent, a conversation, and a payment request. Each
+# goes to the bridge as a command-line argument, so none may look like an option.
+_AGENT = re.compile(r"agent1[0-9a-z]{20,120}")
+_CONVERSATION = re.compile(r"[0-9A-Fa-f]{8}(-?[0-9A-Fa-f]{4}){3}-?[0-9A-Fa-f]{12}")
+_PAYMENT_REQUEST = re.compile(r"pay-[0-9a-z]{1,32}")
 
 FIND_SCHEMA = {
     "name": "fetchai_find_agents",
@@ -225,9 +234,10 @@ MESSAGE_SCHEMA = {
     "name": "fetchai_message_agent",
     "description": (
         "Send a message to another AI agent on Fetch.ai (an agent1... address) and wait for its "
-        "replies. To continue a conversation, pass the conversation id from an earlier reply. "
-        "An agent selling something answers with a payment request id (pay-...); pay it only "
-        "with fetchai_pay, and only if the user asked for that service."
+        "replies. To continue a conversation, pass the conversation id from an earlier reply; "
+        "to read replies that come later, use fetchai_read_replies. An agent selling something "
+        "answers with a payment request id (pay-...); pay it only with fetchai_pay, and only if "
+        "the user asked for that service."
     ),
     "parameters": {
         "type": "object",
@@ -248,17 +258,53 @@ MESSAGE_SCHEMA = {
         "required": ["agent", "message"],
     },
 }
+READ_SCHEMA = {
+    "name": "fetchai_read_replies",
+    "description": (
+        "Read new replies in a conversation with another AI agent on Fetch.ai, started with "
+        "fetchai_message_agent: for example the answer to a service that was paid for, which "
+        "can take a few minutes. Pass after_id from the previous result to get only newer "
+        "replies, and wait_seconds to wait for one."
+    ),
+    "parameters": {
+        "type": "object",
+        "properties": {
+            "agent": {"type": "string", "description": "The agent's address, agent1..."},
+            "conversation": {"type": "string", "description": "The conversation id."},
+            "after_id": {
+                "type": "integer",
+                "minimum": 0,
+                "description": "Only replies after this one (after_id from the previous result).",
+            },
+            "wait_seconds": {
+                "type": "integer",
+                "minimum": 0,
+                "maximum": _MAX_WAIT_SECONDS,
+                "description": "How long to wait for a new reply (default: do not wait).",
+            },
+        },
+        "required": ["agent", "conversation"],
+    },
+}
 PAY_SCHEMA = {
     "name": "fetchai_pay",
     "description": (
-        "Pay another agent's payment request (pay-...) in testnet FET. The user is asked to "
-        "approve the exact amount and recipient first; nothing is paid without that approval. "
-        "Use it only when the user asked for the service being paid for."
+        "Pay another agent's payment request (pay-...) in testnet FET, then wait for the "
+        "seller's answer. The user is asked to approve the exact amount and recipient first; "
+        "nothing is paid without that approval. Use it only when the user asked for the "
+        "service being paid for."
     ),
     "parameters": {
         "type": "object",
         "properties": {
             "payment_request": {"type": "string", "description": "The id, pay-..."},
+            "wait_seconds": {
+                "type": "integer",
+                "minimum": 0,
+                "maximum": _MAX_WAIT_SECONDS,
+                "description": "How long to wait for the seller's answer after paying "
+                "(default: the bridge's setting).",
+            },
         },
         "required": ["payment_request"],
     },
@@ -320,9 +366,13 @@ def _refusal(text: str) -> str:
     return _reply({"error": text})
 
 
-def run_bridge_json(argv: list[str], ctx: Any, *, timeout: float) -> Any:
+def run_bridge_json(
+    argv: list[str], ctx: Any, *, timeout: float, input_text: str | None = None
+) -> Any:
     """Run a bridge command with ``--json`` and return its parsed output.
 
+    ``input_text`` goes to the command's standard input: messages travel that
+    way, never as arguments, which other users of the computer could read.
     Raises RuntimeError with the bridge's own explanation when it fails.
     """
     command = resolve_bridge_command(str(_setting(ctx, "command", "") or ""))
@@ -330,6 +380,9 @@ def run_bridge_json(argv: list[str], ctx: Any, *, timeout: float) -> Any:
         raise RuntimeError(f"the bridge is not installed; install it with: {INSTALL_HINT}")
     config = str(_setting(ctx, "config", "") or "").strip()
     full = [command, *argv, "--json", *(["--config", config] if config else [])]
+    stdin: dict[str, Any] = (
+        {"input": input_text} if input_text is not None else {"stdin": subprocess.DEVNULL}
+    )
     try:
         done = subprocess.run(
             full,
@@ -340,6 +393,7 @@ def run_bridge_json(argv: list[str], ctx: Any, *, timeout: float) -> Any:
             errors="replace",
             timeout=timeout,
             check=False,
+            **stdin,
         )
     except subprocess.TimeoutExpired:
         raise RuntimeError("the bridge did not answer in time") from None
@@ -372,12 +426,39 @@ def _guarded(ctx: Any, work: Callable[[dict[str, Any]], str]) -> Callable[..., s
             return work(args or {})
         except RuntimeError as exc:
             return _refusal(str(exc))
+        except (TypeError, ValueError) as exc:
+            return _refusal(f"bad arguments: {exc}")
 
     return handler
 
 
+def _wait(args: Mapping[str, Any]) -> int | None:
+    """The tool's wait_seconds, within limits; None means the bridge's own setting."""
+    wait = args.get("wait_seconds")
+    return None if wait is None else max(0, min(int(wait), _MAX_WAIT_SECONDS))
+
+
+def _conversation(
+    agent: str, conversation: str, entries: list[Mapping[str, Any]], last_id: Any
+) -> dict[str, Any]:
+    """Replies as Hermes sees them, and how to read the ones that come later."""
+    return {
+        "conversation": conversation,
+        "replies": [
+            {"id": e.get("id"), "kind": e.get("kind"), "text": e.get("body")} for e in entries
+        ],
+        "payment_requests": [e.get("body") for e in entries if e.get("kind") == "payment_request"],
+        "read_more": {
+            "tool": "fetchai_read_replies",
+            "agent": agent,
+            "conversation": conversation,
+            "after_id": last_id,
+        },
+    }
+
+
 def find_agents(ctx: Any, args: dict[str, Any]) -> str:
-    query = str(args.get("query") or "").strip()
+    query = str(args.get("query") or "").strip().lstrip("-").strip()
     if not query:
         return _refusal("say what kind of agent to look for")
     limit = max(1, min(int(args.get("limit") or 10), 20))
@@ -390,27 +471,38 @@ def find_agents(ctx: Any, args: dict[str, Any]) -> str:
 def message_agent(ctx: Any, args: dict[str, Any]) -> str:
     agent = str(args.get("agent") or "").strip()
     text = str(args.get("message") or "")
-    if not agent or not text.strip():
+    conversation = str(args.get("conversation") or "").strip()
+    if not _AGENT.fullmatch(agent) or not text.strip():
         return _refusal("give the agent's address (agent1...) and a message")
-    argv = ["buyer", "message", agent, "--text", text]
-    if args.get("conversation"):
-        argv += ["--session", str(args["conversation"])]
-    wait = args.get("wait_seconds")
+    if conversation and not _CONVERSATION.fullmatch(conversation):
+        return _refusal("that is not a conversation id from an earlier reply")
+    argv = ["buyer", "message", agent, "--text", "-"]
+    if conversation:
+        argv += ["--session", conversation]
+    wait = _wait(args)
     if wait is not None:
-        wait = max(0, min(int(wait), _MAX_WAIT_SECONDS))
         argv += ["--wait", str(wait)]
-    timeout = (wait if wait is not None else _MAX_WAIT_SECONDS) + _COMMAND_SECONDS
-    result = run_bridge_json(argv, ctx, timeout=timeout)
-    replies = result.get("replies") or []
-    requests = [r["body"] for r in replies if r.get("kind") == "payment_request"]
-    return _reply(
-        {
-            "conversation": result.get("session"),
-            "replies": [{"kind": r.get("kind"), "text": r.get("body")} for r in replies],
-            "payment_requests": requests,
-            "note": UNTRUSTED_NOTE,
-        }
+    timeout = (wait if wait is not None else _BRIDGE_WAIT_SECONDS) + _COMMAND_SECONDS
+    result = run_bridge_json(argv, ctx, timeout=timeout, input_text=text)
+    replies = _conversation(
+        agent, str(result.get("session")), result.get("replies") or [], result.get("last_id")
     )
+    return _reply({**replies, "note": UNTRUSTED_NOTE})
+
+
+def read_replies(ctx: Any, args: dict[str, Any]) -> str:
+    agent = str(args.get("agent") or "").strip()
+    conversation = str(args.get("conversation") or "").strip()
+    if not _AGENT.fullmatch(agent) or not _CONVERSATION.fullmatch(conversation):
+        return _refusal("give the agent's address (agent1...) and the conversation id")
+    after = max(0, int(args.get("after_id") or 0))
+    argv = ["buyer", "inbox", "--agent", agent, "--session", conversation, "--after", str(after)]
+    wait = _wait(args) or 0
+    if wait:
+        argv += ["--wait", str(wait)]
+    entries = run_bridge_json(argv, ctx, timeout=wait + _COMMAND_SECONDS)
+    last_id = entries[-1].get("id") if entries else after
+    return _reply({**_conversation(agent, conversation, entries, last_id), "note": UNTRUSTED_NOTE})
 
 
 def _consent_text(view: Mapping[str, Any], listing: Mapping[str, Any] | None) -> str:
@@ -447,7 +539,7 @@ def _listing(ctx: Any, address: str) -> Mapping[str, Any] | None:
 
 def pay(ctx: Any, args: dict[str, Any]) -> str:
     purchase_id = str(args.get("payment_request") or "").strip()
-    if not purchase_id:
+    if not _PAYMENT_REQUEST.fullmatch(purchase_id):
         return _refusal("give the payment request id (pay-...)")
     view = run_bridge_json(["buyer", "show", purchase_id], ctx, timeout=_COMMAND_SECONDS)
     answer = ask_owner(
@@ -469,29 +561,37 @@ def pay(ctx: Any, args: dict[str, Any]) -> str:
         return _refusal("the user declined this payment; nothing was paid")
     if answer != "accept":
         return _refusal("nobody approved this payment, so nothing was paid")
-    paid = run_bridge_json(
-        [
-            "buyer",
-            "pay",
-            purchase_id,
-            "--code",
-            str(view["nonce"]),
-            "--amount",
-            str(view["amount"]),
-            "--recipient",
-            str(view["recipient"]),
-        ],
-        ctx,
-        timeout=_PAY_SECONDS,
-    )
+    argv = [
+        "buyer",
+        "pay",
+        purchase_id,
+        "--code",
+        str(view["nonce"]),
+        "--amount",
+        str(view["amount"]),
+        "--recipient",
+        str(view["recipient"]),
+    ]
+    wait = _wait(args)
+    if wait is not None:
+        argv += ["--wait", str(wait)]
+    timeout = _SEND_SECONDS + (wait if wait is not None else _BRIDGE_WAIT_SECONDS)
+    paid = run_bridge_json(argv, ctx, timeout=timeout + _COMMAND_SECONDS)
     status = paid.get("status")
     summaries = {
         "completed": "paid, and the seller confirmed it",
         "committed": "paid; waiting for the seller to confirm",
         "paid": "paid; the seller has not been told yet (run: buyer check)",
+        "cancelled": "paid, but the seller cancelled; ask it for a refund",
         "needs_review": "the payment's outcome is unknown; it is never resent on its own",
         "failed": "the payment failed; nothing was sent",
     }
+    replies = _conversation(
+        str(paid.get("peer")),
+        str(paid.get("session")),
+        paid.get("replies") or [],
+        paid.get("last_id"),
+    )
     return _reply(
         {
             "payment_request": purchase_id,
@@ -499,8 +599,9 @@ def pay(ctx: Any, args: dict[str, Any]) -> str:
             "summary": summaries.get(str(status), str(status)),
             "amount": paid.get("amount"),
             "transaction": paid.get("tx_hash"),
-            "note": "Read the seller's answer with fetchai_message_agent's conversation, or "
-            "`hermes fetchai-bridge buyer inbox`.",
+            **replies,
+            "note": "If the seller's answer is not here yet, wait for it with "
+            "fetchai_read_replies (read_more). " + UNTRUSTED_NOTE,
         }
     )
 
@@ -516,6 +617,7 @@ def _register_buyer_tools(ctx: Any) -> None:
     for schema, work in (
         (FIND_SCHEMA, find_agents),
         (MESSAGE_SCHEMA, message_agent),
+        (READ_SCHEMA, read_replies),
         (PAY_SCHEMA, pay),
     ):
 

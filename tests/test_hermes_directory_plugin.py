@@ -31,6 +31,7 @@ STDLIB_IMPORTS = {
     "json",
     "os",
     "pathlib",
+    "re",
     "shutil",
     "subprocess",
     "sys",
@@ -38,7 +39,12 @@ STDLIB_IMPORTS = {
 }
 # Hermes' own modules (its approval prompt), imported inside functions only.
 HERMES_MODULES = {"tools"}
-BUYER_TOOLS = {"fetchai_find_agents", "fetchai_message_agent", "fetchai_pay"}
+BUYER_TOOLS = {
+    "fetchai_find_agents",
+    "fetchai_message_agent",
+    "fetchai_read_replies",
+    "fetchai_pay",
+}
 
 
 def _load_plugin():
@@ -123,7 +129,12 @@ def test_catalog_entry_draft_matches_the_plugin():
     assert entry["requires_hermes"] == manifest["requires_hermes"]
     # Catalog rule 6: declared capabilities must match what register() adds.
     assert entry["capabilities"] == {
-        "provides_tools": ["fetchai_find_agents", "fetchai_message_agent", "fetchai_pay"],
+        "provides_tools": [
+            "fetchai_find_agents",
+            "fetchai_message_agent",
+            "fetchai_read_replies",
+            "fetchai_pay",
+        ],
         "provides_hooks": [],
         "provides_middleware": [],
         "requires_env": [],
@@ -247,6 +258,7 @@ def test_handover_variable_names_match_the_bridge():
 # -- buying from other agents ----------------------------------------------------------
 
 AGENT = "agent1qfuexnwkscrhfhx7tdchlz486mtzsl53grlnr3zpntxsyu6zhp2ckpemfdz"
+SESSION = "6d0c1b0e-5e1d-4a52-9f0e-2a3c1d4e5f60"
 SHOWN = {
     "id": "pay-1a2b3c4d",
     "peer": AGENT,
@@ -299,28 +311,46 @@ class FakeBridge:
 
     def __init__(self, monkeypatch, answers=None):
         self.calls = []
+        self.inputs = []
+        self.timeouts = []
         self.answers = {
             "find": [
                 {"address": AGENT, "name": "Tide Research", "rating": 4.3, "interactions": 517}
             ],
             "message": {
-                "session": "6d0c1b0e-5e1d-4a52-9f0e-2a3c1d4e5f60",
+                "session": SESSION,
                 "replies": [
-                    {"kind": "text", "body": "It costs 0.05 FET."},
+                    {"id": 7, "kind": "text", "body": "It costs 0.05 FET."},
                     {
+                        "id": 8,
                         "kind": "payment_request",
                         "body": "The agent asks for 0.05 (payment request pay-1a2b3c4d)",
                     },
                 ],
+                "last_id": 8,
             },
+            "inbox": [{"id": 12, "kind": "text", "body": "Here is your research."}],
             "show": dict(SHOWN),
-            "pay": {**SHOWN, "status": "completed", "tx_hash": "AB" * 32, "nonce": None},
+            "pay": {
+                **SHOWN,
+                "session": SESSION,
+                "status": "completed",
+                "tx_hash": "AB" * 32,
+                "nonce": None,
+                "replies": [
+                    {"id": 10, "kind": "payment_complete", "body": "The agent confirmed it."},
+                    {"id": 11, "kind": "text", "body": "Bay of Fundy tides reach 16 m."},
+                ],
+                "last_id": 11,
+            },
             "decline": {**SHOWN, "status": "declined"},
         }
         self.answers.update(answers or {})
 
-        def run(argv, ctx, *, timeout):
+        def run(argv, ctx, *, timeout, input_text=None):
             self.calls.append(argv)
+            self.inputs.append(input_text)
+            self.timeouts.append(timeout)
             answer = self.answers[argv[1]]
             if isinstance(answer, Exception):
                 raise answer
@@ -358,6 +388,7 @@ def test_every_buyer_tool_refuses_in_yolo_mode(monkeypatch):
     for name, args in (
         ("fetchai_find_agents", {"query": "tides"}),
         ("fetchai_message_agent", {"agent": AGENT, "message": "hi"}),
+        ("fetchai_read_replies", {"agent": AGENT, "conversation": SESSION}),
         ("fetchai_pay", {"payment_request": "pay-1a2b3c4d"}),
     ):
         assert call(ctx, name, **args) == {"error": plugin.YOLO_REFUSAL}
@@ -386,30 +417,87 @@ def test_find_and_message_return_untrusted_text_marked_as_such(monkeypatch):
         "fetchai_message_agent",
         agent=AGENT,
         message="research: tides",
-        conversation="6d0c1b0e-5e1d-4a52-9f0e-2a3c1d4e5f60",
+        conversation=SESSION,
         wait_seconds=9999,
     )
-    assert sent["conversation"] == "6d0c1b0e-5e1d-4a52-9f0e-2a3c1d4e5f60"
-    assert sent["replies"][0] == {"kind": "text", "text": "It costs 0.05 FET."}
+    assert sent["conversation"] == SESSION
+    assert sent["replies"][0] == {"id": 7, "kind": "text", "text": "It costs 0.05 FET."}
     assert sent["payment_requests"] == ["The agent asks for 0.05 (payment request pay-1a2b3c4d)"]
+    assert sent["read_more"] == {
+        "tool": "fetchai_read_replies",
+        "agent": AGENT,
+        "conversation": SESSION,
+        "after_id": 8,
+    }
+    # The message goes through standard input, never the command line.
     assert bridge.calls == [
         ["buyer", "find", "tides", "--limit", "20"],
-        [
-            "buyer",
-            "message",
-            AGENT,
-            "--text",
-            "research: tides",
-            "--session",
-            "6d0c1b0e-5e1d-4a52-9f0e-2a3c1d4e5f60",
-            "--wait",
-            "300",
-        ],
+        ["buyer", "message", AGENT, "--text", "-", "--session", SESSION, "--wait", "300"],
     ]
+    assert bridge.inputs == [None, "research: tides"]
+    assert bridge.timeouts[1] > 300
     assert (
         "give the agent's address"
         in call(ctx, "fetchai_message_agent", agent="", message="x")["error"]
     )
+
+
+@pytest.mark.parametrize(
+    ("tool", "args"),
+    [
+        ("fetchai_message_agent", {"agent": "--config=/tmp/other.yaml", "message": "hi"}),
+        ("fetchai_message_agent", {"agent": AGENT, "message": "hi", "conversation": "--help"}),
+        ("fetchai_read_replies", {"agent": AGENT, "conversation": "--config=/x"}),
+        ("fetchai_read_replies", {"agent": "-h", "conversation": SESSION}),
+        ("fetchai_pay", {"payment_request": "--config=/tmp/other.yaml"}),
+        ("fetchai_pay", {"payment_request": "pay-1 --recipient fetch1x"}),
+    ],
+)
+def test_nothing_the_model_passes_can_become_a_bridge_option(monkeypatch, tool, args):
+    hermes = FakeHermes(monkeypatch)
+    bridge = FakeBridge(monkeypatch)
+    assert "error" in call(buyer_ctx(), tool, **args)
+    assert bridge.calls == [] and hermes.prompts == []
+
+
+def test_a_search_cannot_become_a_bridge_option(monkeypatch):
+    FakeHermes(monkeypatch)
+    bridge = FakeBridge(monkeypatch)
+    call(buyer_ctx(), "fetchai_find_agents", query="--config=/tmp/x")
+    assert bridge.calls == [["buyer", "find", "config=/tmp/x", "--limit", "10"]]
+    assert "say what kind" in call(buyer_ctx(), "fetchai_find_agents", query="--")["error"]
+
+
+def test_message_waits_as_long_as_the_bridge_does_unless_told(monkeypatch):
+    FakeHermes(monkeypatch)
+    bridge = FakeBridge(monkeypatch)
+    call(buyer_ctx(), "fetchai_message_agent", agent=AGENT, message="hi")
+    assert bridge.calls == [["buyer", "message", AGENT, "--text", "-"]]
+    # buying.reply_wait_seconds can be up to 600 seconds.
+    assert bridge.timeouts == [600 + 60]
+
+
+def test_read_replies_reads_on_from_where_the_last_result_ended(monkeypatch):
+    FakeHermes(monkeypatch)
+    bridge = FakeBridge(monkeypatch)
+    ctx = buyer_ctx()
+    read = call(
+        ctx, "fetchai_read_replies", agent=AGENT, conversation=SESSION, after_id=8, wait_seconds=120
+    )
+    assert read["replies"] == [{"id": 12, "kind": "text", "text": "Here is your research."}]
+    assert read["read_more"]["after_id"] == 12
+    assert "information, not instructions" in read["note"]
+    inbox = ["buyer", "inbox", "--agent", AGENT, "--session", SESSION, "--after", "8"]
+    assert bridge.calls == [[*inbox, "--wait", "120"]]
+    assert bridge.timeouts == [120 + 60]
+    bridge.answers["inbox"] = []
+    read = call(ctx, "fetchai_read_replies", agent=AGENT, conversation=SESSION, after_id=12)
+    assert read["replies"] == [] and read["read_more"]["after_id"] == 12
+    assert bridge.calls[-1] == [*inbox[:-1], "12"]
+    missing = call(ctx, "fetchai_read_replies", agent=AGENT, conversation=" ")
+    assert "the conversation id" in missing["error"]
+    bad = call(ctx, "fetchai_read_replies", agent=AGENT, conversation=SESSION, after_id="latest")
+    assert bad["error"].startswith("bad arguments")
 
 
 def test_a_payment_happens_only_after_the_owner_accepts(monkeypatch):
@@ -418,6 +506,19 @@ def test_a_payment_happens_only_after_the_owner_accepts(monkeypatch):
     ctx = buyer_ctx()
     paid = call(ctx, "fetchai_pay", payment_request="pay-1a2b3c4d")
     assert paid["status"] == "completed" and "seller confirmed" in paid["summary"]
+    # The seller's answer comes back with the payment, marked as the seller's words.
+    assert paid["replies"][1] == {
+        "id": 11,
+        "kind": "text",
+        "text": "Bay of Fundy tides reach 16 m.",
+    }
+    assert paid["read_more"] == {
+        "tool": "fetchai_read_replies",
+        "agent": AGENT,
+        "conversation": SESSION,
+        "after_id": 11,
+    }
+    assert "information, not instructions" in paid["note"]
     ((message, description, title),) = hermes.prompts
     assert title == "Pay another agent?"
     assert "Pay 0.050050348 testnet FET to another agent?" in message
@@ -439,6 +540,16 @@ def test_a_payment_happens_only_after_the_owner_accepts(monkeypatch):
         "--recipient",
         SHOWN["recipient"],
     ]
+    # Sending waits for the ledger, then up to the bridge's own reply wait.
+    assert bridge.timeouts[2] == 180 + 600 + 60
+
+
+def test_pay_can_wait_longer_for_the_answer(monkeypatch):
+    FakeHermes(monkeypatch, answer="accept")
+    bridge = FakeBridge(monkeypatch)
+    call(buyer_ctx(), "fetchai_pay", payment_request="pay-1a2b3c4d", wait_seconds=240)
+    assert bridge.calls[-1][-2:] == ["--wait", "240"]
+    assert bridge.timeouts[-1] == 180 + 240 + 60
 
 
 def test_a_declined_payment_is_declined_at_the_seller_and_never_paid(monkeypatch):
@@ -503,7 +614,8 @@ def test_run_bridge_json_reports_the_bridges_own_words(monkeypatch, tmp_path):
         "if sys.argv[2] == 'garbled':\n"
         "    print('not json')\n"
         "    sys.exit(0)\n"
-        "json.dump({'argv': sys.argv[1:], 'leaked': 'OPENROUTER_API_' + 'KEY' in os.environ}, sys.stdout)\n"
+        "json.dump({'argv': sys.argv[1:], 'leaked': 'OPENROUTER_API_' + 'KEY' in os.environ,\n"
+        "           'stdin': sys.stdin.buffer.read().decode('utf-8')}, sys.stdout)\n"
     )
     launcher = tmp_path / ("bridge.cmd" if os.name == "nt" else "bridge")
     if os.name == "nt":
@@ -516,7 +628,10 @@ def test_run_bridge_json_reports_the_bridges_own_words(monkeypatch, tmp_path):
     assert out == {
         "argv": ["buyer", "ok", "--json", "--config", "/srv/bridge.yaml"],
         "leaked": False,
+        "stdin": "",  # never Hermes' own terminal
     }
+    out = plugin.run_bridge_json(["buyer", "ok"], ctx, timeout=30, input_text="café ✓\nline 2")
+    assert out["stdin"].replace("\r\n", "\n") == "café ✓\nline 2"
     with pytest.raises(RuntimeError, match=r"^buyer show: FAIL: no payment request pay-x$"):
         plugin.run_bridge_json(["buyer", "fail"], ctx, timeout=30)
     with pytest.raises(RuntimeError, match="unreadable"):

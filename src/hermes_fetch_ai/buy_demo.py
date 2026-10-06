@@ -52,7 +52,8 @@ async def _until(
         left = deadline - loop.time()
         if left <= 0:
             raise TimeoutError("the other agent stopped answering")
-        new = await buyer.wait_for_reply(peer, session, after_id=after_id, timeout=left)
+        # `done` decides when the conversation is complete, so take replies as they come.
+        new = await buyer.wait_for_reply(peer, session, after_id=after_id, timeout=left, settle=0.0)
         if new:
             seen += new
             after_id = new[-1].id

@@ -11,6 +11,7 @@ from __future__ import annotations
 import argparse
 import asyncio
 import json
+import math
 import os
 import sys
 import time
@@ -36,9 +37,16 @@ def add_parser(sub: Any) -> None:
         help="what to search for (find), the agent (message), or the payment request id",
     )
     b.add_argument("--config", default=None, help="the config `serve` runs with")
-    b.add_argument("--text", default=None, help="the message to send (message)")
+    b.add_argument(
+        "--text", default=None, help="the message to send (message); - reads it from stdin"
+    )
     b.add_argument("--session", default=None, help="continue this conversation (message, inbox)")
-    b.add_argument("--wait", type=float, default=None, help="seconds to wait for a reply")
+    b.add_argument(
+        "--wait",
+        type=float,
+        default=None,
+        help="seconds to wait for a reply (message, pay; inbox with --agent and --session)",
+    )
     b.add_argument("--agent", default=None, help="only messages from this agent (inbox)")
     b.add_argument("--after", type=int, default=0, help="only messages after this id (inbox)")
     b.add_argument("--code", default=None, help="the approval code `show` printed (pay)")
@@ -67,9 +75,17 @@ def _state_path(config: str | None) -> Path | None:
 
 def _print(result: Any, as_json: bool, render: Any) -> None:
     if as_json:
-        print(json.dumps(result, indent=2, ensure_ascii=False))
+        # ASCII-only, so it reads the same through a pipe in any encoding.
+        print(json.dumps(result, indent=2))
     else:
         render(result)
+
+
+def _later(agent: str, session: str, after: int) -> None:
+    print(
+        "later replies: hermes-fetch-ai buyer inbox "
+        f"--agent {agent} --session {session} --after {after} --wait 60"
+    )
 
 
 def _show_entries(entries: list[dict[str, Any]]) -> None:
@@ -174,16 +190,24 @@ def buyer(args: argparse.Namespace) -> int:
 def _operation(args: argparse.Namespace) -> tuple[Any, dict[str, Any], Any, float]:
     """The control operation for ``args``, its arguments, how to show it, and how long to wait."""
     action, target = args.action, args.target
+    if args.wait is not None and not (math.isfinite(args.wait) and args.wait >= 0):
+        _fail(action, "--wait must be a number of seconds")
+        return None, {}, None, 0.0
     needs_target = {"message", "show", "pay", "decline", "check"}
     if action in needs_target and not target:
         what = "the agent's address" if action == "message" else "the payment request id"
         _fail(action, f"give {what}")
         return None, {}, None, 0.0
     if action == "message":
-        if not args.text:
+        if args.text == "-":
+            raw = sys.stdin.buffer.read().decode("utf-8", errors="replace")
+            text = raw.replace("\r\n", "\n")
+        else:
+            text = args.text
+        if not text:
             _fail("message", "give the message with --text")
             return None, {}, None, 0.0
-        payload: dict[str, Any] = {"to": target, "text": args.text}
+        payload: dict[str, Any] = {"to": target, "text": text}
         if args.session:
             payload["session"] = args.session
         if args.wait is not None:
@@ -193,6 +217,7 @@ def _operation(args: argparse.Namespace) -> tuple[Any, dict[str, Any], Any, floa
         def render_message(result: dict[str, Any]) -> None:
             print(f"conversation: {result['session']}")
             _show_entries(result["replies"])
+            _later(target, result["session"], result["last_id"])
 
         return "message", payload, render_message, wait + 15.0
     if action == "inbox":
@@ -201,7 +226,12 @@ def _operation(args: argparse.Namespace) -> tuple[Any, dict[str, Any], Any, floa
             payload["peer"] = args.agent
         if args.session:
             payload["session"] = args.session
-        return "inbox", payload, _show_entries, 15.0
+        if args.wait:
+            if not (args.agent and args.session):
+                _fail("inbox", "to wait for replies, give --agent and --session")
+                return None, {}, None, 0.0
+            payload["wait"] = args.wait
+        return "inbox", payload, _show_entries, (args.wait or 0.0) + 15.0
     if action == "show":
         return "show", {"id": target}, _show_purchase, 15.0
     if action == "pay":
@@ -215,8 +245,18 @@ def _operation(args: argparse.Namespace) -> tuple[Any, dict[str, Any], Any, floa
             "amount": args.amount,
             "recipient": args.recipient,
         }
-        # Sending waits for the ledger to include the payment.
-        return "pay", payload, _show_purchase, 180.0
+        if args.wait is not None:
+            payload["wait"] = args.wait
+        wait = args.wait if args.wait is not None else 600.0
+
+        def render_payment(view: dict[str, Any]) -> None:
+            _show_purchase(view)
+            if view.get("replies"):
+                _show_entries(view["replies"])
+            _later(view["peer"], view["session"], view["last_id"])
+
+        # Sending waits for the ledger to include the payment, then for the answer.
+        return "pay", payload, render_payment, 180.0 + wait
     if action == "decline":
         return "decline", {"id": target, "reason": args.reason}, _show_purchase, 30.0
     if action == "check":

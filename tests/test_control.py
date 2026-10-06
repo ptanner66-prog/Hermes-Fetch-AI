@@ -5,6 +5,7 @@ in `serve`; the commands run in this thread, as a separate process would.
 """
 
 import asyncio
+import io
 import json
 import os
 import socket
@@ -14,9 +15,9 @@ import threading
 import pytest
 
 from hermes_fetch_ai import cli
-from hermes_fetch_ai.control import ControlError, ControlServer, request
+from hermes_fetch_ai.control import MAX_REQUEST_BYTES, ControlError, ControlServer, request
 
-from .test_buyer import SELLER, Market
+from .test_buyer import SELLER, STRANGER, Market, say
 
 
 class Running:
@@ -101,7 +102,17 @@ def test_requests_need_the_token_and_a_known_operation(running):
 
 
 def test_an_oversized_request_gets_no_answer(running):
-    assert raw(running.path, b"x" * (70 * 1024) + b"\n") == b""
+    try:
+        answer = raw(running.path, b"x" * (MAX_REQUEST_BYTES + 1024) + b"\n")
+    except ConnectionError:  # the bridge hung up while it was still being sent
+        answer = b""
+    assert answer == b""
+
+
+def test_a_request_too_large_for_the_bridge_is_not_sent(running, capsys):
+    assert running.cli("message", SELLER, "--text", "x" * MAX_REQUEST_BYTES) == 1
+    assert "send a shorter message" in capsys.readouterr().err
+    assert running.market.to_seller == []
 
 
 def test_a_second_bridge_cannot_take_over_the_channel(running):
@@ -142,8 +153,13 @@ def test_buying_from_the_command_line(running, capsys):
     shown = json.loads(capsys.readouterr().out)
     assert shown["status"] == "quoted" and shown["nonce"]
     pay = ["pay", purchase_id, "--code", shown["nonce"], "--amount", shown["amount"]]
-    assert running.cli(*pay, "--recipient", shown["recipient"], "--json") == 0
-    assert json.loads(capsys.readouterr().out)["status"] == "completed"
+    assert running.cli(*pay, "--recipient", shown["recipient"], "--wait", "5", "--json") == 0
+    paid = json.loads(capsys.readouterr().out)
+    assert paid["status"] == "completed"
+    # Paying waits for the seller's answer, not just its confirmation of the payment.
+    assert [r["kind"] for r in paid["replies"]] == ["payment_complete", "text", "end"]
+    assert paid["replies"][1]["body"] == "tides"  # the echo service's answer
+    assert paid["last_id"] == paid["replies"][-1]["id"]
     assert running.cli("purchases") == 0
     assert f"{purchase_id}  completed" in capsys.readouterr().out
     assert running.cli("inbox", "--agent", SELLER, "--session", sent["session"]) == 0
@@ -162,6 +178,44 @@ def test_declining_and_checking_from_the_command_line(running, capsys):
     assert "declined" in capsys.readouterr().out
     assert running.cli("check", purchase_id, "--json") == 0
     assert json.loads(capsys.readouterr().out)["status"] == "declined"
+
+
+def test_a_message_can_come_from_standard_input(running, capsys, monkeypatch):
+    # Kept out of the command line, which other users of the computer can see.
+    monkeypatch.setattr("sys.stdin", io.TextIOWrapper(io.BytesIO("research: café ✓".encode())))
+    assert running.cli("message", SELLER, "--text", "-", "--wait", "5", "--json") == 0
+    sent = json.loads(capsys.readouterr().out)
+    assert running.market.to_seller[0].content[0].text == "research: café ✓"
+    assert sent["last_id"] == sent["replies"][-1]["id"]
+
+
+def test_the_inbox_can_wait_for_the_next_reply(running, capsys):
+    assert running.cli("message", STRANGER, "--text", "hello?", "--wait", "0", "--json") == 0
+    sent = json.loads(capsys.readouterr().out)
+    assert sent["replies"] == []
+    later = asyncio.run_coroutine_threadsafe(
+        say(running.market, sent["session"], "sorry, I was busy", delay=0.3), running.loop
+    )
+    inbox = ["inbox", "--agent", STRANGER, "--session", sent["session"]]
+    assert running.cli(*inbox, "--after", str(sent["last_id"]), "--wait", "10", "--json") == 0
+    (reply,) = json.loads(capsys.readouterr().out)
+    assert reply["body"] == "sorry, I was busy"
+    later.result(5)
+    assert running.cli(*inbox, "--after", str(reply["id"]), "--json") == 0
+    assert json.loads(capsys.readouterr().out) == []
+    assert running.cli("inbox", "--wait", "5") == 1
+    assert "give --agent and --session" in capsys.readouterr().err
+
+
+@pytest.mark.parametrize("wait", ["nan", "inf", "-1"])
+def test_a_bad_wait_is_refused_before_anything_is_sent(running, capsys, wait):
+    assert running.cli("message", SELLER, "--text", "hi", "--wait", wait) == 1
+    assert "--wait must be a number of seconds" in capsys.readouterr().err
+    # The bridge checks it too, before sending anything.
+    args = {"to": SELLER, "text": "hi", "wait": float(wait)}
+    with pytest.raises(ControlError, match="wait must be a number of seconds"):
+        running.call(request(running.path, "message", args, timeout=5))
+    assert running.market.to_seller == []
 
 
 @pytest.mark.parametrize(

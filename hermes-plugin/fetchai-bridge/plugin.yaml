@@ -12,7 +12,7 @@ requires_hermes: ">=0.21.5"
 # its own environment. This plugin is stdlib-only and installs nothing into Hermes.
 python_runtime: external
 # Registered always, usable only when the buyer_tools setting is on.
-provides_tools: [fetchai_find_agents, fetchai_message_agent, fetchai_pay]
+provides_tools: [fetchai_find_agents, fetchai_message_agent, fetchai_read_replies, fetchai_pay]
 config_schema:
   buyer_tools:
     type: bool

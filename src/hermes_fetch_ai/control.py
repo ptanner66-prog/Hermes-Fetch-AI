@@ -19,6 +19,7 @@ import asyncio
 import contextlib
 import hmac
 import json
+import math
 import os
 import secrets
 import tempfile
@@ -26,7 +27,7 @@ from dataclasses import asdict
 from pathlib import Path
 from typing import Any
 
-from .buyer import Buyer
+from .buyer import MAX_REPLIES_AT_ONCE, Buyer, first_replies
 from .config import BridgeConfig
 from .logging import get_logger
 from .money import format_fet, parse_fet
@@ -35,8 +36,11 @@ from .store import InboxEntry, Purchase, PurchaseRefused
 logger = get_logger("hermes_fetch_ai")
 
 CONTROL_FILE = "control.json"
-MAX_LINE_BYTES = 64 * 1024
+# One request, and one answer, are each a line of JSON at most this long.
+MAX_REQUEST_BYTES = 1024 * 1024
+MAX_ANSWER_BYTES = 4 * 1024 * 1024
 READ_TIMEOUT_SECONDS = 10.0
+MAX_WAIT_SECONDS = 600.0
 _DAY_MS = 86_400_000
 
 
@@ -79,7 +83,7 @@ class ControlServer:
                 f"another bridge is already buying with the records in {self.path.parent}"
             )
         self._server = await asyncio.start_server(
-            self._handle, "127.0.0.1", 0, limit=MAX_LINE_BYTES
+            self._handle, "127.0.0.1", 0, limit=MAX_REQUEST_BYTES
         )
         port = self._server.sockets[0].getsockname()[1]
         _write_private(
@@ -139,6 +143,13 @@ class ControlServer:
             return {"ok": False, "error": f"bad request: {exc}"}
         return {"ok": True, "result": result}
 
+    def _wait(self, args: dict[str, Any]) -> float:
+        """Seconds to wait for replies: the request's ``wait``, else the configured wait."""
+        wait = float(args.get("wait", self.buyer.cfg.buying.reply_wait_seconds))
+        if not (math.isfinite(wait) and wait >= 0):
+            raise ValueError("wait must be a number of seconds")
+        return min(wait, MAX_WAIT_SECONDS)
+
     async def _run(self, op: str, args: dict[str, Any]) -> Any:
         buyer = self.buyer
         store = buyer.store
@@ -157,32 +168,13 @@ class ControlServer:
                 "spent_last_24h": format_fet(store.spent_since(now - _DAY_MS)),
             }
         if op == "message":
-            wait = min(float(args.get("wait", buyer.cfg.buying.reply_wait_seconds)), 600.0)
-            session, mark = await buyer.message(
-                str(args["to"]), str(args["text"]), args.get("session")
-            )
-            replies = await buyer.wait_for_reply(
-                str(args["to"]), session, after_id=mark, timeout=max(wait, 0.0)
-            )
-            return {"session": session, "replies": [entry_view(e) for e in replies]}
+            return await self._message(args)
         if op == "inbox":
-            entries = store.inbox(
-                peer=args.get("peer"),
-                session=args.get("session"),
-                after_id=int(args.get("after", 0)),
-                limit=min(int(args.get("limit", 50)), 200),
-            )
-            return [entry_view(e) for e in entries]
+            return await self._inbox(args)
         if op == "show":
             return purchase_view(buyer.show(str(args["id"])))
         if op == "pay":
-            paid = await buyer.pay(
-                str(args["id"]),
-                nonce=str(args["code"]),
-                expect_amount_base=parse_fet(str(args["amount"])),
-                expect_recipient=str(args["recipient"]),
-            )
-            return purchase_view(paid)
+            return await self._pay(args)
         if op == "decline":
             reason = str(args.get("reason") or "the owner declined")[:200]
             return purchase_view(await buyer.decline(str(args["id"]), reason))
@@ -193,6 +185,62 @@ class ControlServer:
             limit = min(int(args.get("limit", 50)), 200)
             return [purchase_view(p) for p in store.purchases(status, limit)]
         raise ControlError(f"unknown operation {op!r}")
+
+    async def _message(self, args: dict[str, Any]) -> dict[str, Any]:
+        to, wait = str(args["to"]), self._wait(args)
+        session, mark = await self.buyer.message(to, str(args["text"]), args.get("session"))
+        replies = await self.buyer.wait_for_reply(to, session, after_id=mark, timeout=wait)
+        return {
+            "session": session,
+            "replies": [entry_view(e) for e in replies],
+            "last_id": replies[-1].id if replies else mark,
+        }
+
+    async def _inbox(self, args: dict[str, Any]) -> list[dict[str, Any]]:
+        after = int(args.get("after", 0))
+        peer, session = args.get("peer"), args.get("session")
+        if args.get("wait"):
+            if not (peer and session):
+                raise ControlError("to wait for replies, give the agent and the conversation")
+            entries = await self.buyer.wait_for_reply(
+                str(peer), str(session), after_id=after, timeout=self._wait(args)
+            )
+        else:
+            limit = min(int(args.get("limit", MAX_REPLIES_AT_ONCE)), MAX_REPLIES_AT_ONCE)
+            entries = first_replies(
+                self.buyer.store.inbox(peer=peer, session=session, after_id=after, limit=limit)
+            )
+        return [entry_view(e) for e in entries]
+
+    async def _pay(self, args: dict[str, Any]) -> dict[str, Any]:
+        """Pay an approved request, then wait for the seller's answer."""
+        store = self.buyer.store
+        purchase_id, wait = str(args["id"]), self._wait(args)
+        mark = store.last_message_id()
+        paid = await self.buyer.pay(
+            purchase_id,
+            nonce=str(args["code"]),
+            expect_amount_base=parse_fet(str(args["amount"])),
+            expect_recipient=str(args["recipient"]),
+        )
+        view = purchase_view(paid)
+        replies: list[InboxEntry] = []
+        if paid.status in ("paid", "committed", "completed"):
+            # The seller answers once it has checked the payment and done the work;
+            # its confirmation of the payment alone is not the answer.
+            replies = await self.buyer.wait_for_reply(
+                paid.peer,
+                paid.session,
+                after_id=mark,
+                timeout=wait,
+                answers=lambda entry: entry.kind != "payment_complete",
+            )
+            latest = store.purchase(purchase_id)
+            if latest is not None:
+                view["status"] = latest.status
+        view["replies"] = [entry_view(e) for e in replies]
+        view["last_id"] = replies[-1].id if replies else mark
+        return view
 
 
 def _write_private(path: Path, text: str) -> None:
@@ -226,9 +274,12 @@ def _read_control_file(path: Path) -> dict[str, Any]:
 async def request(path: Path, op: str, args: dict[str, Any], *, timeout: float) -> Any:
     """Ask the running bridge to do ``op``; returns its result or raises ControlError."""
     data = _read_control_file(path)
+    line = json.dumps({"token": data["token"], "op": op, "args": args}).encode("utf-8")
+    if len(line) >= MAX_REQUEST_BYTES:
+        raise ControlError("the request is too large for the bridge; send a shorter message")
     try:
         reader, writer = await asyncio.wait_for(
-            asyncio.open_connection("127.0.0.1", int(data["port"]), limit=MAX_LINE_BYTES * 8),
+            asyncio.open_connection("127.0.0.1", int(data["port"]), limit=MAX_ANSWER_BYTES),
             5.0,
         )
     except (OSError, TimeoutError):
@@ -236,7 +287,6 @@ async def request(path: Path, op: str, args: dict[str, Any], *, timeout: float) 
             "the bridge is not answering; is `hermes-fetch-ai serve` still running?"
         ) from None
     try:
-        line = json.dumps({"token": data["token"], "op": op, "args": args}).encode("utf-8")
         writer.write(line + b"\n")
         await writer.drain()
         raw = await asyncio.wait_for(reader.readline(), timeout)

@@ -4,7 +4,9 @@ The seller in these tests is this bridge's own chat desk (the one ASI:One users
 buy from), wired to the buyer in one process over a shared fake ledger.
 """
 
+import asyncio
 import sqlite3
+import time
 import uuid
 
 import pytest
@@ -27,7 +29,7 @@ from uagents_core.identity import Identity
 from hermes_fetch_ai import buyer as buyer_module
 from hermes_fetch_ai import store as store_module
 from hermes_fetch_ai.audit import AuditWriter
-from hermes_fetch_ai.buyer import Buyer, check_request
+from hermes_fetch_ai.buyer import MAX_REPLIES_CHARS, Buyer, check_request, first_replies
 from hermes_fetch_ai.chat_protocol import ChatDesk
 from hermes_fetch_ai.config import BridgeConfig
 from hermes_fetch_ai.fake_ledger import FakeLedger, FakeSender
@@ -35,7 +37,7 @@ from hermes_fetch_ai.money import parse_fet
 from hermes_fetch_ai.quotes import quote_key
 from hermes_fetch_ai.seller import Seller
 from hermes_fetch_ai.services import ServiceDesk
-from hermes_fetch_ai.store import PurchaseRefused, Store
+from hermes_fetch_ai.store import InboxEntry, PurchaseRefused, Store
 
 SELLER = str(Identity.from_seed("buyer-tests-seller-" + "s" * 32, 0).address)
 STRANGER = str(Identity.from_seed("buyer-tests-stranger-" + "t" * 32, 0).address)
@@ -547,6 +549,94 @@ async def test_replies_are_kept_as_clean_text(market):
 async def test_waiting_for_a_reply_returns_it_or_times_out(market):
     session, mark = await market.buyer.message(STRANGER, "hello?")
     assert await market.buyer.wait_for_reply(STRANGER, session, after_id=mark, timeout=0.05) == []
+
+
+async def say(market, session, text, *, delay=0.0):
+    """The other agent says ``text`` in ``session`` after ``delay`` seconds."""
+    await asyncio.sleep(delay)
+    ctx = Ctx(market, uuid.UUID(session), "buyer")
+
+    async def ignore(destination, message):
+        return None
+
+    ctx.send = ignore
+    await market.buyer.on_chat(ctx, STRANGER, ChatMessage(content=[TextContent(text=text)]))
+
+
+async def test_waiting_collects_a_burst_of_replies_until_it_goes_quiet(market):
+    session, mark = await market.buyer.message(STRANGER, "hello?")
+    talk = asyncio.gather(
+        say(market, session, "one", delay=0.05),
+        say(market, session, "two", delay=0.25),
+        say(market, session, "much later", delay=2.0),
+    )
+    replies = await market.buyer.wait_for_reply(
+        STRANGER, session, after_id=mark, timeout=10, settle=0.5
+    )
+    assert [r.body for r in replies] == ["one", "two"]
+    await talk
+    assert market.buyer._arrivals == {}
+
+
+async def test_waiting_for_an_answer_skips_what_is_not_one(market):
+    session, mark = await market.buyer.message(STRANGER, "hello?")
+    talk = asyncio.gather(
+        say(market, session, "received", delay=0.05),
+        say(market, session, "the answer", delay=0.6),
+    )
+    replies = await market.buyer.wait_for_reply(
+        STRANGER,
+        session,
+        after_id=mark,
+        timeout=10,
+        settle=0.2,
+        answers=lambda entry: entry.body != "received",
+    )
+    assert [r.body for r in replies] == ["received", "the answer"]
+    await talk
+
+
+async def test_two_callers_can_wait_on_one_conversation(market):
+    session, mark = await market.buyer.message(STRANGER, "hello?")
+    wait = market.buyer.wait_for_reply
+    short = asyncio.create_task(wait(STRANGER, session, after_id=mark, timeout=0.1))
+    long = asyncio.create_task(wait(STRANGER, session, after_id=mark, timeout=30, settle=0.05))
+    assert await short == []
+    await say(market, session, "hi")
+    # The caller still waiting hears about it, though the other one has gone.
+    assert [r.body for r in await asyncio.wait_for(long, 5)] == ["hi"]
+
+
+def entries(*bodies):
+    return [
+        InboxEntry(id=n, peer=STRANGER, session="s", kind="text", body=body, received_ms=0)
+        for n, body in enumerate(bodies, start=1)
+    ]
+
+
+def test_one_answer_holds_a_bounded_amount_of_replies():
+    third = MAX_REPLIES_CHARS // 3
+    assert [e.id for e in first_replies(entries(*["x" * third] * 4))] == [1, 2, 3]
+    assert len(first_replies(entries(*["x"] * 80))) == buyer_module.MAX_REPLIES_AT_ONCE
+    huge = entries("x" * (MAX_REPLIES_CHARS + 1), "y")
+    assert first_replies(huge) == huge[:1]  # always at least one
+    assert first_replies([]) == []
+
+
+async def test_waiting_stops_once_an_answer_is_full(market, monkeypatch):
+    monkeypatch.setattr(buyer_module, "MAX_REPLIES_AT_ONCE", 3)
+    session, mark = await market.buyer.message(STRANGER, "hello?")
+    for n in range(5):
+        await say(market, session, str(n))
+    started = time.monotonic()
+    replies = await market.buyer.wait_for_reply(
+        STRANGER, session, after_id=mark, timeout=30, settle=30
+    )
+    assert [r.body for r in replies] == ["0", "1", "2"]
+    assert time.monotonic() - started < 5
+    # The rest wait in the inbox for the next read.
+    rest = market.buyer_store.inbox(peer=STRANGER, session=session, after_id=replies[-1].id)
+    assert [r.body for r in rest] == ["3", "4"]
 
 
 def test_the_inbox_keeps_the_newest_messages(tmp_path, monkeypatch):

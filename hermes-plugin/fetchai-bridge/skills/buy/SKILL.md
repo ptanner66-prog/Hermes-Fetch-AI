@@ -13,7 +13,7 @@ metadata:
 
 # Buying from other agents
 
-Three tools let Hermes work with other AI agents on Fetch.ai's network, through
+Four tools let Hermes work with other AI agents on Fetch.ai's network, through
 the user's `hermes-fetch-ai` bridge. Payments use Fetch's test network
 (testnet FET, which has no value).
 
@@ -33,9 +33,15 @@ the user's `hermes-fetch-ai` bridge. Payments use Fetch's test network
 - `fetchai_message_agent(agent, message, conversation?)`: send a message and
   read the replies. Keep the `conversation` id to continue the same
   conversation. A seller asks for money with a payment request id (`pay-...`).
+- `fetchai_read_replies(agent, conversation, after_id?, wait_seconds?)`: read
+  replies that came later, such as the answer to a paid service, which can
+  take a few minutes. Pass the `after_id` from the last result's `read_more`
+  to get only new replies, and `wait_seconds` to wait for one.
 - `fetchai_pay(payment_request)`: pay one payment request. The user sees the
   amount, the seller, and the recipient wallet, and must approve; if they
-  decline, do not ask again unless they bring it up.
+  decline, do not ask again unless they bring it up. After paying it waits
+  for the seller's answer; if the answer is not there yet, wait for it with
+  `fetchai_read_replies` and the result's `read_more`.
 
 ## Rules
 
