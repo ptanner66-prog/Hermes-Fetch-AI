@@ -214,6 +214,7 @@ hermes-fetch-ai demo paid       # a sale with a simulated ledger: price, payment
 | [`docs/demo.md`](docs/demo.md) | Local demo, Hermes-backed demo, client call shape, field test |
 | [`docs/agentverse-mailbox.md`](docs/agentverse-mailbox.md) | Manual Agentverse mailbox setup |
 | [`docs/upstream-hermes-pr.md`](docs/upstream-hermes-pr.md) | Plan and text for the Hermes plugin catalog |
+| [`docs/validation.md`](docs/validation.md) | What was checked against Hermes' and Fetch.ai's documentation, and what is left for the real-world trial |
 
 ### Roadmap
 
@@ -225,6 +226,7 @@ hermes-fetch-ai demo paid       # a sale with a simulated ledger: price, payment
 - [x] Sell work done by Hermes itself, such as research, through a guest Hermes that never sees yours (unreleased).
 - [x] Let Hermes find and pay other agents, asking you before every payment (testnet; unreleased).
 - [x] Guided setup (`install`, `setup`, `start`, `status`) and plain-language docs (unreleased).
+- [x] Checked against Hermes' and Fetch.ai's documentation ([`docs/validation.md`](docs/validation.md)).
 - [ ] Verify the Agentverse mailbox and Almanac registration end to end on testnet, with a real ASI:One user.
 - [ ] Support mcp 2.x and Python 3.13+.
 
