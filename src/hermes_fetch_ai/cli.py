@@ -196,11 +196,19 @@ def wallet(args: argparse.Namespace) -> int:
     source = "payments.payout_address" if cfg.payments.payout_address else "the agent's own wallet"
     print(f"agent address: {agent_address(seed)}")
     print(f"income wallet: {income} ({source})")
+    if args.fund and not cfg.buying.enabled:
+        print(
+            "wallet: FAIL: --fund fills the buying wallet; set buying.enabled: true",
+            file=sys.stderr,
+        )
+        return 1
     wallets = [("balance", income)]
     if cfg.buying.enabled:
         buying = wallet_address(seed, BUYING_WALLET_INDEX)
         print(f"buying wallet: {buying} (pays other agents; it needs testnet FET)")
         wallets.append(("buying balance", buying))
+        if args.fund and not _fund_from_faucet(buying):
+            return 1
     if not args.balance:
         return 0
 
@@ -219,6 +227,21 @@ def wallet(args: argparse.Namespace) -> int:
     for (label, _), amount in zip(wallets, amounts, strict=True):
         print(f"{label}: {format_fet(amount)} testnet FET")
     return 0
+
+
+def _fund_from_faucet(address: str) -> bool:
+    """Ask Fetch's testnet faucet for free test FET for ``address``."""
+    from cosmpy.aerial.config import NetworkConfig
+    from cosmpy.aerial.faucet import FaucetApi
+
+    print(f"asking Fetch's testnet faucet for test FET for {address} ...")
+    try:
+        FaucetApi(NetworkConfig.fetchai_stable_testnet()).get_wealth(address)
+    except Exception as exc:  # noqa: BLE001 - any faucet failure gets the same advice
+        print(f"wallet: FAIL: the faucet did not pay ({exc}); try again later", file=sys.stderr)
+        return False
+    print("faucet: done; the test FET can take a minute to arrive (check with --balance)")
+    return True
 
 
 def ledger(args: argparse.Namespace) -> int:
@@ -455,6 +478,11 @@ def build_parser() -> argparse.ArgumentParser:
     w = sub.add_parser("wallet", help="show the agent's address and income wallet")
     w.add_argument("--config", required=True)
     w.add_argument("--balance", action="store_true", help="also ask the ledger for the balance")
+    w.add_argument(
+        "--fund",
+        action="store_true",
+        help="get free test FET for the buying wallet from Fetch's testnet faucet",
+    )
     w.set_defaults(func=wallet)
     lg = sub.add_parser("ledger", help="check that the configured ledger answers as testnet")
     lg.add_argument("--config", required=True)

@@ -8,6 +8,7 @@ import subprocess
 import sys
 import time
 from pathlib import Path
+from typing import ClassVar
 
 from hermes_fetch_ai import cli
 from hermes_fetch_ai.wallet import BUYING_WALLET_INDEX, agent_address, wallet_address
@@ -86,3 +87,35 @@ def test_wallet_without_buying_shows_no_buying_wallet(tmp_path, monkeypatch, cap
     config.write_text(json.dumps({"payments": {"state_dir": str(Path(tmp_path))}}))
     assert cli.main(["wallet", "--config", str(config)]) == 0
     assert "buying wallet" not in capsys.readouterr().out
+
+
+class Faucet:
+    asked: ClassVar[list[tuple[str, str]]] = []
+    fail = False
+
+    def __init__(self, network):
+        self.network = network
+
+    def get_wealth(self, address):
+        if Faucet.fail:
+            raise RuntimeError("faucet is dry")
+        Faucet.asked.append((self.network.chain_id, address))
+
+
+def test_wallet_fund_fills_the_buying_wallet_from_the_faucet(tmp_path, monkeypatch, capsys):
+    import cosmpy.aerial.faucet
+
+    monkeypatch.setenv("UAGENT_SEED", SEED)
+    monkeypatch.setattr(cosmpy.aerial.faucet, "FaucetApi", Faucet)
+    Faucet.asked, Faucet.fail = [], False
+    config = tmp_path / "c.yaml"
+    config.write_text(json.dumps({"buying": {"enabled": True}}))
+    assert cli.main(["wallet", "--config", str(config), "--fund"]) == 0
+    assert Faucet.asked == [("dorado-1", wallet_address(SEED, BUYING_WALLET_INDEX))]
+    assert "can take a minute to arrive" in capsys.readouterr().out
+    Faucet.fail = True
+    assert cli.main(["wallet", "--config", str(config), "--fund"]) == 1
+    assert "the faucet did not pay (faucet is dry)" in capsys.readouterr().err
+    config.write_text("{}")
+    assert cli.main(["wallet", "--config", str(config), "--fund"]) == 1
+    assert "set buying.enabled: true" in capsys.readouterr().err
