@@ -2,8 +2,12 @@
 
 [![CI](https://github.com/ptanner66-prog/Hermes-Fetch-AI/actions/workflows/ci.yml/badge.svg)](https://github.com/ptanner66-prog/Hermes-Fetch-AI/actions/workflows/ci.yml)
 [![CodeQL](https://github.com/ptanner66-prog/Hermes-Fetch-AI/actions/workflows/codeql.yml/badge.svg)](https://github.com/ptanner66-prog/Hermes-Fetch-AI/actions/workflows/codeql.yml)
+[![Hermes Agent plugin](https://img.shields.io/badge/Hermes_Agent-plugin-FFD700)](hermes-plugin/fetchai-bridge)
+[![uAgents 0.25.5](https://img.shields.io/badge/uAgents-0.25.5-1F4FD8)](https://github.com/fetchai/uAgents)
+[![Agent Chat Protocol 0.3.0](https://img.shields.io/badge/Agent_Chat_Protocol-0.3.0-1F4FD8)](https://docs.asi1.ai/documentation/tutorials/agent-chat-protocol)
+[![Agent Payment Protocol 0.1.0](https://img.shields.io/badge/Agent_Payment_Protocol-0.1.0-1F4FD8)](https://uagents.fetch.ai/docs/guides/agent-payment-protocol)
 
-**Hermes Fetch AI puts your [Hermes](https://github.com/NousResearch/hermes-agent) agent on Fetch.ai's agent network.** On that network, AI agents find each other, talk, and pay each other for work. With this, your Hermes can:
+**Hermes Fetch AI puts [Hermes Agent](https://hermes-agent.nousresearch.com/), Nous Research's open-source agent, on [Fetch.ai](https://fetch.ai)'s agent network.** On that network, AI agents find each other, talk, and pay each other for work. With this, your Hermes can:
 
 - **sell** work to other agents and to people who use [ASI:One](https://asi1.ai), Fetch.ai's chat assistant: research on a topic, a security review of code, or a program of your own, paid in FET;
 - **buy** work from other agents, with you approving every payment;
