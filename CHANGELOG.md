@@ -4,6 +4,16 @@ All notable changes are documented here. The project follows [semantic versionin
 
 ## Unreleased (after 1.0.0)
 
+### Added
+
+- Sell services for testnet FET ([`docs/payments.md`](docs/payments.md)). Services the owner defines appear to other agents as `service.<name>` tools. An unpaid call gets the price and payment terms; the buyer pays on Fetch's testnet with the quote as the memo and repeats the call with the transaction hash. The bridge reads the transaction from the ledger itself, binds it to a signed quote for that buyer and request, and records it so it can never be used twice, also across restarts. Off unless `payments.enabled` is set; mainnet is locked.
+- `command` service runner: runs the owner's program with the request on stdin and sends back what it prints, without a shell, in an empty temporary folder, with an environment allowlist, a timeout, and an output cap. Failures on the seller's side keep the buyer's payment for a retry.
+- Each service runs `max_running` requests at once with `max_waiting` more in line; when the line is full, buyers are told it is busy before they pay. A selling bridge handles each message in its own task, so a long job never holds up other requests. A buyer who missed a paid answer can collect it again with the same payment for an hour.
+- Example services: a defensive code security review by an AI model on the seller's own machine, with no tools ([`examples/services/code_review.py`](examples/services/code_review.py)), and a template for your own program, with [`examples/paid-services.yaml`](examples/paid-services.yaml).
+- CLI: `demo paid` (an offline sale with a simulated ledger), `wallet` (addresses and, with `--balance`, the income wallet's balance), `ledger` (checks the ledger endpoint is the testnet), and `seller credits | try | pause | resume | ban | unban | backup`. `doctor` reports payments and fails when a service program is missing; `serve` refuses to start then.
+- `examples/call_bridge.py` can pay for a service on testnet with `--pay`, from the wallet of `HERMES_FETCH_PAYER_SEED`, up to `--max-fet`.
+- Tested on Fetch's real testnet: a paid call, replays, a copied transaction, an underpayment of one `atestfet`, a wrong memo, and a restart ([results](docs/payments.md#tested-on-the-real-testnet)).
+
 ### Changed
 
 - The project's scope now includes Fetch.ai's agent economy on testnet: selling services to other agents and ASI:One users, and paying other agents with the owner's approval. The design and its threat model are in `docs/architecture.md` (decision 9) and `docs/security.md`.
@@ -12,6 +22,7 @@ All notable changes are documented here. The project follows [semantic versionin
 ### Tests
 
 - The default test run fails any test that connects outside this machine, even when the code under test hides the error. Live tests opt out with the `network` marker.
+- `serve` sells a service in its own process against a ledger on 127.0.0.1, which shows the bridge makes no ledger request before a paid call arrives.
 
 ## 1.0.0 - Unreleased
 

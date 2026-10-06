@@ -192,12 +192,21 @@ def _walk_strings(obj: Any) -> list[str]:
     return []
 
 
-def validate_args(tool: Any, args: dict[str, Any], cfg: BridgeConfig) -> dict[str, Any]:
+def validate_args(
+    tool: Any,
+    args: dict[str, Any],
+    cfg: BridgeConfig,
+    *,
+    shell_checks: bool = True,
+    url_checks: bool = True,
+) -> dict[str, Any]:
     """Check a call's arguments against the tool's schema and the bridge's URL and shell rules.
 
     The cheap checks run first, so a call that fails them causes no DNS
     lookups, and one call can make the bridge resolve at most MAX_URL_HOSTS
-    distinct names.
+    distinct names. Services turn the shell checks off (their requests never
+    reach a shell) and may turn the URL checks off (a code review quotes local
+    addresses without fetching them).
     """
     if not isinstance(args, dict):
         raise TypeError("tool args must be an object")
@@ -214,10 +223,14 @@ def validate_args(tool: Any, args: dict[str, Any], cfg: BridgeConfig) -> dict[st
     strings = _walk_strings(args)
     # Deliberately strict: tools that legitimately need these characters (query
     # strings, multi-line text) must be listed in trusted_shell_tools.
-    if name not in cfg.policy.trusted_shell_tools and any(
-        SHELL_META.search(s) or SHELL_CONTROL.search(s) for s in strings
+    if (
+        shell_checks
+        and name not in cfg.policy.trusted_shell_tools
+        and any(SHELL_META.search(s) or SHELL_CONTROL.search(s) for s in strings)
     ):
         raise ValueError("shell metacharacters or control characters are not allowed")
+    if not url_checks:
+        return args
 
     hosts: set[str] = set()
     for s in strings:

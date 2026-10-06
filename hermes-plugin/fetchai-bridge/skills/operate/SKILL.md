@@ -23,7 +23,9 @@ messaging, or approvals.
 
 - The user asks to put Hermes tools on Fetch.ai, Agentverse, or uAgents.
 - The user asks to check, demo, or serve the Fetch.ai bridge.
-- Do not use this skill to move funds; it only operates the tool bridge.
+- The user asks to sell services for FET, see payments, or pause selling.
+- Do not use this skill to move funds: the bridge only receives payments and
+  never sends them, and refunds are the user's to make.
 
 ## Prerequisites
 
@@ -54,6 +56,9 @@ The plugin hands the bridge Hermes' interpreter, which `probe-hermes` and
 | `hermes fetchai-bridge doctor` | Bridge version, config check, dependency pins |
 | `hermes fetchai-bridge probe-hermes` | Can the bridge start Hermes' tools server? |
 | `hermes fetchai-bridge demo local` | Two-uAgent round trip with fake tools |
+| `hermes fetchai-bridge demo paid` | An offline sale with a simulated ledger |
+| `hermes fetchai-bridge seller credits --config <yaml>` | Payments received, and which need refunds |
+| `hermes fetchai-bridge seller try <service> --request "..." --config <yaml>` | Run one service once, unpaid |
 | `hermes fetchai-bridge serve --config <yaml>` | Run the bridge (long-running; only when the user asks) |
 
 ## Procedure
@@ -86,6 +91,10 @@ The plugin hands the bridge Hermes' interpreter, which `probe-hermes` and
   rejects secret-shaped config values and seeds shorter than 32 characters.
 - A sender's signature proves who sent a message but grants nothing by
   itself; do not make side-effecting tools public for unknown senders.
+- Selling services is off unless the user's config sets `payments.enabled`,
+  and runs on Fetch's testnet only. Run `seller pause`, `resume`, `ban`, or
+  `unban` only when the user asks. The repository's `docs/payments.md` is the
+  guide.
 
 ## Verification
 

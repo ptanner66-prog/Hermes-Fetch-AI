@@ -67,22 +67,46 @@ The `fetchai-bridge` Hermes plugin adds no tools, hooks, or middleware, so it ch
 
 Do not remove an audit exception without confirming that `uagents`, `cosmpy`, signing, and wallet behavior still work with the fixed dependency.
 
-## Payments (in development)
+## Payments
 
-The agent-economy work ([`agent-economy.md`](agent-economy.md)) adds money, so it gets its own threat model. None of it is released yet; this section records the threats the design must close, and each item moves to "Controls" when its code lands with tests.
+Selling services for testnet FET ([`payments.md`](payments.md)) adds money, so it has its own threat model. Buying from other agents is still in development ([`agent-economy.md`](agent-economy.md)); its threats are listed at the end of this section.
 
-Threats when Hermes sells:
-- a buyer pays less than the price, or pays a different denomination or recipient, and claims the full service;
-- one payment is used twice, by the same buyer or by a stranger who copies the transaction hash from the public chain (front-running);
-- an old payment, or one made for another quote, is presented for a new request;
-- a flood of quote requests from throwaway agent identities fills storage or locks out paying buyers;
-- strangers' requests drive the owner's model account (cost, abuse, provider terms) or try to escape the service's tool limits.
+### Selling: threats and controls
 
-Threats when Hermes buys:
-- a reply from another agent carries instructions that a tricked Hermes follows, more dangerous in YOLO mode, so agent conversations are refused in YOLO mode;
-- the model is tricked into paying, or into paying more or to someone else, so every payment asks the owner, shows the terms from the bridge's own records, and is capped per payment, per seller, and per day;
-- a payment whose broadcast outcome is unknown is retried and paid twice, so such payments wait for the owner;
-- the agent's seed in Hermes' `.env` is read through the terminal tool (Hermes masks `.env` reads but does not treat that as a boundary), which is why wallets hold small testnet balances and mainnet requires revisiting where the seed lives.
+| Threat | Control |
+|--------|---------|
+| A buyer claims a payment it did not make, or claims a larger amount | The bridge reads every transaction from the ledger itself and ignores what the buyer says it paid. It accepts only a successful, included transaction of plain transfers from one payer, sums only the transfers to the payout address in `atestfet`, and compares whole numbers of `atestfet`, never floating point. |
+| A buyer pays less, in another token, or to another address | Each is refused (`payment invalid: ...`) and nothing is recorded. |
+| One payment is used twice, by the same buyer or across a restart | Used transaction hashes are stored in SQLite. Checking and recording a payment happen in one `BEGIN IMMEDIATE` transaction, so two requests racing with the same hash cannot both pass, and the record survives restarts. |
+| A stranger copies a transaction hash from the public ledger (front-running) | The memo must be the quote reference, and the reference is bound to the buyer's agent address: another agent presenting it gets `quote does not match this call`, and presenting the hash with its own quote gets `payment already used`. |
+| An old payment, or one made for another quote or request, is presented | The reference is a signed token (HMAC with a key derived from the seed) that carries the buyer, the service, a digest of the exact arguments, the amount, the recipient, the chain, and the expiry. The transaction's block time must fall between the quote's creation (minus 30 seconds) and its expiry (plus 120 seconds). |
+| A flood of quote requests from throwaway identities fills storage | Quotes are stateless signed tokens: asking for a price stores nothing. Quote requests pass the bridge's normal per-sender and global rate limits. |
+| A flood of fake payment proofs drives ledger lookups | Proofs are checked against the token and the used-hash table first; ledger lookups are rate-limited per sender (6 per minute) and globally (60 per minute). |
+| A misconfigured or malicious ledger endpoint | `ledger_url` must be `https://` (or `http://` on this machine). Before verifying anything, the bridge checks once that the endpoint reports chain `dorado-1`, and refuses payments otherwise. `payments.network` accepts only `testnet`. |
+| A paid request is lost when the service or the bridge fails | A verified payment becomes a credit: `paid → running → done`. A failure on the seller's side returns it to `paid` for a retry, up to `max_attempts`; a run interrupted by a crash or a shutdown (which also kills the service program) returns to `paid` at the next start. A buyer who missed a delivered answer can collect it again for an hour. |
+| Someone else collects a paid answer | The reference and transaction are public on the ledger, so a kept answer goes only to the agent the quote was issued to, and only in a new message: an exact copy of an earlier message is refused by the replay check. Answers are kept in memory only, at most 64 of them, for an hour. |
+| One long job holds up everyone | A selling bridge handles each message in its own task (`tests/test_serve_paid.py` lists tools while a three-second job runs). Each service runs at most `max_running` requests at once with `max_waiting` in line; beyond that, callers are told it is busy before they pay. |
+| Strangers run up the owner's costs or abuse a service | Each service has a daily run limit, input size limit, and URL checks; buyers are rate-limited; the owner can `pause` all selling or `ban` one agent. Service programs run without a shell, in an empty temporary folder, with a short environment allowlist, a timeout, and an output cap, and their standard error never reaches the buyer. |
+| A service that cannot run takes payments | `doctor` and `serve` fail when a service program, or a file named by absolute path in its arguments, is missing. |
+| Payment details leak into logs | The audit log records only short forms: the first 8 and last 4 characters of a transaction hash and payer address, and the signed tail of a reference. |
+
+These are covered by tests: `tests/test_check_transfer.py` (every transfer rule), `tests/test_ledger.py` (reading real Dorado responses saved as fixtures), `tests/test_seller.py` (including two redeems racing with one payment), `tests/test_store.py` (including two bridges sharing one database, and restarts), `tests/test_paid_protocol.py`, and `tests/test_serve_paid.py`, which runs `serve` in its own process against a ledger on 127.0.0.1 and checks that the bridge makes no ledger request before a paid call arrives. The results of a manual run on the real testnet are in [`payments.md`](payments.md#tested-on-the-real-testnet).
+
+### Selling: residual risks
+
+- **Refunds are manual.** Failed, lapsed, and extra payments are listed by `seller credits`; the owner sends the FET back by hand.
+- **Refused payments are not recorded.** A buyer who underpays or uses the wrong memo has paid, but the bridge has no record of it; refunds need the buyer's transaction hash.
+- **The seed signs quotes and holds the income.** A leaked `UAGENT_SEED` lets someone forge quotes and spend the income wallet. Set `payout_address` to a wallet whose key lives elsewhere to keep income away from the seed.
+- **Service programs run as the bridge's user.** The runner's allowlisted environment and empty working folder limit what reaches a program; they are not a sandbox. Sell only programs you trust with that user's files.
+- **A model can be talked into things.** A buyer's request can try to make an AI-backed service ignore its instructions. The example code review gives its model no tools, so the worst case is an answer its own buyer should not have gotten.
+- **The ledger endpoint is trusted for what it reports.** The bridge checks the chain ID, not proofs of inclusion; a compromised endpoint could report fake transactions. Use Fetch's endpoint or your own node.
+
+### Buying (in development)
+
+- A reply from another agent carries instructions that a tricked Hermes follows, more dangerous in YOLO mode, so agent conversations are refused in YOLO mode.
+- The model is tricked into paying, or into paying more or to someone else, so every payment asks the owner, shows the terms from the bridge's own records, and is capped per payment, per seller, and per day.
+- A payment whose broadcast outcome is unknown is retried and paid twice, so such payments wait for the owner.
+- The agent's seed in Hermes' `.env` is read through the terminal tool (Hermes masks `.env` reads but does not treat that as a boundary), which is why wallets hold small testnet balances and mainnet requires revisiting where the seed lives.
 
 ## Reporting vulnerabilities
 

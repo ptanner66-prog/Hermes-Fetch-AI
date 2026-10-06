@@ -62,11 +62,23 @@ WantedBy=multi-user.target
 
 systemd only treats whole lines starting with `#` as comments, so keep comments off the `EnvironmentFile=` line. In `bridge.yaml`, set `hermes_mcp.command` to the Hermes environment's Python (a supervised `serve` does not get the Hermes plugin's interpreter hand-over) and point `logging.audit_path` at `/var/lib/hermes-fetch-ai/audit.jsonl`. The audit writer rotates the file itself at 25 MB, keeping `audit.jsonl.1` to `audit.jsonl.5`; if you also use logrotate, use `copytruncate`.
 
+## Payment records
+
+A bridge that sells services ([`payments.md`](payments.md)) keeps its payment records in `payments.sqlite3`, in a folder per agent address under `payments.state_dir` (for the unit above, set `state_dir: /var/lib/hermes-fetch-ai`). The bridge makes that folder readable only by its user.
+
+- **Back it up with the seed.** The database remembers which payments were already used. Losing it lets a buyer present a payment again until its quote's redeem window closes (by default up to 24 hours after the quote expires), and loses the list of payments to refund.
+- **Copy it safely.** `hermes-fetch-ai seller backup --to <new file> --config <file>` writes a consistent copy, readable only by you, even while the bridge runs. Copying the file directly can miss recent payments, which SQLite keeps in a separate write-ahead log for a while.
+- **One database per agent.** Two bridges with the same seed and state folder share the database safely (SQLite serializes them), but different seeds always get different folders.
+- **Versions.** The database records its schema version, and a bridge refuses a database written by a newer version rather than misreading it.
+
+Watch `seller credits` for `failed` payments and extra payments, which need refunds.
+
 ## Network
 
 - The bridge listens on all interfaces (`0.0.0.0`) on `agent.port`; uAgents has no bind-address setting. Firewall the port so only the callers you expect can reach it.
 - With `publish_manifest: false`, the bridge makes no outbound calls of its own: no Almanac registration, contract lookup, or status reports (`tests/test_uagent_direct_protocol.py` checks this). Replying to a remote agent can need egress to Agentverse's Almanac API or the Fetch ledger, to look up that agent's endpoint.
 - Mailbox mode and `publish_manifest: true` need egress to Agentverse and the configured Fetch network (Almanac REST and gRPC, mailbox HTTPS).
+- Selling services needs egress to `payments.ledger_url` (`https://rest-dorado.fetch.ai` by default), only when a paid call arrives.
 
 ## Who can reach the bridge
 
@@ -91,7 +103,8 @@ The JSONL audit log is the operational signal: decisions, reasons, durations, si
 - spikes in `replay detected` or stale/future replay metadata;
 - `backend unavailable` errors;
 - `send_status: failure`;
-- repeated `args exceed max_args_bytes`, URL, or shell-character rejections.
+- repeated `args exceed max_args_bytes`, URL, or shell-character rejections;
+- when selling: records with `payment: invalid` or `payment: mismatch` (someone probing the payment checks), `payment: pending` that never clears (the ledger endpoint is down), `decision: error` from a service (its program is failing), and frequent `this service is busy` refusals (raise `max_running` or `max_waiting` if the machine can take more).
 
 `hermes-fetch-ai doctor --config /etc/hermes-fetch-ai/bridge.yaml` checks the config and the dependency pins; it does not contact a running bridge. For health, watch the process and the audit log.
 

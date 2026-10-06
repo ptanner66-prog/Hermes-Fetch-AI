@@ -40,6 +40,11 @@ def _result(text: str, is_error: bool, max_bytes: int) -> NormalizedToolResult:
     return NormalizedToolResult(capped, is_error, truncated, original)
 
 
+def text_result(text: str, max_bytes: int) -> NormalizedToolResult:
+    """A successful plain-text result, capped like any tool output."""
+    return _result(text, False, max_bytes)
+
+
 def error_result(text: str, max_bytes: int) -> NormalizedToolResult:
     """Return a tool error result capped to the same byte limit as normal output."""
     return _result(text, True, max_bytes)

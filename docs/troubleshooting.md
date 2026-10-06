@@ -153,6 +153,42 @@ The connection to the tools server failed during the call. The bridge's log has 
 
 An unexpected exception in the bridge. The traceback is in the bridge's log with the audit record's `trace_id`. Please [report it](https://github.com/ptanner66-prog/Hermes-Fetch-AI/issues) if it repeats.
 
+## Selling services
+
+The errors buyers can get are listed in [`payments.md`](payments.md#errors-a-buyer-can-get). These are the ones you see.
+
+### `services: FAIL: service <name>: program <path> not found`
+
+`doctor`, `serve`, or `seller try` could not find a service's program, or a file named by absolute path in its `argv`. The bridge refuses to start rather than take payments for a service that cannot run. Fix the path; `which python3` (or `Get-Command python` on Windows) prints the interpreter's full path.
+
+### `services: FAIL: service <name>: program <path> is not executable`
+
+Make it executable (`chmod +x <path>`), or put the interpreter first: `argv: [/usr/bin/python3, /path/to/program.py]`.
+
+### `the program (argv[0]) must be an absolute path, such as ...`
+
+Programs are given as full paths, so the bridge never depends on `PATH` to find them. Use the path the message suggests, if it is the program you mean.
+
+### `payments run on Fetch's testnet only ...`
+
+`payments.network` or `agent.network` is not `testnet`. Mainnet is locked in this version.
+
+### `payout_address must be a fetch1... wallet address`
+
+The address is mistyped or is not a Fetch wallet address. Leave it unset to receive payments in the agent's own wallet.
+
+### `seller: FAIL: this config has agent.dev_random_seed: true ...`
+
+`wallet` and `seller` need a stable identity, because the payment records and the wallet belong to one seed. Set `agent.dev_random_seed: false` and set `UAGENT_SEED`.
+
+### `ledger: FAIL: ...`
+
+`hermes-fetch-ai ledger --config <file>` could not reach `payments.ledger_url`, or the endpoint is not Fetch's testnet. Check your network, or wait if Fetch's endpoint is down; buyers get `payment pending` meanwhile and can retry.
+
+### A service keeps failing (`decision: error` in the audit log)
+
+Run it by hand with `hermes-fetch-ai seller try <service> --request "..." --config <file>`, which shows the program's error output. Buyers keep their payment for a retry; after `payments.max_attempts` failures it is listed as `failed` by `seller credits` and needs a refund.
+
 ## Windows
 
 Use an absolute path for `hermes_mcp.command`, and quote paths that contain spaces. To find Hermes' interpreter, run `Get-Command hermes` in PowerShell (`where` means `Where-Object` there). The bridge passes child processes only an environment allowlist that includes the Windows essentials, and keeps their stderr away from the protocol stream.
