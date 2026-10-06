@@ -67,6 +67,23 @@ The `fetchai-bridge` Hermes plugin adds no tools, hooks, or middleware, so it ch
 
 Do not remove an audit exception without confirming that `uagents`, `cosmpy`, signing, and wallet behavior still work with the fixed dependency.
 
+## Payments (in development)
+
+The agent-economy work ([`agent-economy.md`](agent-economy.md)) adds money, so it gets its own threat model. None of it is released yet; this section records the threats the design must close, and each item moves to "Controls" when its code lands with tests.
+
+Threats when Hermes sells:
+- a buyer pays less than the price, or pays a different denomination or recipient, and claims the full service;
+- one payment is used twice, by the same buyer or by a stranger who copies the transaction hash from the public chain (front-running);
+- an old payment, or one made for another quote, is presented for a new request;
+- a flood of quote requests from throwaway agent identities fills storage or locks out paying buyers;
+- strangers' requests drive the owner's model account (cost, abuse, provider terms) or try to escape the service's tool limits.
+
+Threats when Hermes buys:
+- a reply from another agent carries instructions that a tricked Hermes follows, more dangerous in YOLO mode, so agent conversations are refused in YOLO mode;
+- the model is tricked into paying, or into paying more or to someone else, so every payment asks the owner, shows the terms from the bridge's own records, and is capped per payment, per seller, and per day;
+- a payment whose broadcast outcome is unknown is retried and paid twice, so such payments wait for the owner;
+- the agent's seed in Hermes' `.env` is read through the terminal tool (Hermes masks `.env` reads but does not treat that as a boundary), which is why wallets hold small testnet balances and mainnet requires revisiting where the seed lives.
+
 ## Reporting vulnerabilities
 
 See [`SECURITY.md`](../SECURITY.md).
