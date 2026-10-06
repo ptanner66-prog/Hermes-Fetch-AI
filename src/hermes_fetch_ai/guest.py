@@ -45,6 +45,7 @@ from .config import (
     BridgeConfig,
     HermesRunnerConfig,
     ServiceConfig,
+    guest_control_key,
 )
 from .logging import get_logger
 from .programs import ProgramRunner, ServiceResult, base_env
@@ -53,8 +54,6 @@ logger = get_logger("hermes_fetch_ai")
 
 SETTINGS_FILE = "config.yaml"
 KEYS_FILE = ".env"
-# Keys that change how Hermes itself behaves, e.g. HERMES_ALLOW_PRIVATE_URLS.
-_CONTROL_KEY_PREFIX = "HERMES_"
 # Where an administrator can pin Hermes settings for every user (Hermes' managed scope).
 MANAGED_DIR = Path("/etc/hermes")
 # Every toolset besides the web tools, switched off by name in case the -t
@@ -130,6 +129,9 @@ def guest_settings(runner: HermesRunnerConfig) -> dict[str, Any]:
         model["provider"] = runner.provider
     if runner.base_url:
         model["base_url"] = runner.base_url
+    if runner.key_env:
+        # Hermes sends the key from this variable only to base_url itself.
+        model["key_env"] = runner.key_env
     return {
         "model": model,
         "toolsets": list(runner.toolsets) or ["none"],
@@ -170,7 +172,7 @@ def _env_names(path: Path) -> list[str]:
 
 def _control_keys(path: Path) -> list[str]:
     names = _env_names(path)
-    return sorted({name for name in names if name.upper().startswith(_CONTROL_KEY_PREFIX)})
+    return sorted({name for name in names if guest_control_key(name)})
 
 
 def hermes_checkout(python: str) -> Path | None:
@@ -241,7 +243,8 @@ def _control_key_problems(name: str, path: Path) -> list[str]:
     return [
         (
             f"service {name}: {path} sets {', '.join(control)}, which would change how the "
-            "guest Hermes behaves; a guest takes only model and web search keys"
+            "guest Hermes behaves or where it sends requests; a guest takes only model and web "
+            "search keys"
         )
     ]
 

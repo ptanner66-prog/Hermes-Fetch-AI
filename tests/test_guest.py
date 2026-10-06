@@ -93,6 +93,10 @@ def test_a_guest_may_only_have_the_web_tools(tmp_path):
         ("env_file", "keys/research.env", "absolute path"),
         ("python", "python3", "absolute path"),
         ("pass_env", ["HERMES_ALLOW_PRIVATE_URLS"], "change how the guest Hermes behaves"),
+        ("pass_env", ["CUSTOM_BASE_URL"], "where it sends requests"),
+        ("key_env", "OPENROUTER_BASE_URL", "where it sends requests"),
+        ("key_env", "not a name", "not an environment variable name"),
+        ("key_env", "ASI_ONE_API_KEY", "set base_url too"),
         ("pass_env", ["not a name"], "not an environment variable name"),
         ("max_turns", 51, "less than or equal to 50"),
         ("provider", "custom", "provider custom needs base_url"),
@@ -133,6 +137,25 @@ def test_settings_switch_off_everything_but_the_service(tmp_path):
     assert settings["security"]["allow_lazy_installs"] is False
     assert settings["approvals"]["single_query_mode"] == "deny"
     assert guest_settings(cfg(tmp_path).services["research"].runner)["toolsets"] == ["none"]
+
+
+def test_a_hosted_endpoint_gets_the_key_its_settings_name(tmp_path):
+    runner = (
+        cfg(
+            tmp_path,
+            provider="custom",
+            base_url="https://api.asi1.ai/v1",
+            key_env="ASI_ONE_API_KEY",
+        )
+        .services["research"]
+        .runner
+    )
+    assert guest_settings(runner)["model"] == {
+        "default": "some/model",
+        "provider": "custom",
+        "base_url": "https://api.asi1.ai/v1",
+        "key_env": "ASI_ONE_API_KEY",
+    }
 
 
 # -- one run ------------------------------------------------------------------------
@@ -305,6 +328,23 @@ def test_control_keys_in_any_env_file_hermes_loads_are_problems(tmp_path, fake_h
     assert len(problems) == 2
     assert "HERMES_ENABLE_PROJECT_PLUGINS" in problems[0]
     assert "pins security.allow_private_urls, mcp_servers" in problems[1]
+
+
+def test_endpoint_overrides_in_env_files_hermes_loads_are_problems(tmp_path, fake_hermes):
+    # Hermes puts CUSTOM_BASE_URL before the model address the bridge writes, so a buyer's
+    # request would go wherever it points.
+    checkout_keys = fake_hermes / ".env"
+    checkout_keys.write_text("CUSTOM_BASE_URL=https://elsewhere.example/v1\n")
+    (problem,) = guest_problems(cfg(tmp_path), "research")
+    assert "CUSTOM_BASE_URL" in problem and "where it sends requests" in problem
+    checkout_keys.unlink()
+    keys = tmp_path / "research.env"
+    keys.write_text("OPENROUTER_API_KEY=k\nexport OPENROUTER_BASE_URL=https://mirror.example/v1\n")
+    keys.chmod(0o600)
+    (problem,) = guest_problems(cfg(tmp_path, env_file=str(keys)), "research")
+    assert "OPENROUTER_BASE_URL" in problem and "OPENROUTER_API_KEY" not in problem
+    keys.write_text("OPENROUTER_API_KEY=k\n")
+    assert guest_problems(cfg(tmp_path, env_file=str(keys)), "research") == []
 
 
 @pytest.mark.skipif(os.name == "nt", reason="POSIX file modes")

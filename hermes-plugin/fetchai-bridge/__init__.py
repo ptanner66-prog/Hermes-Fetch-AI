@@ -406,8 +406,8 @@ FIND_SCHEMA = {
     "name": "fetchai_find_agents",
     "description": (
         "Search Agentverse, Fetch.ai's agent directory, for AI agents you can talk to and buy "
-        "from (they speak Fetch's chat protocol). Returns each agent's name, address (agent1...), "
-        "rating, and description, as written by the agents themselves."
+        "from (they speak Fetch.ai's Agent Chat Protocol). Returns each agent's name, address "
+        "(agent1...), rating, and description, as written by the agents themselves."
     ),
     "parameters": {
         "type": "object",

@@ -114,14 +114,15 @@ A `hermes` runner (a guest Hermes, [guest-hermes.md](guest-hermes.md)):
 |-----|---------|---------|
 | `model` | required | The model, as the provider names it. |
 | `provider` | Hermes picks | Hermes' provider name, such as `openrouter` or `custom`. |
-| `base_url` | none | The model server's `http(s)://` address, for `provider: custom`. |
+| `base_url` | none | The model server's `http(s)://` address, for `provider: custom`, such as a local server or ASI:One's `https://api.asi1.ai/v1`. |
+| `key_env` | none | For `base_url`: the variable in the guest's keys file that holds its key, such as `ASI_ONE_API_KEY`; Hermes sends it only to `base_url`. |
 | `toolsets` | `[]` | `[web]` or nothing; no other toolset is accepted. |
 | `instructions` | a generic line | What the guest is told about the job, up to 8000 characters. |
 | `max_turns` | `8` | Most tool-using steps per request, 1 to 50. |
 | `timeout_seconds` | `300` | The guest is stopped after this long, and the run counts as a failure on the seller's side. |
 | `max_output_chars` | `20000` | Longer answers are cut off with a note. |
 | `env_file` | `guests/<name>.env` in the state folder | The guest's keys file (its model key, and a web search key if any). Must be private (`chmod 600`) and set no `HERMES_...` variable. |
-| `pass_env` | `[]` | Names of environment variables the guest may see, such as `HTTPS_PROXY`; no `HERMES_...` names. |
+| `pass_env` | `[]` | Names of environment variables the guest may see, such as `HTTPS_PROXY`; no `HERMES_...` or `..._BASE_URL` names. |
 | `python` | from `hermes fetchai-bridge` | The Python Hermes runs on, as an absolute path. |
 
 `doctor` and `serve` fail if a program, or a file named by absolute path in `argv`, does not exist, or if a guest Hermes could not run safely, so the bridge never takes payments for a service that cannot run. `doctor` also names each guest's keys file. `seller try` runs a service once without payment.
@@ -130,7 +131,7 @@ A `hermes` runner (a guest Hermes, [guest-hermes.md](guest-hermes.md)):
 
 | Key | Default | Meaning |
 |-----|---------|---------|
-| `enable_chat` | `false` | Sell the services under `services` through Fetch's chat protocol, in plain language, to ASI:One users and other chat agents ([`asi-one.md`](asi-one.md)). Needs at least one service. Chat reaches only the services, never Hermes' tools. |
+| `enable_chat` | `false` | Sell the services under `services` through Fetch's Agent Chat Protocol, in plain language, to ASI:One users and other chat agents ([`asi-one.md`](asi-one.md)). Needs at least one service. Chat reaches only the services, never Hermes' tools. |
 
 ## `buying`
 

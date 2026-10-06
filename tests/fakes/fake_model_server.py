@@ -2,7 +2,9 @@
 
 It answers ``POST /v1/chat/completions`` from a script of replies, streamed or
 not, and records every request, so a test can check exactly which tools and
-instructions a guest Hermes offered the model.
+instructions a guest Hermes offered the model. Given ``accepted_fields``, it is
+as strict as ASI:One's API: a request with any other top-level field gets a 400
+``unknown_parameter`` error naming it, in ASI:One's documented error shape.
 """
 
 from __future__ import annotations
@@ -27,9 +29,14 @@ def tool_reply(name: str, arguments: dict[str, Any]) -> dict[str, Any]:
 class FakeModelServer:
     """Serves scripted replies on 127.0.0.1; the last reply repeats once the script runs out."""
 
-    def __init__(self, replies: list[dict[str, Any]]) -> None:
+    def __init__(
+        self, replies: list[dict[str, Any]], accepted_fields: frozenset[str] | None = None
+    ) -> None:
         self.replies = list(replies)
+        self.accepted_fields = accepted_fields
         self.requests: list[dict[str, Any]] = []
+        self.rejected: list[list[str]] = []  # the unknown fields of each refused request
+        self.authorizations: list[str] = []
         self.paths: list[str] = []
         self._lock = threading.Lock()
         server = self
@@ -51,8 +58,23 @@ class FakeModelServer:
                 server.paths.append(f"POST {self.path}")
                 length = int(self.headers.get("Content-Length") or 0)
                 body = json.loads(self.rfile.read(length) or b"{}")
+                server.authorizations.append(self.headers.get("Authorization") or "")
                 if not self.path.rstrip("/").endswith("/chat/completions"):
                     self._json(404, {"error": {"message": f"unsupported path {self.path}"}})
+                    return
+                unknown = (
+                    sorted(set(body) - server.accepted_fields) if server.accepted_fields else []
+                )
+                if unknown:
+                    server.rejected.append(unknown)
+                    error = {
+                        "message": f"Unknown parameter: '{unknown[0]}'.",
+                        "type": "invalid_request_error",
+                        "code": "unknown_parameter",
+                        "param": unknown[0],
+                        "status": 400,
+                    }
+                    self._json(400, {"error": error})
                     return
                 reply = server._next(body)
                 if body.get("stream"):

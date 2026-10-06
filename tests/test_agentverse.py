@@ -49,6 +49,9 @@ def test_readme_tells_asi_one_what_is_sold_and_how_to_order():
     assert "`security-review: <your request>`" in text
     assert "Testnet FET only (Dorado)" in text
     assert "- Defensive code security review: Not a penetration test." in text
+    # Every listing says where the agent comes from, and which of Fetch's protocols it speaks.
+    assert text.endswith(f"## About\n\n{agentverse.ABOUT}\n")
+    assert "Hermes Agent" in agentverse.ABOUT and "Agent Chat Protocol" in agentverse.ABOUT
 
 
 def test_a_mailbox_agent_registers_the_mailbox_and_its_protocols():

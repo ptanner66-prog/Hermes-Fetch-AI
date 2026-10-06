@@ -25,6 +25,7 @@ from hermes_fetch_ai.setup_wizard import (
     check_handle,
     check_price,
     read_keys,
+    research_choice,
     run_setup,
 )
 from hermes_fetch_ai.wallet import BUYING_WALLET_INDEX, agent_address, wallet_address
@@ -253,6 +254,50 @@ def test_research_with_a_model_on_this_computer_needs_no_key(tmp_path, monkeypat
     assert (runner.provider, runner.base_url) == ("custom", "http://localhost:1234/v1")
     assert "research.key" not in asker.asked
     assert not any("costs real money" in line for line in asker.said)
+
+
+def test_research_on_asi_one_uses_fetchs_model_with_its_own_key(tmp_path, monkeypatch, state):
+    answers = {
+        "research": True,
+        "research.provider": "asi-one",
+        "research.key": KEY,
+        "review": False,
+        "buy": False,
+    }
+    w, asker, _ = wizard(tmp_path, answers)
+    assert w.run() == 0, asker.said
+    path = tmp_path / "config" / "bridge.yaml"
+    runner = load(path, monkeypatch).services["research"].runner
+    # Hermes reaches ASI:One's OpenAI-compatible API as a custom endpoint, with the key that
+    # key_env names, which Hermes sends to that address only.
+    assert (runner.provider, runner.base_url, runner.key_env, runner.model) == (
+        "custom",
+        "https://api.asi1.ai/v1",
+        "ASI_ONE_API_KEY",
+        "asi1",
+    )
+    assert "research.url" not in asker.asked
+    assert read_keys(state / "guests" / "research.env") == {"ASI_ONE_API_KEY": KEY}
+    assert any("ASI:One account, which costs real money" in line for line in asker.said)
+    # Running setup again keeps ASI:One, not the model server on this computer.
+    w, asker, _ = wizard(tmp_path, {})
+    assert w.run() == 0, asker.said
+    again = load(path, monkeypatch).services["research"].runner
+    assert (again.base_url, again.key_env, again.model) == (runner.base_url, runner.key_env, "asi1")
+    assert "research.url" not in asker.asked and "research.keep_key" in asker.asked
+
+
+def test_research_choice_reads_a_saved_runner():
+    assert (
+        research_choice({"provider": "custom", "base_url": "https://api.asi1.ai/v1"}) == "asi-one"
+    )
+    assert (
+        research_choice({"provider": "custom", "base_url": "http://127.0.0.1:11434/v1"}) == "custom"
+    )
+    asi_one_with_slash = {"provider": "custom", "base_url": "https://api.asi1.ai/v1/"}
+    assert research_choice(asi_one_with_slash) == "asi-one"
+    assert research_choice({"provider": "anthropic"}) == "anthropic"
+    assert research_choice(None) == ""
 
 
 def test_a_model_server_that_does_not_answer_is_pointed_out(tmp_path):

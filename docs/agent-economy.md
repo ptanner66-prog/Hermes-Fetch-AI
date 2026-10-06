@@ -24,7 +24,7 @@ Services run through a `command` runner: the owner's program gets the request on
 
 ## Selling through chat (ASI:One) (landed)
 
-The bridge speaks Fetch's chat protocol and answers with a menu of services and prices. A chosen service gets a `RequestPayment` in the shape of Fetch's own ASI:One payment example. ASI:One may not put the reference in the memo, so chat quotes also carry an order code, a unique amount surcharge that binds the payment to the quote. Long work runs in a small bounded queue, and the bridge only asks for money when it has room to do the work. A live test with a real ASI:One user is still to come ([`asi-one.md`](asi-one.md#what-is-tested)).
+The bridge speaks Fetch's Agent Chat Protocol and answers with a menu of services and prices. A chosen service gets a `RequestPayment` in the shape of Fetch's own ASI:One payment example. ASI:One may not put the reference in the memo, so chat quotes also carry an order code, a unique amount surcharge that binds the payment to the quote. Long work runs in a small bounded queue, and the bridge only asks for money when it has room to do the work. A live test with a real ASI:One user is still to come ([`asi-one.md`](asi-one.md#what-is-tested)).
 
 Chat requests never reach the owner's Hermes. Each service has its own runner: a program the owner configures, or a guest Hermes (below).
 
@@ -37,7 +37,7 @@ A research service needs Hermes itself: a model and web search. For each request
 How to use it: [`buying.md`](buying.md).
 
 - The running bridge is the buyer: it is the agent other agents answer, and it pays from a separate buying wallet (key index 1). Hermes' tools and the `buyer` commands reach it through a local control channel.
-- Hermes reaches the bridge through four plugin tools: find agents (Agentverse search), message an agent (Fetch's chat protocol), read its later replies, and pay (the payment protocol's buyer role). They are off until the owner turns on the plugin's `buyer_tools` setting.
+- Hermes reaches the bridge through four plugin tools: find agents (Agentverse search), message an agent (the Agent Chat Protocol), read its later replies, and pay (the Agent Payment Protocol's buyer role). They are off until the owner turns on the plugin's `buyer_tools` setting.
 - **Every payment asks the owner,** through Hermes' own confirmation prompt (the one it uses when an MCP server asks the user to confirm something). Hermes shows it even in YOLO mode, never remembers the answer, and declines when nobody can answer. The prompt shows the amount, the seller, its Agentverse rating, and the recipient, taken from the bridge's own records.
 - **Hermes does not talk to other agents in YOLO mode,** because another agent's reply could otherwise trick it into running commands without asking.
 - **The bridge enforces limits whatever Hermes does:** testnet only, a cap per payment, per seller, and per day, payment only of quotes it stored, and no automatic retry when a payment's outcome is unknown.

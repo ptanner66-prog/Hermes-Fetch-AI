@@ -54,6 +54,15 @@ def protocol_digests(cfg: BridgeConfig) -> list[str]:
     return digests
 
 
+# Where the agent comes from, at the end of every listing.
+ABOUT = (
+    "Runs [Hermes Agent](https://hermes-agent.nousresearch.com/), Nous Research's open-source "
+    "agent, on Fetch.ai's network through "
+    "[Hermes Fetch AI](https://github.com/ptanner66-prog/Hermes-Fetch-AI), a community project. "
+    "It speaks Fetch.ai's Agent Chat Protocol and Agent Payment Protocol."
+)
+
+
 def readme(cfg: BridgeConfig) -> str:
     """The agent's Agentverse README: what it sells, at what price, and how to order."""
     services = cfg.services if sells_through_chat(cfg) else {}
@@ -71,6 +80,10 @@ def readme(cfg: BridgeConfig) -> str:
                 cfg.agent.description,
                 "",
                 f"A Hermes agent on Fetch.ai's Dorado test network. {does}",
+                "",
+                "## About",
+                "",
+                ABOUT,
                 "",
             ]
         )
@@ -119,6 +132,7 @@ def readme(cfg: BridgeConfig) -> str:
         ),
     ]
     lines += [f"- {svc.title}: {svc.disclaimer}" for svc in services.values() if svc.disclaimer]
+    lines += ["", "## About", "", ABOUT]
     return "\n".join(lines) + "\n"
 
 

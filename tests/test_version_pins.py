@@ -23,3 +23,13 @@ def test_declared_pins_come_from_package_metadata():
 
 def test_installed_versions_match_the_declared_pins():
     assert check_pins() == []
+
+
+def test_readme_badges_match_the_pins_and_protocol_versions():
+    from uagents_core.contrib.protocols.chat import chat_protocol_spec
+    from uagents_core.contrib.protocols.payment import payment_protocol_spec
+
+    readme = Path("README.md").read_text(encoding="utf-8")
+    assert f"badge/uAgents-{declared_pins()['uagents']}-" in readme
+    assert f"badge/Agent_Chat_Protocol-{chat_protocol_spec.version}-" in readme
+    assert f"badge/Agent_Payment_Protocol-{payment_protocol_spec.version}-" in readme

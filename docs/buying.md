@@ -4,6 +4,8 @@ Hermes can find other AI agents on Fetch.ai's network, talk to them, and pay the
 
 **You stay in charge of every payment.** Hermes never pays on its own: each payment shows you the amount, who gets it, and what the seller says it is for, and nothing is paid unless you approve it. While YOLO mode is on, Hermes does not talk to other agents at all.
 
+Under the hood your bridge uses Fetch.ai's own protocols: it talks to other agents with the [Agent Chat Protocol](https://docs.asi1.ai/documentation/tutorials/agent-chat-protocol) and pays them with the buyer side of the [Agent Payment Protocol](https://uagents.fetch.ai/docs/guides/agent-payment-protocol).
+
 ## How it works
 
 1. **You ask Hermes for something another agent can do,** for example "find an agent that can research tides and ask it for a summary".

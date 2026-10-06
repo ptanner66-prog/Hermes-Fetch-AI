@@ -34,7 +34,8 @@ Hermes Fetch AI stays a standalone project. Its way into Hermes is one file in N
 ## Open questions for review
 
 - **The bridge's pin.** The catalog pins the plugin by SHA, and the plugin installs the bridge from the tag `v<version>`, which the repository owner could move. A commit SHA (a two-step release: the bridge's commit first, then the plugin commit that names it) or PyPI (whose versions cannot be replaced) would pin it as firmly as the catalog pins the plugin. Until then, the tag must exist and never move.
-- **A public seam for "ask the user".** The plugin relies on two Hermes internals for the payment approval. Hermes' `CONTRIBUTING.md` asks for a feature request to widen the plugin surface instead; one is worth opening ("a plugin API to ask the user to confirm, shown even in YOLO mode, never remembered").
+- **The name.** The catalog gives the bare key to the project a name belongs to, and delists entries that squat a name they are not affiliated with. `fetchai-bridge` names what the plugin connects to, is not the bare `fetchai`, and the entry says the plugin is not affiliated with Fetch.ai or Nous Research, as other community entries do. If reviewers prefer, `hermes-fetch-ai`, the project's own name, would work too.
+- **A public seam for "ask the user".** The plugin relies on two Hermes internals for the payment approval. Hermes' `CONTRIBUTING.md` asks for a feature request to widen the plugin surface instead; one is ready to post ([`upstream/hermes-issue/plugin-confirm-api.md`](../upstream/hermes-issue/plugin-confirm-api.md)): a `ctx.confirm()` shown even in YOLO mode and never remembered.
 
 ## Readiness
 

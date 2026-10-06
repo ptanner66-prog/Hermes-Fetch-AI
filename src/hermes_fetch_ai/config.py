@@ -135,6 +135,18 @@ _SERVICE_NAME_RE = re.compile(r"[a-z0-9][a-z0-9_-]{0,39}")
 _ENV_NAME_RE = re.compile(r"[A-Za-z_][A-Za-z0-9_]{0,127}")
 
 
+def guest_control_key(name: str) -> bool:
+    """Whether a variable would change how a guest Hermes behaves or where it sends requests.
+
+    ``HERMES_...`` variables change Hermes itself (``HERMES_ALLOW_PRIVATE_URLS``);
+    ``..._BASE_URL`` variables move its endpoints: Hermes puts ``CUSTOM_BASE_URL``
+    before the model address the bridge writes, and reads ``OPENROUTER_BASE_URL``
+    and the like for other providers.
+    """
+    upper = name.upper()
+    return upper.startswith("HERMES_") or upper.endswith("_BASE_URL")
+
+
 def is_fetch_address(value: str) -> bool:
     """True for a well-formed ``fetch1...`` wallet address."""
     hrp, data = bech32.bech32_decode(value)
@@ -347,8 +359,12 @@ class HermesRunnerConfig(BaseModel):
     # Hermes' inference provider, such as "openrouter", or "custom" with base_url
     # for a model server like Ollama; unset: Hermes picks one from the keys it has.
     provider: str | None = Field(default=None, min_length=1, max_length=64)
-    # The model server's address, for provider "custom", e.g. http://127.0.0.1:11434/v1.
+    # The model server's address, for provider "custom", e.g. http://127.0.0.1:11434/v1,
+    # or a hosted OpenAI-compatible service such as ASI:One's https://api.asi1.ai/v1.
     base_url: str | None = None
+    # For base_url: the variable in the guest's keys file that holds its key, such as
+    # ASI_ONE_API_KEY. Unset: Hermes finds the key itself (a local server needs none).
+    key_env: str | None = None
     # What the guest is told about the job; the buyer's request follows it.
     instructions: str = Field(default="", max_length=8000)
     max_turns: int = Field(default=8, ge=1, le=50)
@@ -373,9 +389,24 @@ class HermesRunnerConfig(BaseModel):
         for name in names:
             if not _ENV_NAME_RE.fullmatch(name):
                 raise ValueError(f"{name!r} is not an environment variable name")
-            if name.upper().startswith("HERMES_"):
-                raise ValueError(f"{name} would change how the guest Hermes behaves")
+            if guest_control_key(name):
+                raise ValueError(
+                    f"{name} would change how the guest Hermes behaves or where it sends requests"
+                )
         return names
+
+    @field_validator("key_env")
+    @classmethod
+    def _key_env_name(cls, name: str | None) -> str | None:
+        if name is None:
+            return None
+        if not _ENV_NAME_RE.fullmatch(name):
+            raise ValueError(f"{name!r} is not an environment variable name")
+        if guest_control_key(name):
+            raise ValueError(
+                f"{name} would change how the guest Hermes behaves or where it sends requests"
+            )
+        return name
 
     @field_validator("python")
     @classmethod
@@ -425,6 +456,8 @@ class HermesRunnerConfig(BaseModel):
                 "provider custom needs base_url, the model server's address, "
                 "such as http://127.0.0.1:11434/v1"
             )
+        if self.key_env and not self.base_url:
+            raise ValueError("key_env names the key for base_url; set base_url too")
         return self
 
 

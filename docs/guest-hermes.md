@@ -43,6 +43,8 @@ Web search works without any search key: Hermes then uses the free tiers of publ
 
 A local model works too, with no key at all: `provider: custom`, `base_url: http://127.0.0.1:11434/v1` (Ollama's address), and the model's name.
 
+So does [ASI:One](https://asi1.ai)'s own model, through its OpenAI-compatible API: `setup` offers it, or set `provider: custom`, `base_url: https://api.asi1.ai/v1`, `key_env: ASI_ONE_API_KEY`, and `model: asi1` (or `asi1-mini`, `asi1-ultra`), and put `ASI_ONE_API_KEY=...` in the guest's keys file. Hermes sends that key only to that address. ASI:One refuses request fields it does not know, and Hermes adds two (`stream_options`, `reasoning_effort`); Hermes drops them as soon as ASI:One says so, at the cost of a quick retry on a run's first call.
+
 ## Settings
 
 Under the service's `runner`:
@@ -53,13 +55,14 @@ Under the service's `runner`:
 | `model` | The model, as your provider names it | required |
 | `provider` | Hermes' name for the provider, such as `openrouter`, `anthropic`, or `custom` | Hermes picks from the keys it has |
 | `base_url` | The model server's address, for `provider: custom` | none |
+| `key_env` | For `base_url`: the variable in the keys file that holds its key, such as `ASI_ONE_API_KEY` | none (a local server needs no key) |
 | `toolsets` | `[web]` for web search and reading web pages; `[]` for no tools at all | `[]` |
 | `instructions` | What the guest is told about the job, before the buyer's request | a generic line |
 | `max_turns` | Most tool-using steps per request (1 to 50) | 8 |
 | `timeout_seconds` | Stop the guest after this long; the buyer keeps the payment | 300 |
 | `max_output_chars` | Longest answer; longer ones are cut with a note | 20000 |
 | `env_file` | The guest's keys file | `guests/<service>.env` in the bridge's state folder |
-| `pass_env` | Names of environment variables the guest may see, such as `HTTPS_PROXY` | none |
+| `pass_env` | Names of environment variables the guest may see, such as `HTTPS_PROXY`; no `HERMES_...` or `..._BASE_URL` names | none |
 | `python` | The Python Hermes runs on | the one `hermes fetchai-bridge` hands over |
 
 `web` is the only toolset a guest can have. Anything else, such as `terminal` or `file`, is refused when the config is loaded.
@@ -91,9 +94,9 @@ A run counts as done only when Hermes exits cleanly with a final answer. If it d
 
 `doctor`, `seller try`, and `serve` refuse to go on when:
 - Hermes' Python is not known, does not exist, or has no Hermes installed;
-- the guest's keys file sets any `HERMES_...` variable (those change how Hermes behaves, for example `HERMES_ALLOW_PRIVATE_URLS`), cannot be read, or other users can read it (`chmod 600` fixes that);
+- the guest's keys file sets any `HERMES_...` variable (those change how Hermes behaves, for example `HERMES_ALLOW_PRIVATE_URLS`) or `..._BASE_URL` variable (those change where it sends requests: Hermes puts `CUSTOM_BASE_URL` before the address the bridge writes), cannot be read, or other users can read it (`chmod 600` fixes that);
 - an `env_file` you named does not exist;
-- the `.env` file in Hermes' install folder sets a `HERMES_...` variable: Hermes loads that file into every run, guests included;
+- the `.env` file in Hermes' install folder sets a `HERMES_...` or `..._BASE_URL` variable: Hermes loads that file into every run, guests included;
 - on a machine with Hermes settings pinned by an administrator in `/etc/hermes`, those settings set a `HERMES_...` variable, allow private network addresses, or add MCP servers.
 
 ## Privacy
@@ -104,5 +107,5 @@ A run counts as done only when Hermes exits cleanly with a final answer. If it d
 ## What is tested
 
 - Offline, on Linux, macOS, and Windows: the exact command, environment, settings, and keys file a guest gets; that the request travels only on standard input and inside its markers; that every way Hermes can fail is treated as a failed run; time and output limits; every check above.
-- Against real Hermes (0.21.5 and a pinned `main`) in CI, with a stand-in model server on `127.0.0.1`: a research guest is offered only `web_search` and `web_extract`; a guest without toolsets is offered no tools; a terminal command the model asks for is refused and never runs; a page on `127.0.0.1` the model asks for is refused and never fetched; only the request's own model calls are made; nothing is left behind.
+- Against real Hermes (0.21.5 and a pinned `main`) in CI, with a stand-in model server on `127.0.0.1`: a research guest is offered only `web_search` and `web_extract`; a guest without toolsets is offered no tools; a terminal command the model asks for is refused and never runs; a page on `127.0.0.1` the model asks for is refused and never fetched; only the request's own model calls are made; nothing is left behind; and against a stand-in as strict as ASI:One's API, which refuses unknown request fields, the guest still answers, with the key `key_env` names.
 - By hand, against real Hermes: a model server that never answers ends the run at `timeout_seconds` (Hermes itself keeps retrying, so the bridge's limit is what stops it), with the payment kept and no process left running.

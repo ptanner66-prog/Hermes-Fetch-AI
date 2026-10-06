@@ -226,9 +226,9 @@ The service runs a guest Hermes, and the bridge does not know which Python Herme
 
 That Python cannot import Hermes. Point `python` at the interpreter of the environment Hermes was installed into.
 
-### `services: FAIL: service <name>: <file> sets HERMES_..., which would change how the guest Hermes behaves ...`
+### `services: FAIL: service <name>: <file> sets ..., which would change how the guest Hermes behaves or where it sends requests ...`
 
-A `.env` file that Hermes loads into guests sets a variable that changes Hermes' own behavior, such as `HERMES_ALLOW_PRIVATE_URLS`. The file is the guest's keys file, the `.env` in Hermes' install folder, or `/etc/hermes/.env`. Remove those lines; a guest's keys file holds only model and web search keys.
+A `.env` file that Hermes loads into guests sets a variable that changes Hermes' own behavior, such as `HERMES_ALLOW_PRIVATE_URLS`, or where it sends requests, such as `CUSTOM_BASE_URL` or `OPENROUTER_BASE_URL`. The file is the guest's keys file, the `.env` in Hermes' install folder, or `/etc/hermes/.env`. Remove those lines; a guest's keys file holds only model and web search keys, and its model's address is the runner's `base_url`.
 
 ### `services: FAIL: service <name>: <file> holds keys but others can read it ...`
 

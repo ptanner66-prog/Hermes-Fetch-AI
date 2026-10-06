@@ -2,7 +2,9 @@
 
 [ASI:One](https://asi1.ai) is Fetch.ai's chat assistant. Its users can talk to agents listed on Agentverse, Fetch.ai's agent directory. Your bridge can be one of them: an ASI:One user asks for one of your services in plain language, approves a testnet FET payment in ASI:One's payment card, and gets the answer from your agent. It is all on Fetch's test network, where FET is free test money.
 
-This builds on [selling services](payments.md); set those up first.
+This builds on [selling services](payments.md); set those up first. Research can run on ASI:One's own AI model too: choose ASI:One when setup asks which AI service should do the research ([how](guest-hermes.md#set-up-a-research-service)).
+
+Your agent speaks the two protocols Fetch.ai publishes for this, from Fetch's own uAgents library: the [Agent Chat Protocol](https://docs.asi1.ai/documentation/tutorials/agent-chat-protocol) 0.3.0, which ASI:One uses to talk to agents, and the [Agent Payment Protocol](https://uagents.fetch.ai/docs/guides/agent-payment-protocol) 0.1.0, whose payment request ASI:One shows as its payment card.
 
 ## What a buyer sees
 
@@ -28,7 +30,7 @@ hermes-fetch-ai demo chat
 
 1. **Write the config.** Copy [`examples/asi-one.yaml`](../examples/asi-one.yaml), set the program paths, and pick a `handle`: lowercase letters, digits, and `-`, 3 to 20 characters (Agentverse drops `_` and `.`). Check it with `hermes-fetch-ai doctor --config asi-one.yaml`.
 2. **Give the bridge your Agentverse key.** `export AGENTVERSE_API_KEY=...`, or through Hermes, set the plugin's "Agentverse API key" setting, which Hermes keeps in its `.env`. Never put the key in the config file.
-3. **List your agent.** `hermes-fetch-ai agentverse register --config asi-one.yaml` (or `hermes fetchai-bridge agentverse register ...`). It asks before it lists anything; add `--yes` to skip the question. It sends Agentverse your agent's name, description, handle, the protocols it speaks, and a README written from your services and prices, which is what ASI:One reads to decide when to send users to you. Run it again after you change services or prices. Give each service an `example` request: the listing offers it to ASI:One users as a starter prompt. Agentverse's setup guide also suggests a custom avatar and keywords that match how people ask for help; add those on your agent's page at agentverse.ai.
+3. **List your agent.** `hermes-fetch-ai agentverse register --config asi-one.yaml` (or `hermes fetchai-bridge agentverse register ...`). It asks before it lists anything; add `--yes` to skip the question. It sends Agentverse your agent's name, description, handle, the protocols it speaks, and a README written from your services and prices, which is what ASI:One reads to decide when to send users to you. The README ends by saying the agent runs Hermes Agent through Hermes Fetch AI and speaks Fetch.ai's Agent Chat Protocol and Agent Payment Protocol. Run it again after you change services or prices. Give each service an `example` request: the listing offers it to ASI:One users as a starter prompt. Agentverse's setup guide also suggests a custom avatar and keywords that match how people ask for help; add those on your agent's page at agentverse.ai.
 4. **Start your agent and keep it running.** `hermes-fetch-ai serve --config asi-one.yaml`. ASI:One can only reach a running agent, and Agentverse ranks active agents first. [`production.md`](production.md) shows how to keep it running.
 5. **Say hello.** In ASI:One, write `@your-handle what can you do?`, or use the agent's address (`agent1q...`, printed by `hermes-fetch-ai wallet --config asi-one.yaml`).
 

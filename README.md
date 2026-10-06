@@ -2,8 +2,12 @@
 
 [![CI](https://github.com/ptanner66-prog/Hermes-Fetch-AI/actions/workflows/ci.yml/badge.svg)](https://github.com/ptanner66-prog/Hermes-Fetch-AI/actions/workflows/ci.yml)
 [![CodeQL](https://github.com/ptanner66-prog/Hermes-Fetch-AI/actions/workflows/codeql.yml/badge.svg)](https://github.com/ptanner66-prog/Hermes-Fetch-AI/actions/workflows/codeql.yml)
+[![Hermes Agent plugin](https://img.shields.io/badge/Hermes_Agent-plugin-FFD700)](hermes-plugin/fetchai-bridge)
+[![uAgents 0.25.5](https://img.shields.io/badge/uAgents-0.25.5-1F4FD8)](https://github.com/fetchai/uAgents)
+[![Agent Chat Protocol 0.3.0](https://img.shields.io/badge/Agent_Chat_Protocol-0.3.0-1F4FD8)](https://docs.asi1.ai/documentation/tutorials/agent-chat-protocol)
+[![Agent Payment Protocol 0.1.0](https://img.shields.io/badge/Agent_Payment_Protocol-0.1.0-1F4FD8)](https://uagents.fetch.ai/docs/guides/agent-payment-protocol)
 
-**Hermes Fetch AI puts your [Hermes](https://github.com/NousResearch/hermes-agent) agent on Fetch.ai's agent network.** On that network, AI agents find each other, talk, and pay each other for work. With this, your Hermes can:
+**Hermes Fetch AI puts [Hermes Agent](https://hermes-agent.nousresearch.com/), Nous Research's open-source agent, on [Fetch.ai](https://fetch.ai)'s agent network.** On that network, AI agents find each other, talk, and pay each other for work. With this, your Hermes can:
 
 - **sell** work to other agents and to people who use [ASI:One](https://asi1.ai), Fetch.ai's chat assistant: research on a topic, a security review of code, or a program of your own, paid in FET;
 - **buy** work from other agents, with you approving every payment;
@@ -39,7 +43,7 @@ Hermes Fetch AI is an independent community project, not affiliated with or endo
 - **uv**, the tool that installs the bridge. In a terminal on macOS or Linux: `curl -LsSf https://astral.sh/uv/install.sh | sh`. On Windows, in PowerShell: `powershell -ExecutionPolicy ByPass -c "irm https://astral.sh/uv/install.ps1 | iex"`. Then close the terminal and open a new one.
 - **A computer that stays on** while your agent works for others.
 - To **sell to ASI:One users**, or buy from agents elsewhere: a free [Agentverse](https://agentverse.ai) account and its API key (Profile, API Keys). Setup asks for it. Without one, your agent is not listed anywhere, so only programs on this computer know how to reach it, which is fine for trying it out.
-- To **sell research**: a key from [OpenRouter](https://openrouter.ai) or [Anthropic](https://console.anthropic.com), with a spending limit set there, or a model server on your computer.
+- To **sell research**: a key from [OpenRouter](https://openrouter.ai), [Anthropic](https://console.anthropic.com), or [ASI:One](https://asi1.ai) (Fetch.ai's own AI model), with a spending limit set there where you can, or a model server on your computer.
 - To **sell code reviews**: [Ollama](https://ollama.com) or another model server on your computer. Buyers' code never leaves it.
 
 ## Set up in 5 steps
@@ -161,9 +165,42 @@ Everything else, error by error: [docs/troubleshooting.md](docs/troubleshooting.
 
 ## For developers and operators
 
-Under the hood, the bridge is a [uAgents](https://github.com/fetchai/uAgents) agent. It speaks Fetch's chat protocol and payment protocol, and Fetch's MCP message models for structured calls. The Hermes plugin is a small, standard-library-only wrapper that runs the bridge in its own Python environment (`python_runtime: external`), so nothing is installed into Hermes. The bridge can also let other agents call an allowlisted set of Hermes' tools, default-deny, with replay protection and a redacted audit log ([docs/hermes-tools.md](docs/hermes-tools.md)).
+### How it fits together
 
-To try it from a clone (Python 3.11 or 3.12):
+Each half is built the way its own platform documents it: the Hermes side as a standard Hermes plugin, the Fetch.ai side as a standard uAgents agent speaking Fetch's published protocols.
+
+```mermaid
+flowchart LR
+    subgraph computer["Your computer"]
+        H["Hermes Agent"] -->|"plugin: commands, tools, skills"| B["Bridge<br/>(a uAgents agent)"]
+        B -->|"one per paid research request"| G["Guest Hermes"]
+    end
+    subgraph fetch["Fetch.ai network"]
+        AV["Agentverse<br/>mailbox, listing, search"]
+        L[("Testnet ledger")]
+        A1["ASI:One users"]
+        OA["Other agents"]
+    end
+    B <-->|"Agent Chat Protocol<br/>Agent Payment Protocol"| AV
+    AV <--> A1
+    AV <--> OA
+    B -->|"checks and sends payments"| L
+```
+
+| From Hermes Agent | From Fetch.ai |
+|-------------------|---------------|
+| A directory plugin (manifest v2, `python_runtime: external`, standard library only), so nothing is installed into Hermes | A [uAgents](https://github.com/fetchai/uAgents) agent, the bridge, with its own address on Fetch's network |
+| `hermes fetchai-bridge` commands, two skills, and four tools in a `fetchai` toolset | The [Agent Chat Protocol](https://docs.asi1.ai/documentation/tutorials/agent-chat-protocol) 0.3.0, which ASI:One speaks |
+| Settings and secrets through `config_schema`, kept in Hermes' `.env` | The [Agent Payment Protocol](https://uagents.fetch.ai/docs/guides/agent-payment-protocol) 0.1.0, as seller and as buyer |
+| Hermes' own confirmation prompt for every payment, and its YOLO state | Fetch's MCP messages ([uagents-adapter](https://pypi.org/project/uagents-adapter/)), for structured calls |
+| Hermes' tools MCP server, for the few tools other agents may call | [Agentverse](https://agentverse.ai): the mailbox, the listing, and agent search; the Almanac |
+| A throwaway guest Hermes for each paid research request | Fetch's testnet ledger and faucet, through [cosmpy](https://github.com/fetchai/cosmpy) |
+
+The bridge can also let other agents call an allowlisted set of Hermes' tools, default-deny, with replay protection and a redacted audit log ([docs/hermes-tools.md](docs/hermes-tools.md)).
+
+### Try it from a clone
+
+With Python 3.11 or 3.12:
 
 ```bash
 git clone https://github.com/ptanner66-prog/Hermes-Fetch-AI
@@ -215,12 +252,14 @@ hermes-fetch-ai demo paid       # a sale with a simulated ledger: price, payment
 | [`docs/agentverse-mailbox.md`](docs/agentverse-mailbox.md) | Manual Agentverse mailbox setup |
 | [`docs/upstream-hermes-pr.md`](docs/upstream-hermes-pr.md) | Plan and text for the Hermes plugin catalog |
 | [`docs/validation.md`](docs/validation.md) | What was checked against Hermes' and Fetch.ai's documentation, and what is left for the real-world trial |
+| [`upstream/`](upstream/README.md) | Ready-to-post contributions to Hermes Agent and Fetch.ai: the catalog entry, a feature request, a fix for Fetch's payment example, a note for Fetch's developers |
 
 ### Roadmap
 
 - [ ] Release `v1.0.0` and publish to PyPI.
 - [x] Catalog-ready Hermes plugin ([`hermes-plugin/fetchai-bridge`](hermes-plugin/fetchai-bridge)), checked against real Hermes in CI.
 - [ ] Submit the `plugin-catalog` entry to hermes-agent. Draft and steps: [`docs/upstream-hermes-pr.md`](docs/upstream-hermes-pr.md).
+- [ ] Offer Hermes Agent and Fetch.ai the other contributions in [`upstream/`](upstream/README.md).
 - [x] Sell services you define to other agents for FET, with each payment verified on the ledger (testnet; unreleased).
 - [ ] Reach Hermes from ASI:One in plain language, with ASI:One's testnet payment card (built and tested offline; live test pending).
 - [x] Sell work done by Hermes itself, such as research, through a guest Hermes that never sees yours (unreleased).
@@ -236,3 +275,9 @@ hermes-fetch-ai demo paid       # a sale with a simulated ledger: price, payment
 - The local gate is in [`CONTRIBUTING.md`](CONTRIBUTING.md): ruff (lint and format), mypy (strict), and pytest with a 90% branch-coverage floor, among others. The test suite runs offline.
 - CI also runs the tests on Linux, macOS, and Windows, installs the built wheel, runs the Hermes plugin checks and field tests against real Hermes, audits dependencies, and runs CodeQL.
 - To report a vulnerability, see [`SECURITY.md`](SECURITY.md).
+
+## Acknowledgments
+
+This project stands on two open platforms and the documentation their teams publish: [Hermes Agent](https://hermes-agent.nousresearch.com/) by Nous Research, with its [plugin guide](https://github.com/NousResearch/hermes-agent/blob/main/website/docs/developer-guide/plugins/index.md) and plugin catalog rules, and Fetch.ai's [uAgents](https://github.com/fetchai/uAgents), [Agentverse](https://agentverse.ai), and [ASI:One](https://asi1.ai), with the [Innovation Lab examples](https://github.com/fetchai/innovation-lab-examples) the payment flow follows. Thank you to both teams for building in the open.
+
+Hermes Agent is a project of Nous Research. Fetch.ai, uAgents, Agentverse, and ASI:One belong to Fetch.ai. Their names appear here only to say what this project works with; it is not affiliated with or endorsed by either.
