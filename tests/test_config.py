@@ -1,3 +1,5 @@
+from pathlib import Path
+
 import pytest
 from pydantic import ValidationError
 
@@ -74,6 +76,11 @@ def test_stdio_command_can_come_from_the_hermes_plugin(monkeypatch):
 def test_audit_path_defaults_per_platform():
     cfg = BridgeConfig(agent={"dev_random_seed": True})
     assert str(cfg.audit_path).endswith("audit.jsonl")
+
+
+def test_audit_path_expands_home():
+    cfg = BridgeConfig(agent={"dev_random_seed": True}, logging={"audit_path": "~/bridge.jsonl"})
+    assert cfg.audit_path == Path.home() / "bridge.jsonl"
 
 
 def test_secret_shaped_yaml_rejected(tmp_path):

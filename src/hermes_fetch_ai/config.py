@@ -185,7 +185,9 @@ class BridgeConfig(BaseModel):
 
     @property
     def audit_path(self) -> Path:
-        return Path(self.logging.audit_path) if self.logging.audit_path else default_audit_path()
+        if self.logging.audit_path:
+            return Path(self.logging.audit_path).expanduser()
+        return default_audit_path()
 
 
 def _looks_like_secret(value: str) -> bool:
