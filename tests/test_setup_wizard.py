@@ -294,6 +294,8 @@ def test_research_choice_reads_a_saved_runner():
     assert (
         research_choice({"provider": "custom", "base_url": "http://127.0.0.1:11434/v1"}) == "custom"
     )
+    asi_one_with_slash = {"provider": "custom", "base_url": "https://api.asi1.ai/v1/"}
+    assert research_choice(asi_one_with_slash) == "asi-one"
     assert research_choice({"provider": "anthropic"}) == "anthropic"
     assert research_choice(None) == ""
 
