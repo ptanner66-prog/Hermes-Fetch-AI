@@ -4,14 +4,17 @@ import json
 from dataclasses import dataclass
 from typing import Any
 
+_OMITTED_CONTENT_TYPES = {"image", "audio", "resource", "resource_link"}
+
 
 @dataclass
 class NormalizedToolResult:
+    """A tool result as the bridge returns it: text, capped at ``max_output_bytes``."""
+
     text: str
-    structured: dict[str, Any] | None
     is_error: bool
     truncated: bool
-    output_bytes: int
+    output_bytes: int  # size before truncation
 
 
 def _cap(text: str, max_bytes: int) -> tuple[str, bool, int]:
@@ -32,57 +35,67 @@ def _cap(text: str, max_bytes: int) -> tuple[str, bool, int]:
     return raw[:keep].decode("utf-8", errors="ignore") + marker, True, original
 
 
+def _result(text: str, is_error: bool, max_bytes: int) -> NormalizedToolResult:
+    capped, truncated, original = _cap(text, max_bytes)
+    return NormalizedToolResult(capped, is_error, truncated, original)
+
+
 def error_result(text: str, max_bytes: int) -> NormalizedToolResult:
     """Return a tool error result capped to the same byte limit as normal output."""
-    capped, truncated, original = _cap(text, max_bytes)
-    return NormalizedToolResult(capped, None, True, truncated, original)
+    return _result(text, True, max_bytes)
+
+
+def _field(block: Any, name: str) -> Any:
+    return block.get(name) if isinstance(block, dict) else getattr(block, name, None)
 
 
 def _extract_content(content: Any) -> str:
-    blocks = content if isinstance(content, list) else [content]
+    """Join MCP content blocks into text; binary content is replaced by a placeholder."""
+    blocks = content if isinstance(content, list | tuple) else [content]
     parts: list[str] = []
     for block in blocks:
-        typ = getattr(block, "type", None) or (
-            block.get("type") if isinstance(block, dict) else None
-        )
-        if typ == "text" or hasattr(block, "text") or (isinstance(block, dict) and "text" in block):
-            parts.append(str(getattr(block, "text", None) or block.get("text")))
-        elif typ in {"image", "audio", "resource"}:
-            parts.append(f"[{typ} content omitted]")
-        elif block is not None:
+        if block is None:
+            continue
+        text = _field(block, "text")
+        kind = _field(block, "type")
+        if text is not None:
+            parts.append(str(text))
+        elif kind in _OMITTED_CONTENT_TYPES:
+            parts.append(f"[{kind} content omitted]")
+        else:
             parts.append(str(block))
     return "\n".join(parts)
 
 
-def from_call_tool_result(result: Any, max_bytes: int) -> NormalizedToolResult:
-    structured = getattr(result, "structuredContent", None) or getattr(
-        result, "structured_content", None
-    )
-    if structured is None and isinstance(result, dict):
-        structured = result.get("structuredContent") or result.get("structured")
-    content = (
-        getattr(result, "content", None) if not isinstance(result, dict) else result.get("content")
-    )
-    text = _extract_content(content)
+def _text_or_structured(text: str, structured: Any) -> str:
     if not text and structured is not None:
-        text = json.dumps(structured, sort_keys=True)
-    is_error = bool(
-        getattr(result, "isError", False)
-        or getattr(result, "is_error", False)
-        or (isinstance(result, dict) and result.get("isError", False))
-    )
-    capped, truncated, original = _cap(text, max_bytes)
-    return NormalizedToolResult(capped, structured, is_error, truncated, original)
+        return json.dumps(structured, sort_keys=True, default=str)
+    return text
+
+
+def from_call_tool_result(result: Any, max_bytes: int) -> NormalizedToolResult:
+    """Normalize an MCP client ``CallToolResult``."""
+    structured = _field(result, "structuredContent") or _field(result, "structured_content")
+    text = _text_or_structured(_extract_content(_field(result, "content")), structured)
+    is_error = bool(_field(result, "isError") or _field(result, "is_error"))
+    return _result(text, is_error, max_bytes)
 
 
 def from_fastmcp_result(result: Any, max_bytes: int) -> NormalizedToolResult:
+    """Normalize what an in-process server's ``call_tool`` returns.
+
+    FastMCP returns content blocks, or a ``(content, structured)`` pair when
+    the tool has structured output; the fake server returns plain values.
+    """
     if isinstance(result, NormalizedToolResult):
         return result
+    structured: Any = None
+    if isinstance(result, tuple) and len(result) == 2 and isinstance(result[1], dict):
+        result, structured = result
     if isinstance(result, dict):
-        text = json.dumps(result, sort_keys=True)
-        structured = result
+        text = json.dumps(result, sort_keys=True, default=str)
+    elif isinstance(result, list | tuple):
+        text = _extract_content(result)
     else:
         text = str(result)
-        structured = None
-    capped, truncated, original = _cap(text, max_bytes)
-    return NormalizedToolResult(capped, structured, False, truncated, original)
+    return _result(_text_or_structured(text, structured), False, max_bytes)

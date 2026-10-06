@@ -11,7 +11,5 @@ hermes_mcp:
   mode: fake
 policy:
   public_tools: []
-logging:
-  redaction: true
 chat:
   enable_chat: false

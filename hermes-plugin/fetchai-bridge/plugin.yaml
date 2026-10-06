@@ -1,0 +1,24 @@
+name: fetchai-bridge
+version: 1.0.0
+description: Run the Fetch.ai uAgents bridge for allowlisted Hermes tools
+author: Porter Tanner (ptanner66-prog)
+manifest_version: 2
+api_version: 1
+license: MIT
+homepage: https://github.com/ptanner66-prog/Hermes-Fetch-AI
+tags: [fetchai, uagents, agentverse, mcp, bridge]
+requires_hermes: ">=0.21.5"
+# The bridge pins uAgents and mcp 1.x and runs on Python 3.11/3.12, so it lives in
+# its own environment. This plugin is stdlib-only and installs nothing into Hermes.
+python_runtime: external
+config_schema:
+  command:
+    type: str
+    default: ""
+    label: Bridge command
+    description: Path to the hermes-fetch-ai executable. Leave empty to find it on PATH.
+  uagent_seed:
+    type: secret
+    env: UAGENT_SEED
+    label: uAgent seed
+    description: Stable bridge identity for `serve` (at least 32 random characters). Kept in Hermes' .env and passed to the bridge through the environment.

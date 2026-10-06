@@ -2,21 +2,26 @@
 
 ## Process model
 
-One bridge per process. `serve` owns a dedicated event loop, starts the MCP backend (stdio subprocess preferred), runs the uAgent server, and shuts down gracefully on SIGINT/SIGTERM/SIGBREAK (exit code 0; the MCP child receives a clean EOF). The two-process HTTP round trip, signed message exchange, and graceful shutdown path are covered by `tests/test_serve_http_roundtrip.py`.
+One bridge per process. `serve` owns an event loop, starts the MCP backend (a stdio subprocess for real Hermes tools), runs the uAgent HTTP server, and on SIGINT or SIGTERM (CTRL_BREAK on Windows) shuts down and exits 0, closing the MCP child's stdin. `tests/test_serve_http_roundtrip.py` runs this in a separate process, in fake mode and in stdio mode, and sends SIGTERM (CTRL_BREAK on Windows).
 
-If the Hermes backend cannot start, `serve` prints `hermes backend: FAIL: ...` and exits with status 1 (covered by `tests/test_cli.py`), so `Restart=on-failure` below retries it. The child's stderr is discarded because it is outside the bridge's redaction boundary; run the configured `hermes_mcp.command` and `args` by hand to see the underlying error. If the backend dies after startup, callers get `backend unavailable` and the audit log records `decision: error`; restart the service to recover.
+`serve` exits with status 1 and a one-line reason when it cannot start, so `Restart=on-failure` below retries it:
+
+- `hermes backend: FAIL: ...` when Hermes' tools server cannot start. The child's stderr is discarded because it is outside the bridge's redaction boundary; the message names the command to run by hand to see the error.
+- `serve: FAIL: ...` when the HTTP server cannot start, for example because `agent.port` is taken.
+
+If the backend dies after startup, callers get `backend unavailable` and the audit log records `decision: error`; restart the service to recover.
 
 ## Secrets
 
-- `UAGENT_SEED` comes from the environment only. The config loader rejects production YAML seed values; mailbox/hosted mode fails closed without the seed; logs and audit redact seed-shaped strings.
-- The seed must be at least 32 characters because the agent's signing key is derived from it. Generate one with `python -c "import secrets; print(secrets.token_hex(32))"`.
-- Production configs must set `agent.dev_random_seed: false` (as `examples/hermes-stdio.yaml` does). With `true`, `UAGENT_SEED` is ignored and the bridge gets a new address on every start; `doctor` and `serve` print `seed: WARN` in that case.
-- Use a dedicated agent seed. Fund the derived `fetch1...` wallet with only what Almanac registration needs.
-- Do not put seeds, mailbox keys, API tokens, private endpoints, or connection strings in examples, audit logs, issues, PRs, or screenshots.
+- `UAGENT_SEED` comes from the environment only. Config files with seed or mailbox-key values are rejected, mailbox mode refuses to start without the seed, and logs and audit records redact seed-shaped strings.
+- The seed must be at least 32 characters, because the agent's signing key is derived from it. Generate one with `python -c "import secrets; print(secrets.token_hex(32))"`.
+- Production configs set `agent.dev_random_seed: false` (as `examples/hermes-stdio.yaml` does). With `true`, `UAGENT_SEED` is ignored and the bridge gets a new address on every start; `doctor` and `serve` print `seed: WARN` in that case.
+- Use a dedicated agent seed, not a wallet that holds real funds. The seed also derives the agent's `fetch1...` wallet, which Almanac registration (`publish_manifest: true`) can spend from.
+- Keep seeds, mailbox keys, API tokens, private endpoints, and connection strings out of configs, audit logs, issues, pull requests, and screenshots.
 
-## Replay/idempotency contract
+## Replay-protection contract
 
-`CallTool` requires bridge metadata by default under reserved args key `_hermes_fetch_ai`:
+`CallTool` requires this metadata by default, under the reserved argument key `_hermes_fetch_ai`:
 
 ```json
 {
@@ -27,17 +32,7 @@ If the Hermes backend cannot start, `serve` prints `hermes backend: FAIL: ...` a
 }
 ```
 
-Clients should generate a fresh request ID per attempted tool call. The bridge strips this metadata before schema validation and before invoking Hermes. Duplicate request IDs for the same sender, stale timestamps, future timestamps beyond configured skew, malformed metadata, and oversized calls are denied before tool invocation.
-
-Relevant policy knobs:
-
-```yaml
-policy:
-  require_replay_metadata: true
-  replay_ttl_seconds: 300
-  max_replay_entries: 8192
-  max_replay_clock_skew_seconds: 60
-```
+Clients generate a fresh request ID (8 to 128 characters from `A-Z a-z 0-9 _ . : -`) for every call. The bridge strips the metadata before schema validation and before calling Hermes. A stale or future timestamp, malformed metadata, and oversized calls are denied before the tool runs. The bridge remembers a sender's request ID once the call has passed every check and is handed to the tool, so reusing it gets `replay detected`, even if the tool failed; a call denied earlier does not use up its ID. `hermes_fetch_ai.direct_protocol.replay_args()` builds the metadata for Python clients, as [`examples/call_bridge.py`](../examples/call_bridge.py) shows. The settings are in [`configuration.md`](configuration.md#policy).
 
 ## systemd unit (example)
 
@@ -50,11 +45,14 @@ Wants=network-online.target
 [Service]
 Type=exec
 User=hermes-bridge
-EnvironmentFile=/etc/hermes-fetch-ai/env      # UAGENT_SEED=... (mode 0600)
+# /etc/hermes-fetch-ai/env holds UAGENT_SEED=... (owner root, mode 0600).
+EnvironmentFile=/etc/hermes-fetch-ai/env
+Environment=HERMES_HOME=/var/lib/hermes-fetch-ai/hermes
 ExecStart=/opt/hermes-fetch-ai/venv/bin/hermes-fetch-ai serve --config /etc/hermes-fetch-ai/bridge.yaml
 Restart=on-failure
 RestartSec=5
 NoNewPrivileges=true
+PrivateTmp=true
 ProtectSystem=strict
 ReadWritePaths=/var/lib/hermes-fetch-ai
 
@@ -62,51 +60,41 @@ ReadWritePaths=/var/lib/hermes-fetch-ai
 WantedBy=multi-user.target
 ```
 
-Point `logging.audit_path` at `/var/lib/hermes-fetch-ai/audit.jsonl`. The writer appends line-delimited JSON and rotates the file itself at 25 MB, keeping five rotated files (`audit.jsonl.1` to `audit.jsonl.5`). External logrotate is optional; if you use it, use `copytruncate`.
+systemd only treats whole lines starting with `#` as comments, so keep comments off the `EnvironmentFile=` line. In `bridge.yaml`, set `hermes_mcp.command` to the Hermes environment's Python (a supervised `serve` does not get the Hermes plugin's interpreter hand-over) and point `logging.audit_path` at `/var/lib/hermes-fetch-ai/audit.jsonl`. The audit writer rotates the file itself at 25 MB, keeping `audit.jsonl.1` to `audit.jsonl.5`; if you also use logrotate, use `copytruncate`.
 
-## Network egress
+## Network
 
-- Local/endpoint mode with `publish_manifest: false`: no mandatory egress for local tests. uAgents may probe the configured network at startup; failures are logged and non-fatal in local mode.
-- Hosted mode (mailbox/manifest): allow egress to Agentverse and the configured Fetch network (Almanac REST/gRPC, mailbox HTTPS).
+- The bridge listens on all interfaces (`0.0.0.0`) on `agent.port`; uAgents has no bind-address setting. Firewall the port so only the callers you expect can reach it.
+- With `publish_manifest: false`, the bridge makes no outbound calls of its own: no Almanac registration, contract lookup, or status reports (`tests/test_uagent_direct_protocol.py` checks this). Replying to a remote agent can need egress to Agentverse's Almanac API or the Fetch ledger, to look up that agent's endpoint.
+- Mailbox mode and `publish_manifest: true` need egress to Agentverse and the configured Fetch network (Almanac REST and gRPC, mailbox HTTPS).
 
 ## Who can reach the bridge
 
-- With `publish_manifest: false` the bridge is not registered in the Almanac, so remote agents cannot discover its address. Only clients that are configured with its endpoint directly can reach it, which is what `tests/test_serve_http_roundtrip.py` does.
-- Public discovery needs either `publish_manifest: true` with a reachable `agent.endpoint` (Almanac registration may need a funded wallet) or mailbox mode ([`agentverse-mailbox.md`](agentverse-mailbox.md)). Neither path is covered by CI yet; prove it on testnet first.
+- With `publish_manifest: false`, the bridge is not registered in the Almanac, so remote agents cannot discover it; only clients configured with its endpoint can call it. It still listens on `0.0.0.0:<port>`, so any host that can reach the port can call its public tools.
+- Public discovery needs either `publish_manifest: true` with a reachable `agent.endpoint` (registration may need a funded wallet) or mailbox mode ([`agentverse-mailbox.md`](agentverse-mailbox.md)). Neither path is covered by CI yet; prove it on testnet first.
 
 ## Going to mainnet (checklist)
 
 1. Prove the deployment on `network: testnet` first.
-2. Set `agent.network` explicitly; never reuse a testnet seed casually.
-3. Fund the derived `fetch1...` address only for Almanac registration needs.
-4. Keep `policy.public_tools` empty or minimal (`skills_list` at most for Hermes-backed demos); denylist wins.
-5. Confirm `hermes_mcp.command` points at the Hermes environment's Python and that `HERMES_HOME` is set for the service user.
-6. Confirm callers attach replay metadata and treat replay denials as final, not retriable with the same request ID.
-7. Run the full local gate and the gated field test before promoting a new config.
+2. Set `agent.network` explicitly, and use a separate seed for mainnet.
+3. Fund the derived `fetch1...` address only with what Almanac registration needs.
+4. Keep `policy.public_tools` empty or minimal; the denylist wins.
+5. Check that `hermes_mcp.command` points at the Hermes environment's Python and that `HERMES_HOME` is set for the service user.
+6. Make sure callers attach replay-protection metadata and treat a replay denial as final.
+7. Run the local gate and the field test ([`demo.md`](demo.md)) before promoting a new config.
 
 ## Monitoring
 
-The audit JSONL is the operational signal: decisions, reasons, durations, sizes, truncation, send status, and redacted sender fingerprints. Alert on:
+The JSONL audit log is the operational signal: decisions, reasons, durations, sizes, truncation, send status, and shortened sender addresses. Alert on:
 
-- sustained `denied` spikes;
-- `reason: replay detected` spikes;
-- stale/future replay metadata spikes;
+- sustained spikes in `denied`;
+- spikes in `replay detected` or stale/future replay metadata;
+- `backend unavailable` errors;
 - `send_status: failure`;
-- repeated `args exceed max_args_bytes` or URL/shell validation failures.
+- repeated `args exceed max_args_bytes`, URL, or shell-character rejections.
 
-`hermes-fetch-ai --version` and `hermes-fetch-ai doctor` are safe health probes. Use `hermes fetchai doctor` only after the active Hermes installation has enabled and wired the plugin CLI.
-
-## GitHub/release governance for this repo
-
-Before public release, configure repository settings so the workflow files are enforceable rather than advisory:
-
-- protect `main` or create a ruleset requiring PRs;
-- require the CI matrix jobs, dependency audit, package build/wheel-smoke, and CodeQL checks;
-- require at least one review and stale-review dismissal;
-- restrict direct pushes and force-pushes;
-- require signed tags or a release ruleset for `v*`;
-- enable GitHub Security Advisories and Dependabot security updates.
+`hermes-fetch-ai doctor --config /etc/hermes-fetch-ai/bridge.yaml` checks the config and the dependency pins; it does not contact a running bridge. For health, watch the process and the audit log.
 
 ## Upgrades
 
-Dependencies are intentionally constrained. Bump pins in a dedicated change with CI green, build verification, dependency audit, serve smoke, and a field-test re-run (`docs/demo.md`). `doctor` reads the tested pins from the installed package metadata, so it warns if the running environment drifts from them. The current dependency-audit exceptions (`PyNaCl==1.6.0` and `ecdsa`) are tracked in `docs/security.md` and should be removed only after compatible upstream Fetch/uAgents constraints are available.
+Dependencies are pinned on purpose. Bump them in a dedicated change, with CI green and the field test re-run ([`demo.md`](demo.md)). `doctor` reads the tested pins from the installed package's metadata and warns if the running environment has drifted from them. The dependency-audit exceptions (`PyNaCl==1.6.0` and `ecdsa`) are tracked in [`security.md`](security.md#residual-risks).

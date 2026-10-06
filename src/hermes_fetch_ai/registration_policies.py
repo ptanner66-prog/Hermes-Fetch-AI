@@ -6,6 +6,8 @@ from uagents_core.registration import AgentRegistrationPolicy
 
 
 class NoopRegistrationPolicy(AgentRegistrationPolicy):
+    """Registers nowhere, for a bridge with ``publish_manifest: false``."""
+
     async def register(
         self,
         agent_identifier: str,
@@ -15,9 +17,3 @@ class NoopRegistrationPolicy(AgentRegistrationPolicy):
         metadata: dict[str, Any] | None = None,
     ) -> None:
         return None
-
-    async def unregister(self, *args: Any, **kwargs: Any) -> None:
-        return None
-
-    def should_register(self, *args: Any, **kwargs: Any) -> bool:
-        return False

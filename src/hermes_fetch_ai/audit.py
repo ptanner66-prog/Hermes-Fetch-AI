@@ -6,7 +6,7 @@ import time
 from pathlib import Path
 from typing import Any
 
-from ._redaction import redact_text, short_sender
+from ._redaction import redact_dict, short_sender
 
 MAX_AUDIT_BYTES = 25 * 1024 * 1024
 KEEP_FILES = 5
@@ -37,14 +37,11 @@ class AuditWriter:
     def _rotate(self) -> None:
         if not self.path.exists() or self.path.stat().st_size < MAX_AUDIT_BYTES:
             return
+        # audit.jsonl.4 -> .5 (replacing the oldest), ..., audit.jsonl -> .1
         for idx in range(KEEP_FILES - 1, 0, -1):
             src = self.path.with_suffix(self.path.suffix + f".{idx}")
-            dst = self.path.with_suffix(self.path.suffix + f".{idx + 1}")
             if src.exists():
-                if idx + 1 > KEEP_FILES:
-                    src.unlink(missing_ok=True)
-                else:
-                    src.replace(dst)
+                src.replace(self.path.with_suffix(self.path.suffix + f".{idx + 1}"))
         self.path.replace(self.path.with_suffix(self.path.suffix + ".1"))
 
     def write(self, **event: Any) -> None:
@@ -55,7 +52,9 @@ class AuditWriter:
             safe["sender_short"] = short_sender(str(event["sender"]))
         elif "sender_short" in safe:
             safe["sender_short"] = short_sender(str(safe["sender_short"]))
-        line = redact_text(json.dumps(safe, sort_keys=True, default=str, ensure_ascii=False))
+        # Redact each value, then serialize, so caller-controlled text (a tool
+        # name, say) can never break the JSON line.
+        line = json.dumps(redact_dict(safe), sort_keys=True, default=str, ensure_ascii=False)
         with self.path.open("a", encoding="utf-8") as f:
             f.write(line + "\n")
 

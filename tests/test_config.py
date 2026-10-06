@@ -1,7 +1,10 @@
+from pathlib import Path
+
 import pytest
 from pydantic import ValidationError
 
 from hermes_fetch_ai.config import (
+    HERMES_PYTHON_VAR,
     BridgeConfig,
     ConfigError,
     format_validation_error,
@@ -62,9 +65,22 @@ def test_stdio_requires_command():
         BridgeConfig(agent={"dev_random_seed": True}, hermes_mcp={"mode": "stdio"})
 
 
+def test_stdio_command_can_come_from_the_hermes_plugin(monkeypatch):
+    with pytest.raises(ValidationError, match="hermes fetchai-bridge"):
+        BridgeConfig(agent={"dev_random_seed": True}, hermes_mcp={"mode": "stdio"})
+    monkeypatch.setenv(HERMES_PYTHON_VAR, "/hermes/venv/bin/python")
+    cfg = BridgeConfig(agent={"dev_random_seed": True}, hermes_mcp={"mode": "stdio"})
+    assert cfg.hermes_mcp.command is None
+
+
 def test_audit_path_defaults_per_platform():
     cfg = BridgeConfig(agent={"dev_random_seed": True})
     assert str(cfg.audit_path).endswith("audit.jsonl")
+
+
+def test_audit_path_expands_home():
+    cfg = BridgeConfig(agent={"dev_random_seed": True}, logging={"audit_path": "~/bridge.jsonl"})
+    assert cfg.audit_path == Path.home() / "bridge.jsonl"
 
 
 def test_secret_shaped_yaml_rejected(tmp_path):
@@ -110,7 +126,8 @@ def _write(tmp_path, body):
     "body",
     [
         # A credential inside a list (previously never scanned).
-        'hermes_mcp:\n  mode: stdio\n  command: python\n  args: ["s' + 'k-live-abcdefghijklmnop12"]\n',
+        'hermes_mcp:\n  mode: stdio\n  command: python\n  args: ["s'
+        + 'k-live-abcdefghijklmnop12"]\n',
         # A command-line flag that introduces a secret.
         'hermes_mcp:\n  mode: stdio\n  command: python\n  args: ["--api-' + 'key", "x"]\n',
         # key=value assignments anywhere in a value.
@@ -159,3 +176,38 @@ def test_validation_errors_are_summarized_without_input_dump():
         ok, msg = False, format_validation_error(exc)
     assert not ok
     assert msg == "UAGENT_SEED is required when agent.dev_random_seed=false"
+
+
+@pytest.mark.parametrize(
+    ("policy", "message"),
+    [
+        ({"denied_tools": ["web search"]}, "'web search' is not a valid tool name"),
+        ({"public_tools": ["github/search"]}, "not a valid tool name"),
+        ({"allowed_senders": {"agent1qexample": ["\uff45cho"]}}, "not a valid tool name"),
+        ({"replay_ttl_seconds": 0}, "greater than 0"),
+        ({"max_args_bytes": -1}, "greater than 0"),
+    ],
+)
+def test_policy_mistakes_are_caught_at_load(policy, message):
+    with pytest.raises(ValidationError, match=message):
+        BridgeConfig(agent={"dev_random_seed": True}, policy=policy)
+
+
+def test_agent_addresses_that_contain_secret_words_are_allowed(tmp_path):
+    address = "agent1qtkph5ppcajjthaw38n50suzzl5zvudtz09q2lq2229lva82seedyq7ngz3"
+    cfg = load_config(_write(tmp_path, f"policy:\n  allowed_senders:\n    {address}: [echo]\n"))
+    assert cfg.policy.allowed_senders == {address: ["echo"]}
+
+
+@pytest.mark.parametrize(
+    ("body", "field"),
+    [
+        ("hermes_mcp:\n  mode: http\n", "hermes_mcp.mode"),
+        ("logging:\n  redaction: true\n", "logging.redaction"),
+        ("  network: devnet\n", "agent.network"),
+        ("  port: 70000\n", "agent.port"),
+    ],
+)
+def test_unsupported_settings_are_rejected(tmp_path, body, field):
+    with pytest.raises(ValidationError, match=field):
+        load_config(_write(tmp_path, body))

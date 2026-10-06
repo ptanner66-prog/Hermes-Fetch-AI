@@ -13,7 +13,5 @@ policy:
   public_tools:
     - echo
   denied_tools: []
-logging:
-  redaction: true
 chat:
   enable_chat: false

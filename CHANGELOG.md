@@ -1,55 +1,47 @@
 # Changelog
 
-All notable changes will be documented in this file.
-
-This project follows semantic versioning once public releases begin.
+All notable changes are documented here. The project follows [semantic versioning](https://semver.org/).
 
 ## 1.0.0 - Unreleased
 
-Set the date and push the `v1.0.0` tag to release.
+The first release. To release, set the date here and push the `v1.0.0` tag.
 
-### Fixed
+### Bridge
 
-- CI: pin `ruff` (0.16.x) and `mypy` (2.4.x) so new tool releases cannot change lint/type rules underneath CI; fix the findings from ruff 0.16's wider default rule set.
-- `serve` now exits with status 1 and `hermes backend: FAIL: ...` when the Hermes MCP backend cannot start, instead of serving an empty tool list. A backend that dies later yields `backend unavailable` responses and audit errors instead of hung requests.
-- `examples/hermes-stdio.yaml` (the production-preferred config) now uses `UAGENT_SEED` (`dev_random_seed: false`); `doctor` and `serve` warn when a config ignores a set `UAGENT_SEED`.
-- Missing or malformed config files report `config: FAIL: ...` instead of a traceback; validation errors no longer echo the submitted config.
-- `doctor` reads the tested dependency pins from package metadata, so they can no longer drift from `pyproject.toml`.
-- `demo mailbox` works from an installed wheel (the mailbox example config is packaged); `doctor --contamination-scan` reports `SKIP` outside a source checkout instead of passing vacuously.
-- Argument validation no longer treats text such as `Note: hello` as a URL.
-- `hermes-local.yaml` denylists exact tool names (the old `web`/`browser`/`kanban` entries never matched anything) and matches `hermes-stdio.yaml`; both now also deny `kanban_schedule`, `kanban_request_review`, and `kanban_request_changes`, which current Hermes exposes.
-- Verified stdio mode against current hermes-agent `main` (Python 3.14, mcp 2.0); the field test follows the served schema and its setup notes ask for a Python 3.14 Hermes environment.
-- Removed a tool-descriptor fingerprint check that compared a value with itself and could never fire.
-- Docs: replaced references to deleted `research/` notes with `docs/agentverse-mailbox.md` and a design-decisions section in `docs/architecture.md`; corrected the version-specific `kwargs` argument guidance.
+- A uAgents bridge that serves Fetch's MCP message models (`ListTools`, `CallTool`) over signed uAgents envelopes and runs the calls against Hermes' tools MCP server, or against two built-in fake tools for demos and tests.
+- Backends: Hermes' tools server as a stdio subprocess (the production shape, tested against Hermes 0.21.5 and `main`); an in-process mode for hermes-agent v0.16.x; fake tools.
+- CLI: `doctor` (version, config, dependency pins), `probe-hermes`, `demo local` (a two-agent round trip with no network), `demo mailbox`, and `serve`.
+- `serve` exits with status 1 and a clear message when Hermes' tools server or the HTTP server cannot start, and shuts down cleanly on Ctrl-C or SIGTERM.
+- Example configs for a local demo, Hermes over stdio, the in-process mode, and an Agentverse mailbox, plus a client, `examples/call_bridge.py`, that calls a running bridge.
 
 ### Security
 
-- Bump `mcp` to 1.28.1 (PYSEC-2026-3483), with `uagents` 0.25.3 and `uagents-core` 0.4.8.
-- Require `UAGENT_SEED` to be at least 32 characters.
-- Check URLs embedded anywhere in argument strings and bare local/literal-IP hosts (`localhost:8080`, `169.254.169.254/latest`); run DNS checks off the event loop.
-- Scan config files for credential-shaped values inside lists and command-line args (`--api-key`, `token=...`), without flagging ordinary words such as "token".
-- Cap tool error text to `max_output_bytes`; internal `CallTool` errors stay generic for callers and are logged with the audit `trace_id`.
-- Document the `ecdsa` Minerva timing exception (PYSEC-2026-1325, no upstream fix) and the unauthenticated Agent Inspector endpoints in mailbox mode.
-- Build with `setuptools>=83` (PYSEC-2026-3447).
-- Reject local/private/non-global/reserved URL targets and DNS resolutions in tool arguments.
-- Reject shell-control characters and unsafe shell metacharacters unless explicitly trusted.
-- Require bridge replay/idempotency metadata for `CallTool` by default.
-- Add bounded TTL replay cache for duplicate/stale/future call rejection.
-- Add global and bounded per-sender rate limiting for tool calls and tool listing.
-- Enforce environment-only production `UAGENT_SEED`; reject production YAML seed material.
-- Strengthen redaction for multi-word sensitive values.
-- Ensure normalized output never exceeds configured byte cap.
+- Default deny: a tool is callable only if it is public or allowlisted for the sender, and the denylist always wins. The Hermes example configs make only `skills_list` public.
+- Replay protection for `CallTool`: a per-sender request ID and an issue time, checked for freshness, with a bounded in-memory cache.
+- Rate limits per sender and globally, for both `ListTools` and `CallTool`.
+- Argument checks: each tool's JSON schema, shell metacharacters and control characters, and URLs anywhere in the arguments, including encoded IPv4 forms and DNS answers that point at private or local addresses.
+- Size caps on arguments, tool lists, and results; tool names restricted to plain ASCII.
+- A JSONL audit log with an allowlist of fields (no arguments or outputs) and redaction.
+- Seeds come only from `UAGENT_SEED` and must be at least 32 characters; config files that contain credential-shaped values are rejected.
+- With `publish_manifest: false`, the bridge makes no outbound calls of its own: it skips the Almanac contract lookup and the status reports that uAgents otherwise makes for every agent.
+- Hermes' tools server runs without a shell, with an environment allowlist and its stderr discarded.
+- Dependencies pinned to tested versions, including `mcp` 1.28.1 (PYSEC-2026-3483); builds use `setuptools>=83` (PYSEC-2026-3447).
 
-### Reliability
+### Hermes plugin
 
-- Make real HTTP serve smoke use a dynamic port and separate subprocess.
-- Make serve shutdown deterministic on Windows and Unix.
-- Add audit metadata that reflects normalized truncation/original-byte state.
+- `hermes-plugin/fetchai-bridge`, a directory plugin for Hermes 0.21.5 or later. It is stdlib-only (`python_runtime: external`), adds `hermes fetchai-bridge`, which runs the separately installed bridge with an environment allowlist and hands it Hermes' interpreter, and ships an `operate` skill.
+- A draft entry for Hermes' plugin catalog (`upstream/hermes-pr/plugin-catalog/fetchai-bridge.yaml`) and submission notes.
 
-### Open source readiness
+### Quality
 
-- Add stronger CI matrix, security audit, package verification, CodeQL, and Dependabot.
-- Add native Hermes plugin documentation and founder/open-source governance docs.
-- Verify wheel build, twine metadata, and plugin entry point discovery.
-- Release workflow can publish to PyPI through trusted publishing (opt-in via the `PUBLISH_TO_PYPI` repository variable).
-- Rework the upstream Hermes submission plan for current hermes-agent rules (plugin catalog first; skill frontmatter now declares `platforms`).
+- CI on Linux, macOS, and Windows with Python 3.11 and 3.12: ruff lint and format, `mypy --strict`, and the test suite, including a real HTTP round trip through `serve`.
+- At least 90% branch coverage, counting the CLI and `serve` subprocesses.
+- A CI job against Hermes 0.21.5 and a pinned `main`: Hermes' own plugin validator and doctor, the plugin's CLI, and a field test against Hermes' real tools server.
+- Dependency audit, CodeQL, Dependabot, wheel and sdist checks, and a release workflow that can publish to PyPI through trusted publishing.
+
+### Known limitations
+
+- The Agentverse mailbox mode has not been verified end to end.
+- `serve` listens on all network interfaces; firewall the port.
+- The replay cache is in memory, and URL checks cannot stop DNS rebinding or redirects. See [`docs/security.md`](docs/security.md#residual-risks).
+- The dependency audit ignores two transitive vulnerabilities with no fix that uAgents can use yet (`CVE-2025-69277` in PyNaCl and `PYSEC-2026-1325` in ecdsa); the reasons are in `docs/security.md`.

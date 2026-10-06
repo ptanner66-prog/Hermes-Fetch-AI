@@ -1,42 +1,31 @@
 # Governance
 
-Hermes Fetch AI is a standalone plugin project. Its goal is to be small enough for Hermes maintainers to bless or list without inheriting unnecessary core risk.
+Hermes Fetch AI is a standalone project with a thin Hermes plugin. It is kept small so that listing the plugin in Hermes adds little risk to Hermes.
 
-## Project principles
+## Principles
 
-1. Hermes core stays unchanged unless maintainers explicitly request a core contribution.
+1. Hermes core stays unchanged unless Hermes maintainers ask for a core contribution.
 2. Network exposure is opt-in.
 3. Tool access is default-deny.
-4. Production secrets come from the environment, never YAML examples.
-5. Security claims require tests or documented operator procedures.
-6. Residual risks are documented rather than hidden.
+4. Secrets come from the environment, never from config files or examples.
+5. Security claims need tests or documented procedures.
+6. Residual risks are written down, not hidden.
 
-## Maintainer responsibilities
+## Maintainers
 
-Maintainers should:
+The project has one maintainer today. Changes to policy, replay protection, argument checks, redaction, subprocess handling, release workflows, or the examples need tests, and every change goes through a pull request with green CI. If a secret is ever exposed, it is rotated or revoked immediately. Confirmed vulnerabilities get a GitHub security advisory.
 
-- keep CI, CodeQL, dependency audit, and package checks green;
-- require review for changes to policy, replay protection, validation, redaction, subprocess handling, release workflows, and examples;
-- rotate or revoke any accidentally exposed secret immediately;
-- publish security advisories for confirmed vulnerabilities;
-- keep the upstream Hermes contribution path aligned with Hermes plugin policy.
+## Releases
 
-## Release process
+1. Run the local gate in [`CONTRIBUTING.md`](CONTRIBUTING.md).
+2. Set the release date in `CHANGELOG.md`.
+3. Confirm that no build artifacts or secrets are staged and that the dependency-audit exceptions are still documented.
+4. Once CI is green on `main`, tag `vX.Y.Z`. The release workflow verifies, builds, attests, and publishes the artifacts.
 
-1. Run the full local gate in `CONTRIBUTING.md`.
-2. Confirm no untracked build artifacts or secrets are staged.
-3. Confirm dependency-audit exceptions are documented.
-4. Tag with `vX.Y.Z` only after CI is green on `main`.
-5. Let the release workflow build, verify, attest, and publish artifacts.
+## Repository settings
 
-## Required repository settings
-
-Before public release, configure GitHub rulesets/branch protection:
-
-- PR required for `main`.
-- Required checks: CI matrix, security-audit, package, CodeQL.
-- At least one approving review.
-- Dismiss stale approvals.
-- Block force pushes and deletions.
-- Protect or require review for `v*` tags.
-- Enable Dependabot security updates and GitHub Security Advisories.
+- Pull requests required for `main`, with force pushes and deletion blocked.
+- Required checks: `verify` (all six OS and Python jobs), `package smoke`, `test coverage`, `dependency audit`, both `hermes plugin + field test` jobs, and CodeQL.
+- An approving review, once there is a second maintainer.
+- `v*` tags protected.
+- Dependabot security updates and private vulnerability reporting enabled.
