@@ -63,6 +63,7 @@ hermes_fetch_ai = ["data/*.yaml"]
 asyncio_mode = "auto"
 testpaths = ["tests"]
 pythonpath = ["src"]
+markers = ["network: the test may connect outside this machine (opt-in live tests only)"]
 
 [tool.coverage.run]
 source = ["hermes_fetch_ai"]

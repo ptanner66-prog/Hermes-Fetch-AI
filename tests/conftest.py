@@ -1,3 +1,5 @@
+import ipaddress
+import socket
 import sys
 from pathlib import Path
 
@@ -12,6 +14,48 @@ if str(SRC) not in sys.path:
 @pytest.fixture(autouse=True)
 def clear_seed(monkeypatch):
     monkeypatch.delenv("UAGENT_SEED", raising=False)
+
+
+def _is_loopback(address) -> bool:
+    if not isinstance(address, tuple):  # a Unix socket path
+        return True
+    host = str(address[0]).split("%", 1)[0]
+    if host == "localhost":
+        return True
+    try:
+        return ipaddress.ip_address(host).is_loopback
+    except ValueError:
+        return False
+
+
+@pytest.fixture(autouse=True)
+def no_outside_network(request, monkeypatch):
+    """Fail any test that connects outside this machine, even if the code under test
+    swallows the error. Mark a test `network` to allow it (opt-in live tests only)."""
+    if request.node.get_closest_marker("network"):
+        yield None
+        return
+    attempts = []
+    real_connect = socket.socket.connect
+    real_connect_ex = socket.socket.connect_ex
+
+    def check(address):
+        if not _is_loopback(address):
+            attempts.append(address)
+            raise OSError(f"tests may not connect outside this machine: {address!r}")
+
+    def connect(self, address):
+        check(address)
+        return real_connect(self, address)
+
+    def connect_ex(self, address):
+        check(address)
+        return real_connect_ex(self, address)
+
+    monkeypatch.setattr(socket.socket, "connect", connect)
+    monkeypatch.setattr(socket.socket, "connect_ex", connect_ex)
+    yield attempts
+    assert not attempts, f"test tried to connect outside this machine: {attempts}"
 
 
 @pytest.fixture
