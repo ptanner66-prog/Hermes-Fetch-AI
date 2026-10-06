@@ -1,0 +1,52 @@
+# Sell services to ASI:One users in plain language, for testnet FET. Guide: docs/asi-one.md.
+#
+# Payments use Fetch's Dorado testnet: test FET with no market value.
+# Before the first start:
+#   1. Set UAGENT_SEED, the agent's identity and wallet key, and back it up.
+#   2. Change every /path/to/... below to the real absolute path on your machine
+#      (see examples/paid-services.yaml), then check:
+#        hermes-fetch-ai doctor --config examples/asi-one.yaml
+#   3. Create an Agentverse API key with write access and set AGENTVERSE_API_KEY.
+#   4. List the agent on Agentverse, once:
+#        hermes-fetch-ai agentverse register --config examples/asi-one.yaml
+#   5. Start it, and keep it running:
+#        hermes-fetch-ai serve --config examples/asi-one.yaml
+#   6. In ASI:One, write to @hermes-reviews (your handle) or to the agent's address.
+version: 1
+agent:
+  name: hermes_reviews
+  description: Defensive code security reviews by a local AI model, for testnet FET.
+  handle: hermes-reviews  # lowercase, 3-20 characters; pick your own
+  mode: mailbox  # Agentverse relays messages, so no public address is needed
+  publish_manifest: true  # registers through the Almanac API; never spends from the wallet
+  enable_agent_inspector: false
+policy:
+  public_tools: []  # only the services below; no raw Hermes tools
+payments:
+  enabled: true
+chat:
+  enable_chat: true
+services:
+  security-review:
+    title: Defensive code security review
+    description: >-
+      Send source code and get its security problems explained, with fixes.
+      An AI model on the seller's machine reads only the code you send;
+      nothing is scanned, contacted, or attacked.
+    price: "0.1"
+    input:
+      max_chars: 20000
+      check_urls: false  # URLs inside code are text to review; nothing fetches them
+    runner:
+      type: command
+      argv:
+        - /usr/bin/python3
+        - /path/to/Hermes-Fetch-AI/examples/services/code_review.py
+        - --url
+        - http://127.0.0.1:11434/v1
+        - --model
+        - qwen2.5-coder:7b
+      timeout_seconds: 900
+    disclaimer: >-
+      Automated review by an AI model. It can miss problems and is not a
+      penetration test or a security guarantee.

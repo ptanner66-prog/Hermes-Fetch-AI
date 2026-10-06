@@ -445,3 +445,25 @@ def test_sentence(text, expected):
 async def test_funds_amount_is_a_string_asi_one_can_show():
     funds = Funds(amount="0.050000000001234", currency="FET", payment_method="fet_direct")
     assert isinstance(funds.amount, str)
+
+
+async def test_a_payment_that_arrives_while_paused_is_kept_for_later(shop):
+    request = await order(shop)
+    shop.desk.seller.store.set_paused(True)
+    (complete, message) = await shop.commit(request, shop.pay(request))
+    assert isinstance(complete[1], CompletePayment)
+    assert "paused its work. The payment is kept" in text_of(message[1])
+    assert shop.desk.seller.store.credit(request.reference).status == "paid"
+    shop.desk.seller.store.set_paused(False)
+    ((_, answer),) = await shop.say("research: tides")
+    assert text_of(answer).startswith("tides")
+
+
+async def test_a_banned_agent_cannot_commit(shop):
+    request = await order(shop)
+    shop.desk.seller.store.ban(BUYER, reason="abuse", now_ms=1)
+    ((_, cancel),) = await shop.commit(request, shop.pay(request))
+    assert cancel == CancelPayment(
+        transaction_id=cancel.transaction_id, reason="this agent does not accept your requests"
+    )
+    assert shop.desk.seller.store.credit(request.reference) is None

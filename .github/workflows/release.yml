@@ -59,6 +59,7 @@ jobs:
           python -m pytest -q --cov --cov-fail-under=90
           python -m hermes_fetch_ai.cli demo local
           python -m hermes_fetch_ai.cli demo paid
+          python -m hermes_fetch_ai.cli demo chat
 
       - name: Dependency audit
         run: |
@@ -84,6 +85,7 @@ jobs:
           hermes-fetch-ai doctor
           hermes-fetch-ai demo local
           hermes-fetch-ai demo paid
+          hermes-fetch-ai demo chat
 
       - name: Attest build provenance
         uses: actions/attest-build-provenance@v4

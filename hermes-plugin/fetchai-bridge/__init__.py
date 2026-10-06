@@ -34,6 +34,8 @@ SHUTDOWN_GRACE_SECONDS = 30.0
 BRIDGE_ENV = frozenset(
     {
         "UAGENT_SEED",
+        # Used only by `agentverse register`.
+        "AGENTVERSE_API_KEY",
         "HERMES_HOME",
         "PATH",
         "HOME",

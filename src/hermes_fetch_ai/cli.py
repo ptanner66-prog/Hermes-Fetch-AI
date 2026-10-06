@@ -120,7 +120,21 @@ def demo(args: argparse.Namespace) -> int:
         return 0
     if args.kind == "paid":
         return _demo_paid()
+    if args.kind == "chat":
+        return _demo_chat()
     return asyncio.run(_demo_local())
+
+
+def _demo_chat() -> int:
+    from .chat_demo import run_chat_demo
+
+    with tempfile.TemporaryDirectory(
+        prefix="hermes-fetch-ai-chat-demo-", ignore_cleanup_errors=True
+    ) as tmp:
+        lines = asyncio.run(run_chat_demo(Path(tmp)))
+    for line in lines:
+        print(line)
+    return 0 if any(line.startswith("seller says: tides") for line in lines) else 1
 
 
 def _demo_paid() -> int:
@@ -305,6 +319,64 @@ def seller(args: argparse.Namespace) -> int:
     return 0
 
 
+def agentverse(args: argparse.Namespace) -> int:
+    """List the bridge on Agentverse (an explicit, owner-run step)."""
+    import os
+
+    from uagents_core.utils.registration import AgentverseRequestError
+
+    from .agentverse import API_KEY_VAR, register, registration
+    from .wallet import agent_address
+
+    cfg = _load_or_report(args.config)
+    if cfg is None:
+        return 1
+    if not cfg.chat.enable_chat:
+        print(
+            "agentverse: FAIL: ASI:One talks to agents through chat; "
+            "set chat.enable_chat: true (it sells the services in this config)",
+            file=sys.stderr,
+        )
+        return 1
+    seed = _stable_seed(cfg, "agentverse")
+    if seed is None:
+        return 1
+    api_key = os.environ.get(API_KEY_VAR, "").strip()
+    if not api_key:
+        print(
+            f"agentverse: FAIL: set {API_KEY_VAR} to an Agentverse API key with write "
+            "access (agentverse.ai, Profile, API Keys)",
+            file=sys.stderr,
+        )
+        return 1
+    try:
+        request = registration(cfg)
+    except ValueError as exc:
+        print(f"agentverse: FAIL: {exc}", file=sys.stderr)
+        return 1
+    address = agent_address(seed)
+    if not args.yes:
+        if not sys.stdin.isatty():
+            print("agentverse: FAIL: confirm with --yes when not at a terminal", file=sys.stderr)
+            return 2
+        print(
+            f"This lists {request.name} ({address}) publicly on Agentverse, where ASI:One "
+            "users can find it. Agentverse keeps the listing."
+        )
+        if input("Continue? [y/N] ").strip().lower() not in ("y", "yes"):
+            print("agentverse: nothing was registered")
+            return 1
+    try:
+        register(cfg, seed, api_key)
+    except (AgentverseRequestError, OSError, ValueError) as exc:
+        print(f"agentverse: FAIL: {exc}", file=sys.stderr)
+        return 1
+    reach = f"@{request.handle}" if request.handle else f"@{address}"
+    print(f"agentverse: listed {request.name} as a {request.type} agent ({address})")
+    print(f"agentverse: start it with `serve`; in ASI:One, write to {reach}")
+    return 0
+
+
 def _now_ms() -> int:
     import time
 
@@ -349,9 +421,9 @@ def build_parser() -> argparse.ArgumentParser:
     s.add_argument("--config", required=True)
     s.set_defaults(func=serve)
     dm = sub.add_parser(
-        "demo", help="run the local or paid demo (offline), or check the mailbox demo setup"
+        "demo", help="run the local, paid, or chat demo (offline), or check the mailbox setup"
     )
-    dm.add_argument("kind", choices=["local", "paid", "mailbox"])
+    dm.add_argument("kind", choices=["local", "paid", "chat", "mailbox"])
     dm.set_defaults(func=demo)
     w = sub.add_parser("wallet", help="show the agent's address and income wallet")
     w.add_argument("--config", required=True)
@@ -377,6 +449,11 @@ def build_parser() -> argparse.ArgumentParser:
         "--to", default=None, help="the new file to copy payment records to, for backup"
     )
     sl.set_defaults(func=seller)
+    av = sub.add_parser("agentverse", help="list the bridge on Agentverse for ASI:One users")
+    av.add_argument("action", choices=["register"])
+    av.add_argument("--config", required=True)
+    av.add_argument("--yes", action="store_true", help="do not ask for confirmation")
+    av.set_defaults(func=agentverse)
     return p
 
 

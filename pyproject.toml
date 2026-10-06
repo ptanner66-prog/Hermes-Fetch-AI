@@ -100,6 +100,7 @@ ignore_missing_imports = true
 [[tool.mypy.overrides]]
 # These modules subclass uAgents classes and use its decorators, which are untyped.
 module = [
+  "hermes_fetch_ai.chat_demo",
   "hermes_fetch_ai.chat_protocol",
   "hermes_fetch_ai.direct_protocol",
   "hermes_fetch_ai.registration_policies",

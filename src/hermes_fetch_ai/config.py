@@ -66,6 +66,8 @@ class AgentConfig(BaseModel):
     seed: str | None = None
     endpoint: str | None = None
     description: str = "Hermes Fetch AI bridge"
+    # The agent's handle on Agentverse; ASI:One users can write @handle to reach it.
+    handle: str | None = Field(default=None, pattern=r"^[a-z0-9][a-z0-9_-]{2,19}$")
 
 
 class HermesMCPConfig(BaseModel):

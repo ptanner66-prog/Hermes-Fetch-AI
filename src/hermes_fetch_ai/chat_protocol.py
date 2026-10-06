@@ -302,6 +302,11 @@ class ChatDesk:
             self._audit(sender, "payment", "denied", why)
             await ctx.send(sender, CancelPayment(transaction_id=msg.transaction_id, reason=why))
             return
+        if self.desk.seller.store.is_banned(sender):
+            reason = "this agent does not accept your requests"
+            self._audit(sender, "payment", "denied", reason)
+            await ctx.send(sender, CancelPayment(transaction_id=msg.transaction_id, reason=reason))
+            return
         order = self.orders.get(msg.reference)
         if order is not None:
             order.tx_hash = msg.transaction_id
@@ -370,6 +375,19 @@ class ChatDesk:
     ) -> None:
         await ctx.send(committer, CompletePayment(transaction_id=tx_hash))
         self.orders.remove(order.reference)
+        if self.desk.seller.store.paused():
+            # The owner stopped selling after this order: keep the payment for later.
+            self._audit(
+                order.sender, "payment", "allowed", "payment kept while paused", order.service
+            )
+            await self._say(
+                ctx,
+                order.sender,
+                "Your payment arrived, but this agent has paused its work. The payment is "
+                f"kept: send your request again later, starting with `{order.service}:`, and it "
+                "will run without another payment.",
+            )
+            return
         await self._deliver(ctx, order.sender, order.service, order.request, credit)
 
     async def _refused(
