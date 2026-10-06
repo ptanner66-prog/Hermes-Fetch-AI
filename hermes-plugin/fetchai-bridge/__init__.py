@@ -262,9 +262,12 @@ def install_bridge(argv: list[str], configured: str = "") -> int:
         print("The install did not finish; the messages above say why.")
         return code
     if resolve_bridge_command(configured) is None:
+        update_path = (
+            "pipx ensurepath" if "pipx" in Path(command[0]).name else "uv tool update-shell"
+        )
         print(
             "Installed, but your terminal cannot find hermes-fetch-ai yet: run "
-            "`uv tool update-shell`, open a new terminal, then: hermes fetchai-bridge setup"
+            f"`{update_path}`, open a new terminal, then: hermes fetchai-bridge setup"
         )
         return 0
     print(f"Installed. Next: hermes {PLUGIN_NAME} setup")

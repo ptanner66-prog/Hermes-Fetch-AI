@@ -69,6 +69,8 @@ PROVIDERS: dict[str, tuple[str, str, str | None, str]] = {
     ),
 }
 LOCAL_MODEL_URL = "http://127.0.0.1:11434/v1"  # Ollama's default
+# Buyers pay in free test FET, but each research request uses the owner's model account.
+RESEARCH_RUNS_PER_DAY = 20
 REVIEW_MODEL = "qwen2.5-coder:7b"
 
 RESEARCH_SERVICE: dict[str, Any] = {
@@ -274,6 +276,16 @@ def check_program(text: str) -> str:
     if path.suffix != ".py" and not os.access(path, os.X_OK):
         raise SetupError(f"{path} is not executable; make it so (chmod +x) and try again.")
     return str(path)
+
+
+def check_runs_per_day(text: str) -> str:
+    try:
+        runs = int(text)
+    except ValueError:
+        raise SetupError("Give a whole number, like 20.") from None
+    if not 1 <= runs <= 100_000:
+        raise SetupError("Give a number from 1 to 100000.")
+    return str(runs)
 
 
 def check_seconds(text: str) -> str:
@@ -629,7 +641,24 @@ class Wizard:
             default=str(old.get("price", "0.05")) if isinstance(old, dict) else "0.05",
             check=check_price,
         )
-        return {**RESEARCH_SERVICE, "price": price, "runner": runner}
+        if key_name:
+            say("Buyers pay in test FET, which is free, but each research request uses your")
+            say(f"{label} account, which costs real money. Set a spending limit with {label},")
+            say("and choose how many requests a day to take.")
+        per_day = ask.ask(
+            "research.per_day",
+            "Most research requests a day",
+            default=str(old.get("max_runs_per_day", RESEARCH_RUNS_PER_DAY))
+            if isinstance(old, dict)
+            else str(RESEARCH_RUNS_PER_DAY),
+            check=check_runs_per_day,
+        )
+        return {
+            **RESEARCH_SERVICE,
+            "price": price,
+            "max_runs_per_day": int(per_day),
+            "runner": runner,
+        }
 
     def _research_key(self, key_name: str, label: str) -> bool:
         """Make sure the research guest has its own model key; True if it does."""

@@ -144,6 +144,11 @@ def test_an_installed_bridge_off_the_path_is_explained(monkeypatch, capsys):
     monkeypatch.setattr(plugin.subprocess, "call", lambda command, env: 0)
     assert plugin.install_bridge(["--yes"], "") == 0
     assert "uv tool update-shell" in capsys.readouterr().out
+    monkeypatch.setattr(
+        plugin.shutil, "which", lambda name: "/usr/bin/pipx" if name == "pipx" else None
+    )
+    assert plugin.install_bridge(["--yes"], "") == 0
+    assert "pipx ensurepath" in capsys.readouterr().out
 
 
 # -- the plugin's own secrets ---------------------------------------------------------

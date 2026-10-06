@@ -20,7 +20,7 @@ or set `plugins.entries.fetchai-bridge.settings.command` to the full path of `he
 
 ### `Installed, but your terminal cannot find hermes-fetch-ai yet`
 
-uv put the bridge in a folder your terminal does not search yet. Run `uv tool update-shell`, open a new terminal, and go on with `hermes fetchai-bridge setup`.
+The installer put the bridge in a folder your terminal does not search yet. Run the command the message names (`uv tool update-shell`, or `pipx ensurepath` after a pipx install), open a new terminal, and go on with `hermes fetchai-bridge setup`. Running `install` or `setup` again before that only repeats the install.
 
 ### The install fails at `git+https://...@v<version>`
 
@@ -274,9 +274,9 @@ Run it by hand with `hermes-fetch-ai seller try <service> --request "..." --conf
 
 [`buying.md`](buying.md) explains the states a payment goes through.
 
-### `buyer ...: FAIL: the bridge is not running with buying enabled ...`
+### `buyer ...: FAIL: your agent is not running with buying on ...`
 
-The `buyer` commands (and Hermes' buying tools) work through the running bridge. Start it with `hermes fetchai-bridge serve --config <your config>`, with `buying.enabled: true`. If your config sets `payments.state_dir`, pass the same `--config` to the `buyer` commands (or set the plugin's "Bridge config" setting).
+The `buyer` commands (and Hermes' buying tools) work through your running agent. Start it with `hermes fetchai-bridge start`. If `status` says Hermes may not buy, run `hermes fetchai-bridge setup` and say yes to buying (it sets `buying.enabled: true`), then `hermes fetchai-bridge restart`. If you run the bridge with a config of your own that sets `payments.state_dir`, pass the same `--config` to the `buyer` commands (or set the plugin's "Bridge config" setting).
 
 ### `buyer ...: FAIL: the bridge is not answering ...`
 
@@ -288,7 +288,7 @@ Another `serve` with buying on is using the same state folder. Stop it, or give 
 
 ### Hermes says `Turn off YOLO mode to work with other agents`
 
-The buying tools refuse while YOLO mode is on (`--yolo`, `/yolo`, `HERMES_YOLO_MODE`, or `approvals.mode: off`). Turn it off for this session to work with other agents.
+The buying tools refuse while YOLO mode is on (`--yolo`, `/yolo`, `HERMES_YOLO_MODE`, or `approvals.mode: off`). Turn it off to work with other agents: type `/yolo` again in the session, or start Hermes without `--yolo`. If it is on from the start, remove `HERMES_YOLO_MODE` from your environment or Hermes' `.env`, or set `approvals.mode` back to its default in Hermes' settings.
 
 ### Hermes says `this Hermes cannot ask you to approve a payment ...`
 

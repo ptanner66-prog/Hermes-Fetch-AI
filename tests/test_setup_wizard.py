@@ -136,6 +136,7 @@ def test_a_first_setup_that_sells_and_buys(tmp_path, monkeypatch, state):
         "anthropic/claude-sonnet-4.6",
     )
     assert research.runner.toolsets == ["web"]
+    assert research.max_runs_per_day == 20  # each request costs the owner real money
     review = cfg.services["security-review"].runner
     assert review.argv[:3] == [sys.executable, "-m", "hermes_fetch_ai.local_review"]
     assert review.argv[3:] == ["--url", "http://127.0.0.1:11434/v1", "--model", "qwen2.5-coder:14b"]
@@ -155,6 +156,7 @@ def test_a_first_setup_that_sells_and_buys(tmp_path, monkeypatch, state):
     said = "\n".join(asker.said)
     assert agent_address(SEED) in said and wallet_address(SEED) in said
     assert "Keep a copy somewhere" in said
+    assert "OpenRouter account, which costs real money" in said
     assert owner.funded == [wallet_address(SEED, BUYING_WALLET_INDEX)]
     assert owner.listed == []  # no Agentverse key: nothing is listed
     # The guest Hermes is found only through `hermes fetchai-bridge`.
@@ -183,6 +185,7 @@ def test_running_it_again_keeps_answers_and_hand_made_settings(tmp_path, monkeyp
         "research": True,
         "research.key": KEY,
         "research.provider": "anthropic",
+        "research.per_day": "5",
         "review": False,
         "own": [True, False],
         "own.program": str(tool),
@@ -203,6 +206,7 @@ def test_running_it_again_keeps_answers_and_hand_made_settings(tmp_path, monkeyp
     assert list(cfg.services) == ["research", "legal-draft"]
     assert cfg.services["research"].runner.provider == "anthropic"
     assert cfg.services["research"].runner.model == "claude-sonnet-4-6"
+    assert cfg.services["research"].max_runs_per_day == 5
     assert cfg.logging.audit_path == str(tmp_path / "audit.jsonl")
     assert not cfg.buying.enabled
     assert "research.keep_key" in asker.asked and "research.key" not in asker.asked
@@ -244,6 +248,7 @@ def test_research_with_a_model_on_this_computer_needs_no_key(tmp_path, monkeypat
     runner = load(tmp_path / "config" / "bridge.yaml", monkeypatch).services["research"].runner
     assert (runner.provider, runner.base_url) == ("custom", "http://localhost:1234/v1")
     assert "research.key" not in asker.asked
+    assert not any("costs real money" in line for line in asker.said)
 
 
 def test_a_model_server_that_does_not_answer_is_pointed_out(tmp_path):
@@ -329,6 +334,7 @@ def test_more_checks(tmp_path):
         check_local_url,
         check_optional_text,
         check_program,
+        check_runs_per_day,
         check_seconds,
         check_service_name,
         check_text,
@@ -354,6 +360,10 @@ def test_more_checks(tmp_path):
         plain.write_text("x")
         with pytest.raises(SetupError, match="not executable"):
             check_program(str(plain))
+    assert check_runs_per_day(" 20 ") == "20"
+    for bad in ("many", "0", "2.5", "100001"):
+        with pytest.raises(SetupError):
+            check_runs_per_day(bad)
     assert check_seconds("90") == "90"
     for bad in ("soon", "0", "7200"):
         with pytest.raises(SetupError):

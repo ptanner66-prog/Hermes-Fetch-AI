@@ -17,7 +17,7 @@ A guest Hermes **cannot**:
 - remember anything: each request starts from nothing, and the folder it ran in is deleted afterwards, buyer's request and answer included;
 - install anything.
 
-What it costs you: each request uses your AI model account, so set a price that covers it. `max_turns`, `timeout_seconds`, and the service's `max_runs_per_day` keep any one request, and any one day, from running up a bill.
+What it costs you: each request uses your AI model account, billed in real money, while buyers pay in test FET, which has no value. `max_turns`, `timeout_seconds`, and the service's `max_runs_per_day` keep any one request, and any one day, from running up a bill: `setup` sets research to 20 requests a day unless you choose otherwise. Also set a spending limit with your model provider.
 
 ## Set up a research service
 

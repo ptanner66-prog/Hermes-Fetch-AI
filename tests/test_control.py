@@ -347,7 +347,9 @@ def test_commands_explain_a_bridge_that_is_not_running(tmp_path, capsys):
         json.dumps({"agent": {"dev_random_seed": True}, "payments": {"state_dir": str(tmp_path)}})
     )
     assert cli.main(["buyer", "status", "--config", str(config)]) == 1
-    assert "the bridge is not running with buying enabled" in capsys.readouterr().err
+    err = capsys.readouterr().err
+    assert "your agent is not running with buying on" in err
+    assert "hermes fetchai-bridge start" in err
     (tmp_path / "control.json").write_text("{}")
     assert cli.main(["buyer", "status", "--config", str(config)]) == 1
     assert "is not a control file" in capsys.readouterr().err
