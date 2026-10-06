@@ -11,16 +11,16 @@ import time
 import pytest
 from pydantic import ValidationError
 
-from hermes_fetch_ai import services
+from hermes_fetch_ai import programs, services
 from hermes_fetch_ai.config import BridgeConfig, load_config
 from hermes_fetch_ai.fake_ledger import FakeLedger
+from hermes_fetch_ai.programs import ServiceResult
 from hermes_fetch_ai.quotes import quote_key
 from hermes_fetch_ai.seller import PaymentProof, Seller, parse_payment_terms
 from hermes_fetch_ai.services import (
     CommandRunner,
     EchoRunner,
     ServiceDesk,
-    ServiceResult,
     build_runner,
     service_tool,
 )
@@ -249,7 +249,7 @@ async def test_stopping_a_program_reads_off_the_output_nobody_read(tmp_path):
 
 @pytest.mark.skipif(os.name == "nt", reason="needs fork and sessions")
 async def test_command_runner_gives_up_on_a_child_that_escapes_the_kill(tmp_path, monkeypatch):
-    monkeypatch.setattr(services, "_STOP_SECONDS", 0.5)
+    monkeypatch.setattr(programs, "_STOP_SECONDS", 0.5)
     pid_file = tmp_path / "escaped.pid"
     argv = program(
         tmp_path,

@@ -14,9 +14,6 @@ import asyncio
 import contextlib
 import json
 import os
-import signal
-import sys
-import tempfile
 import time
 from collections import OrderedDict
 from collections.abc import AsyncIterator, Callable, Mapping
@@ -29,6 +26,7 @@ from .config import BridgeConfig, CommandRunnerConfig, RunnerConfig, ServiceConf
 from .ledger import normalize_tx_hash
 from .logging import get_logger
 from .money import format_fet
+from .programs import ProgramRunner, ServiceResult, base_env
 from .quotes import request_digest
 from .result_normalizer import error_result, text_result
 from .seller import PaymentProof, PaymentRefused, Seller, short_reference, short_tx
@@ -38,23 +36,11 @@ logger = get_logger("hermes_fetch_ai")
 
 SERVICE_PREFIX = "service."
 _DAY_MS = 86_400_000
-# How long a killed service program gets to finish going away.
-_STOP_SECONDS = 5.0
 BUSY = "this service is busy; try again in a few minutes"
 CALL_RETRY_HINT = "; your payment is kept, so you can repeat the call with the same reference"
 # A paid answer is kept in memory this long, so a buyer who missed it can ask again.
 _ANSWER_TTL_SECONDS = 3600.0
 _MAX_KEPT_ANSWERS = 64
-# Environment a service program always gets; anything else must be listed in pass_env.
-_BASE_ENV = ("PATH", "LANG", "LANGUAGE", "TZ", "SYSTEMROOT", "WINDIR", "COMSPEC", "PATHEXT")
-
-
-@dataclass(frozen=True)
-class ServiceResult:
-    text: str
-    # False when the runner itself failed; the buyer keeps the payment and may retry.
-    ok: bool
-    problem: str = ""
 
 
 class ServiceRunner(Protocol):
@@ -68,126 +54,38 @@ class EchoRunner:
         return ServiceResult(text=request, ok=True)
 
 
-def _runner_env(pass_env: list[str], workdir: str) -> dict[str, str]:
-    env = {name: os.environ[name] for name in _BASE_ENV if name in os.environ}
-    env.update({name: value for name, value in os.environ.items() if name.startswith("LC_")})
-    env.update({name: os.environ[name] for name in pass_env if name in os.environ})
-    env["HOME"] = workdir
-    env["TMPDIR"] = workdir
-    return env
-
-
-class CommandRunner:
+class CommandRunner(ProgramRunner):
     """Runs the owner's program: the request as JSON on stdin, the answer on stdout.
 
-    No shell is involved, the program starts in an empty temporary directory
-    with a short environment allowlist, stderr is discarded, and both time and
-    output size are capped. A non-zero exit or a timeout is a runner failure.
+    The program sees only a short environment allowlist plus the variables
+    named in ``pass_env``. A non-zero exit or a timeout is a runner failure.
     """
 
     def __init__(self, cfg: CommandRunnerConfig, *, show_errors: bool = False) -> None:
+        super().__init__(
+            timeout_seconds=cfg.timeout_seconds,
+            # Read a little past the cap: the answer is cut to max_output_chars anyway.
+            read_limit=cfg.max_output_chars * 4 + 4,
+            show_errors=show_errors,
+        )
         self.cfg = cfg
-        # Only for the owner's own test runs: buyers never see the program's stderr.
-        self.show_errors = show_errors
 
-    async def run(self, request: str) -> ServiceResult:
-        # Windows cannot delete a folder a leftover process still uses; never fail on that.
-        with tempfile.TemporaryDirectory(
-            prefix="hermes-fetch-ai-service-", ignore_cleanup_errors=True
-        ) as workdir:
-            try:
-                process = await asyncio.create_subprocess_exec(
-                    *self.cfg.argv,
-                    stdin=asyncio.subprocess.PIPE,
-                    stdout=asyncio.subprocess.PIPE,
-                    stderr=None if self.show_errors else asyncio.subprocess.DEVNULL,
-                    cwd=workdir,
-                    env=_runner_env(self.cfg.pass_env, workdir),
-                    start_new_session=os.name != "nt",
-                )
-            except OSError as exc:
-                logger.warning("service program %s could not start (%s)", self.cfg.argv[0], exc)
-                return ServiceResult("", ok=False, problem="the service program could not start")
-            payload = json.dumps({"request": request}).encode("utf-8")
-            try:
-                output, overflowed = await asyncio.wait_for(
-                    self._exchange(process, payload), self.cfg.timeout_seconds
-                )
-            except TimeoutError:
-                await self._stop(process)
-                return ServiceResult("", ok=False, problem="the service took too long")
-            except asyncio.CancelledError:
-                # The bridge is stopping: never leave the program running behind it.
-                self._kill(process)
-                raise
-            # A program stopped for writing too much still produced an answer.
-            if process.returncode != 0 and not overflowed:
-                return ServiceResult(
-                    "", ok=False, problem=f"the service program failed (exit {process.returncode})"
-                )
-            text = output.decode("utf-8", errors="replace")
-            if overflowed or len(text) > self.cfg.max_output_chars:
-                text = text[: self.cfg.max_output_chars] + "\n[…answer truncated]"
-            return ServiceResult(text, ok=True)
+    def command(self, workdir: str) -> tuple[list[str], dict[str, str]]:
+        return list(self.cfg.argv), base_env(workdir, self.cfg.pass_env)
 
-    async def _exchange(
-        self, process: asyncio.subprocess.Process, payload: bytes
-    ) -> tuple[bytes, bool]:
-        """Send the request and read the answer; True if the program wrote too much."""
-        assert process.stdin is not None and process.stdout is not None
-        with contextlib.suppress(BrokenPipeError, ConnectionResetError):
-            process.stdin.write(payload)
-            await process.stdin.drain()
-        process.stdin.close()
-        # Read a little past the cap, then stop reading so a runaway program
-        # cannot fill memory.
-        limit = self.cfg.max_output_chars * 4 + 4
-        chunks: list[bytes] = []
-        size = 0
-        while size < limit:
-            chunk = await process.stdout.read(min(65536, limit - size))
-            if not chunk:
-                break
-            chunks.append(chunk)
-            size += len(chunk)
-        overflowed = size >= limit
-        if overflowed:
-            await self._stop(process)
-        else:
-            await process.wait()
-        return b"".join(chunks), overflowed
+    def payload(self, request: str) -> bytes:
+        return json.dumps({"request": request}).encode("utf-8")
 
-    async def _stop(self, process: asyncio.subprocess.Process) -> None:
-        """Kill the program (and anything it started) and wait for it to go.
-
-        asyncio's ``wait()`` also waits for the output pipe to close, and a pipe
-        we stopped reading never does, so the leftover output is read and
-        dropped. A process that escaped the kill and still holds the pipe open
-        is given up on after a few seconds rather than hanging the bridge.
-        """
-        self._kill(process)
-        stdout = process.stdout
-        assert stdout is not None
-
-        async def drain() -> None:
-            while await stdout.read(65536):
-                pass
-            await process.wait()
-
-        try:
-            await asyncio.wait_for(drain(), _STOP_SECONDS)
-        except TimeoutError:
-            logger.warning(
-                "service program %s left a process holding its output open", self.cfg.argv[0]
+    def answer(self, output: bytes, returncode: int | None, overflowed: bool) -> ServiceResult:
+        # A program stopped for writing too much still produced an answer.
+        if returncode != 0 and not overflowed:
+            return ServiceResult(
+                "", ok=False, problem=f"the service program failed (exit {returncode})"
             )
-
-    @staticmethod
-    def _kill(process: asyncio.subprocess.Process) -> None:
-        with contextlib.suppress(ProcessLookupError, PermissionError, OSError):
-            if sys.platform == "win32":
-                process.kill()
-            else:
-                os.killpg(process.pid, signal.SIGKILL)
+        text = output.decode("utf-8", errors="replace")
+        if overflowed or len(text) > self.cfg.max_output_chars:
+            text = text[: self.cfg.max_output_chars] + "\n[…answer truncated]"
+        return ServiceResult(text, ok=True)
 
 
 def program_problems(cfg: BridgeConfig) -> list[str]:
