@@ -26,7 +26,7 @@ from hermes_fetch_ai.uagent_app import (
     payment_store_path,
 )
 
-# AgentChatProtocol 0.3.0: the digest Fetch publishes for agents that ASI:One talks to.
+# AgentChatProtocol 0.3.0, the chat protocol ASI:One speaks.
 CHAT = "proto:30a801ed3a83f9a0ff0a9f1e6fe958cb91da1fc2218b153df7b6cbf87bd33d62"
 # AgentPaymentProtocol 0.1.0, in each role, and Fetch's MCP message models as a server.
 PAYMENT_SELLER = "proto:74bbe17d083d81bf3afb28af299aa285d3bf800ac264775923cdd3cb7b47d069"
