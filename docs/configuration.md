@@ -1,6 +1,8 @@
 # Configuration
 
-The bridge reads one YAML file (`--config`). Unknown keys are errors, and so are credential-shaped values: secrets come from the environment. [`src/hermes_fetch_ai/config.py`](../src/hermes_fetch_ai/config.py) is the source of truth for everything below; `hermes-fetch-ai doctor --config <file>` checks a file without starting anything.
+The bridge reads one YAML file. `hermes fetchai-bridge setup` writes it for you, from plain questions, to `~/.config/hermes-fetch-ai/bridge.yaml` (`$XDG_CONFIG_HOME/hermes-fetch-ai/bridge.yaml`, or `%APPDATA%\HermesFetchAI\bridge.yaml` on Windows), and every command uses that file unless given `--config <file>`. Running setup again changes the answers it asks about and keeps any other setting you add by hand; it replaces a file it did not write only when you say so, and keeps the old one as `bridge.yaml.bak`.
+
+Unknown keys are errors, and so are credential-shaped values: secrets come from the environment. [`src/hermes_fetch_ai/config.py`](../src/hermes_fetch_ai/config.py) is the source of truth for everything below; `hermes-fetch-ai doctor --config <file>` checks a file without starting anything.
 
 The examples in [`examples/`](../examples) are complete configs: `local-direct.yaml` (fake tools), `hermes-stdio.yaml` (real Hermes tools, the production shape), `hermes-local.yaml` (Hermes in the same environment, v0.16.x only), `agentverse-mailbox.yaml` (manual, unverified), `paid-services.yaml` (selling services for testnet FET), and `asi-one.yaml` (selling them to ASI:One users through chat).
 

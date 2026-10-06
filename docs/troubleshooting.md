@@ -6,13 +6,66 @@ Messages are grouped by where they appear. A remote caller sees a short reason i
 
 ### `fetchai-bridge: 'hermes-fetch-ai' not found`
 
-The plugin could not find the bridge. Install it in its own environment:
+The plugin could not find the bridge. Install it, in its own environment:
 
 ```bash
-uv tool install --python 3.12 "hermes-fetch-ai @ git+https://github.com/ptanner66-prog/Hermes-Fetch-AI"
+hermes fetchai-bridge install
 ```
 
 or set `plugins.entries.fetchai-bridge.settings.command` to the full path of `hermes-fetch-ai`. Do not install the bridge into Hermes' environment: the two pin different `mcp` versions.
+
+### `install` says to install uv first
+
+`install` uses [uv](https://docs.astral.sh/uv/getting-started/installation/) (or pipx). Install uv with the one command on that page, open a new terminal, and run `hermes fetchai-bridge install` again.
+
+### `Installed, but your terminal cannot find hermes-fetch-ai yet`
+
+The installer put the bridge in a folder your terminal does not search yet. Run the command the message names (`uv tool update-shell`, or `pipx ensurepath` after a pipx install), open a new terminal, and go on with `hermes fetchai-bridge setup`. Running `install` or `setup` again before that only repeats the install.
+
+### The install fails at `git+https://...@v<version>`
+
+The bridge is installed from the git tag of the plugin's version. If that tag does not exist yet (an unreleased plugin), install the bridge from the branch you got the plugin from, for example `uv tool install --force --python 3.12 "hermes-fetch-ai @ git+https://github.com/ptanner66-prog/Hermes-Fetch-AI@main"`.
+
+### `note: this bridge is version X and the fetchai-bridge plugin is Y`
+
+The plugin and the bridge come from different releases. `hermes fetchai-bridge install` installs the bridge that matches the plugin.
+
+### `Hermes did not keep it, so nothing was set up`
+
+`setup` keeps the agent's key in Hermes' `.env` through Hermes itself, and this Hermes did not save it (for example, a managed install whose `.env` is read-only). Set the "uAgent seed" in the plugin's settings (at least 32 random characters; `python -c "import secrets; print(secrets.token_hex(32))"` makes one), then run setup again.
+
+### `setup asks questions; run it in a terminal`
+
+Setup was run where nobody can answer (a script, or Hermes' own tools). Run `hermes fetchai-bridge setup` in a terminal yourself.
+
+### `config: FAIL: no config yet; run hermes fetchai-bridge setup`
+
+The commands use the config setup writes. Run `hermes fetchai-bridge setup`, or pass `--config <file>` for a config of your own.
+
+## Running in the background
+
+### `Your agent could not start`
+
+`start` shows the end of the agent's log. The usual causes, by what the log says:
+- `address already in use`: another program uses the agent's port. Run setup again (it picks a free port), then `start`.
+- `services: FAIL: ...`: see "Selling services" below.
+- `UAGENT_SEED is required`: start the agent through Hermes (`hermes fetchai-bridge start`), which passes the key from Hermes' `.env`.
+
+### `serve: FAIL: another bridge is already running with these records`
+
+An agent is already running with the same records folder (perhaps started with `start` in another terminal). `hermes fetchai-bridge status` shows it; stop it with `hermes fetchai-bridge stop` before starting another.
+
+### `Your agent did not stop within 40 seconds; stopping it now`
+
+The agent was busy and did not finish in time, so `stop` ended it. A payment it was sending is marked `needs_review` the next time it starts; run `hermes fetchai-bridge buyer check <id>` for it, as `status` says.
+
+### `status` says `Testnet: not answering`
+
+The bridge could not reach Fetch's testnet ledger (`payments.ledger_url`), so it shows no balances. Your agent may still be running fine; check your internet connection, or run `status --offline`.
+
+### `Testnet: its newest block is ... old; the chain may have stopped`
+
+Fetch's test network has stopped making blocks for now. Payments wait until it moves again; nothing is lost.
 
 ### ``hermes: 'fetchai-bridge' is not a `hermes` command``
 
@@ -221,9 +274,9 @@ Run it by hand with `hermes-fetch-ai seller try <service> --request "..." --conf
 
 [`buying.md`](buying.md) explains the states a payment goes through.
 
-### `buyer ...: FAIL: the bridge is not running with buying enabled ...`
+### `buyer ...: FAIL: your agent is not running with buying on ...`
 
-The `buyer` commands (and Hermes' buying tools) work through the running bridge. Start it with `hermes fetchai-bridge serve --config <your config>`, with `buying.enabled: true`. If your config sets `payments.state_dir`, pass the same `--config` to the `buyer` commands (or set the plugin's "Bridge config" setting).
+The `buyer` commands (and Hermes' buying tools) work through your running agent. Start it with `hermes fetchai-bridge start`. If `status` says Hermes may not buy, run `hermes fetchai-bridge setup` and say yes to buying (it sets `buying.enabled: true`), then `hermes fetchai-bridge restart`. If you run the bridge with a config of your own that sets `payments.state_dir`, pass the same `--config` to the `buyer` commands (or set the plugin's "Bridge config" setting).
 
 ### `buyer ...: FAIL: the bridge is not answering ...`
 
@@ -235,7 +288,7 @@ Another `serve` with buying on is using the same state folder. Stop it, or give 
 
 ### Hermes says `Turn off YOLO mode to work with other agents`
 
-The buying tools refuse while YOLO mode is on (`--yolo`, `/yolo`, `HERMES_YOLO_MODE`, or `approvals.mode: off`). Turn it off for this session to work with other agents.
+The buying tools refuse while YOLO mode is on (`--yolo`, `/yolo`, `HERMES_YOLO_MODE`, or `approvals.mode: off`). Turn it off to work with other agents: type `/yolo` again in the session, or start Hermes without `--yolo`. If it is on from the start, remove `HERMES_YOLO_MODE` from your environment or Hermes' `.env`, or set `approvals.mode` back to its default in Hermes' settings.
 
 ### Hermes says `this Hermes cannot ask you to approve a payment ...`
 

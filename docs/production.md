@@ -11,10 +11,23 @@ One bridge per process. `serve` owns an event loop, starts the MCP backend (a st
 
 If the backend dies after startup, callers get `backend unavailable` and the audit log records `decision: error`; restart the service to recover.
 
+## Running in the background
+
+`start` runs `serve` in the background and returns once the agent is up, `stop` stops it, `restart` does both, and `status` and `logs` show how it is doing. These are what `hermes fetchai-bridge start` and the others run; like every command, they use the config `setup` wrote unless given `--config`.
+
+- **The records folder.** Everything lives in `payments.state_dir` (by default `~/.local/state/hermes-fetch-ai`, or `%LOCALAPPDATA%\HermesFetchAI` on Windows): `serve.log`, the background agent's output (readable only by you, and set aside as `serve.log.1` by a `start` once it passes 5 MB); `serve.json`, the run file; `control.json` when buying is on; and a folder per agent address with the payment records.
+- **Starting.** `start` runs `serve` in a session of its own (a detached process on Windows), so it keeps running when the terminal closes. It waits up to a minute for the agent to say it is up (Hermes' tools server, the records, and the control channel) and to stay up two more seconds. If the agent exits instead, `start` prints the end of its log and exits 1; if it is still starting after a minute, `start` says so and exits 0.
+- **One bridge per records folder.** `serve`, however it was started (by `start`, by hand, or by a service manager), writes `serve.json` (its process id, start time, config, log, and whether it is up) and removes it when it stops. A second `serve` with the same records folder refuses to start while the first runs (`serve: FAIL: another bridge is already running with these records`): the two would share the control channel's file, and each would take the other's work in progress for interrupted work. To run two agents on one machine, give each its own `payments.state_dir`. A run file left by a crash, or one naming a process id that another program now has, is ignored and removed.
+- **Stopping.** `stop` sends SIGTERM (on Windows, where a background process gets no console signals, it creates `serve.stop`, which `serve` checks for every second) and waits up to 40 seconds; `serve` gives work in progress 20 of them. A bridge that has not stopped by then is stopped by force (SIGKILL, or `taskkill /F /T` on Windows), and `stop` exits 1.
+- **Interrupted work.** When `serve` starts, once it holds the records folder, it returns paid requests that were running when the bridge last stopped to `paid`, so each runs again when its buyer asks again, and marks payments it was in the middle of sending `needs_review` (settle each with `buyer check <id>`). It logs both. Commands that open the records while the bridge runs (`status`, `seller credits`, `seller pause`) change neither.
+- **Health.** `status` reads the run file, the records, and, unless given `--offline`, the testnet: the wallets' balances and how long ago the newest block was made. It never contacts the running bridge. It exits 0 when the agent runs and 3 when it does not, so a script or a monitor can use it.
+
+`start` keeps the agent running until it is stopped or the computer restarts. For an agent that stays online across restarts and comes back after a crash, run `serve` under a service manager instead, as below. `status` still works, because `serve` writes the run file however it runs; its output then goes to the manager's log (`journalctl -u hermes-fetch-ai`), not `serve.log`.
+
 ## Secrets
 
 - `UAGENT_SEED` comes from the environment only. Config files with seed or mailbox-key values are rejected, mailbox mode refuses to start without the seed, and logs and audit records redact seed-shaped strings.
-- The seed must be at least 32 characters, because the agent's signing key is derived from it. Generate one with `python -c "import secrets; print(secrets.token_hex(32))"`.
+- The seed must be at least 32 characters, because the agent's signing key is derived from it. `hermes fetchai-bridge setup` makes one and keeps it in Hermes' `.env`; for a service, generate one with `python -c "import secrets; print(secrets.token_hex(32))"`.
 - Production configs set `agent.dev_random_seed: false` (as `examples/hermes-stdio.yaml` does). With `true`, `UAGENT_SEED` is ignored and the bridge gets a new address on every start; `doctor` and `serve` print `seed: WARN` in that case.
 - Use a dedicated agent seed, not a wallet that holds real funds. The seed also derives the agent's `fetch1...` wallet, which Almanac registration (`publish_manifest: true`) can spend from.
 - Keep seeds, mailbox keys, API tokens, private endpoints, and connection strings out of configs, audit logs, issues, pull requests, and screenshots.
@@ -70,7 +83,7 @@ A bridge that sells services ([`payments.md`](payments.md)) keeps its payment re
 
 - **Back it up with the seed.** The database remembers which payments were already used. Losing it lets a buyer present a payment again until its quote's redeem window closes (by default up to 24 hours after the quote expires), and loses the list of payments to refund.
 - **Copy it safely.** `hermes-fetch-ai seller backup --to <new file> --config <file>` writes a consistent copy, readable only by you, even while the bridge runs. Copying the file directly can miss recent payments, which SQLite keeps in a separate write-ahead log for a while.
-- **One database per agent.** Two bridges with the same seed and state folder share the database safely (SQLite serializes them), but different seeds always get different folders.
+- **One database per agent.** Each agent address gets its own folder under `state_dir`. Only one bridge runs per `state_dir` at a time ([above](#running-in-the-background)); owner commands share the database safely while it runs, because SQLite serializes them.
 - **Versions.** The database records its schema version, and a bridge refuses a database written by a newer version rather than misreading it.
 
 Watch `seller credits` for `failed` payments and extra payments, which need refunds.
@@ -111,7 +124,7 @@ The JSONL audit log is the operational signal: decisions, reasons, durations, si
 - repeated `args exceed max_args_bytes`, URL, or shell-character rejections;
 - when selling: records with `payment: invalid` or `payment: mismatch` (someone probing the payment checks), `payment: pending` that never clears (the ledger endpoint is down), `decision: error` from a service (its program is failing), and frequent `this service is busy` refusals (raise `max_running` or `max_waiting` if the machine can take more).
 
-`hermes-fetch-ai doctor --config /etc/hermes-fetch-ai/bridge.yaml` checks the config and the dependency pins; it does not contact a running bridge. For health, watch the process and the audit log.
+`hermes-fetch-ai doctor --config /etc/hermes-fetch-ai/bridge.yaml` checks the config and the dependency pins; it does not contact a running bridge. For health, watch the process and the audit log, or run `hermes-fetch-ai status --config /etc/hermes-fetch-ai/bridge.yaml` (exit status 3 when the agent is not running; it also warns when the testnet has made no block for two minutes).
 
 ## Upgrades
 

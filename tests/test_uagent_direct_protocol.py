@@ -122,7 +122,11 @@ def test_exactly_one_bridge_protocol_shape():
 
 
 @pytest.mark.asyncio
-async def test_client_list_and_call_succeeds_via_local_dispatcher(tmp_path, monkeypatch):
+async def test_client_list_and_call_succeeds_via_local_dispatcher(
+    tmp_path, monkeypatch, almanac_calls
+):
+    # almanac_calls: the client is a plain uAgents agent, which would look up the Almanac
+    # contract on the real testnet through gRPC, which the network guard cannot see.
     dispatched = {"count": 0}
     original_dispatch = dispatcher.dispatch_msg
 

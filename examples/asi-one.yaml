@@ -40,8 +40,9 @@ services:
     runner:
       type: command
       argv:
-        - /usr/bin/python3
-        - /path/to/Hermes-Fetch-AI/examples/services/code_review.py
+        - /path/to/bridge/python  # the Python the bridge runs with: `hermes-fetch-ai doctor` prints it
+        - -m
+        - hermes_fetch_ai.local_review  # ships with the bridge
         - --url
         - http://127.0.0.1:11434/v1
         - --model

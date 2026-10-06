@@ -1,4 +1,5 @@
 import ipaddress
+import os
 import socket
 import sys
 from pathlib import Path
@@ -10,10 +11,48 @@ SRC = ROOT / "src"
 if str(SRC) not in sys.path:
     sys.path.insert(0, str(SRC))
 
+# Proxy settings: a client given one connects to the proxy, which may be on this
+# machine, so the network guard below would let its requests through.
+PROXY_VARIABLES = (
+    "HTTP_PROXY",
+    "HTTPS_PROXY",
+    "ALL_PROXY",
+    "http_proxy",
+    "https_proxy",
+    "all_proxy",
+)
+
+
+@pytest.fixture(autouse=True)
+def restore_environment():
+    """Undo what the code under test sets in os.environ itself (the plugin keeps a secret
+    it saved there, as Hermes does), which monkeypatch does not see."""
+    saved = os.environ.copy()
+    yield
+    for name in set(os.environ) - set(saved):
+        del os.environ[name]
+    for name, value in saved.items():
+        if os.environ.get(name) != value:
+            os.environ[name] = value
+
 
 @pytest.fixture(autouse=True)
 def clear_seed(monkeypatch):
+    """Tests never see the developer's own agent key or Agentverse key."""
     monkeypatch.delenv("UAGENT_SEED", raising=False)
+    monkeypatch.delenv("AGENTVERSE_API_KEY", raising=False)
+
+
+@pytest.fixture(autouse=True)
+def no_owner_files(monkeypatch, tmp_path_factory):
+    """Commands use the config `setup` wrote and the default records folder: never the
+    developer's own."""
+    config_home = tmp_path_factory.mktemp("config-home")
+    monkeypatch.setenv("XDG_CONFIG_HOME", str(config_home))
+    monkeypatch.setenv("APPDATA", str(config_home))  # where it lives on Windows
+    state_home = tmp_path_factory.mktemp("state-home")
+    monkeypatch.setenv("XDG_STATE_HOME", str(state_home))
+    monkeypatch.setenv("LOCALAPPDATA", str(state_home))
 
 
 def _is_loopback(address) -> bool:
@@ -35,6 +74,8 @@ def no_outside_network(request, monkeypatch):
     if request.node.get_closest_marker("network"):
         yield None
         return
+    for name in PROXY_VARIABLES:
+        monkeypatch.delenv(name, raising=False)
     attempts = []
     real_connect = socket.socket.connect
     real_connect_ex = socket.socket.connect_ex

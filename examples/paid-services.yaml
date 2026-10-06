@@ -4,7 +4,8 @@
 # Before the first start:
 #   1. Set UAGENT_SEED, the agent's identity and wallet key, and back it up.
 #   2. Change every /path/to/... below to the real absolute path on your
-#      machine, and /usr/bin/python3 to what `which python3` prints.
+#      machine (/path/to/bridge/python is the Python `hermes-fetch-ai doctor`
+#      names), and /usr/bin/python3 to what `which python3` prints.
 #   3. Give the research service's guest Hermes its model key (see below).
 #   4. Check the file:
 #        hermes-fetch-ai doctor --config examples/paid-services.yaml
@@ -69,8 +70,9 @@ services:
       type: command
       # The model server must run on this machine; this is Ollama's default address.
       argv:
-        - /usr/bin/python3
-        - /path/to/Hermes-Fetch-AI/examples/services/code_review.py
+        - /path/to/bridge/python  # the Python the bridge runs with: `hermes-fetch-ai doctor` prints it
+        - -m
+        - hermes_fetch_ai.local_review  # ships with the bridge
         - --url
         - http://127.0.0.1:11434/v1
         - --model

@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import argparse
 import asyncio
+import contextlib
 import sys
 import tempfile
 from importlib import resources
@@ -38,7 +39,19 @@ def default_config_path() -> Path:
     return example_config_path("local-direct.yaml")
 
 
-def _load_or_report(path: str | Path) -> BridgeConfig | None:
+def _load_or_report(path: str | Path | None) -> BridgeConfig | None:
+    """The config at ``path``, or the one `setup` wrote; None (with the reason) if unusable."""
+    if path is None:
+        from .audit import managed_config_path
+
+        path = managed_config_path()
+        if not path.exists():
+            print(
+                "config: FAIL: no config yet; run `hermes fetchai-bridge setup` "
+                "(or pass --config <file>)",
+                file=sys.stderr,
+            )
+            return None
     try:
         return load_config(path)
     except ValidationError as exc:
@@ -50,13 +63,21 @@ def _load_or_report(path: str | Path) -> BridgeConfig | None:
 
 def doctor(args: argparse.Namespace) -> int:
     from . import __version__
+    from .audit import managed_config_path
 
     print(f"hermes-fetch-ai {__version__}")
-    config_path = Path(args.config) if args.config else default_config_path()
+    print(f"python: {sys.executable}")
+    note = ""
+    if args.config:
+        config_path = Path(args.config)
+    elif managed_config_path().exists():
+        config_path, note = managed_config_path(), " (written by setup)"
+    else:
+        config_path = default_config_path()
+        note = " (the demo config; run `hermes fetchai-bridge setup` to make yours)"
     cfg = _load_or_report(config_path)
     if cfg is None:
         return 1
-    note = "" if args.config else " (the demo config; pass --config to check yours)"
     print(f"config: ok: {config_path}{note}")
     pin_problems = check_pins()
     if pin_problems:
@@ -380,10 +401,10 @@ def agentverse(args: argparse.Namespace) -> int:
     cfg = _load_or_report(args.config)
     if cfg is None:
         return 1
-    if not cfg.chat.enable_chat:
+    if not (cfg.chat.enable_chat or cfg.buying.enabled):
         print(
-            "agentverse: FAIL: ASI:One talks to agents through chat; "
-            "set chat.enable_chat: true (it sells the services in this config)",
+            "agentverse: FAIL: the agent neither sells through chat nor buys; set "
+            "chat.enable_chat: true (to sell to ASI:One users) or buying.enabled: true",
             file=sys.stderr,
         )
         return 1
@@ -432,27 +453,142 @@ def _now_ms() -> int:
     return int(time.time() * 1000)
 
 
-def serve(args: argparse.Namespace) -> int:
-    from .mcp_shim import HermesBackendError
-    from .uagent_app import ServeError, run_bridge
+def _config_target(args: argparse.Namespace) -> tuple[BridgeConfig, Path] | None:
+    """The config to use and where it is: --config, else the one `setup` wrote."""
+    from .audit import managed_config_path
 
     cfg = _load_or_report(args.config)
     if cfg is None:
+        return None
+    return cfg, Path(args.config or managed_config_path()).resolve()
+
+
+def serve(args: argparse.Namespace) -> int:
+    from .background import STOP_FILE, AlreadyRunning, claim, mark_ready, release
+    from .mcp_shim import HermesBackendError
+    from .uagent_app import ServeError, run_bridge
+
+    target = _config_target(args)
+    if target is None:
         return 1
+    cfg, path = target
     seed_warning = cfg.ignored_seed_warning()
     if seed_warning:
         print(f"seed: WARN: {seed_warning}", file=sys.stderr)
     if not _programs_ok(cfg):
         return 1
+    state = cfg.payments.state_path
     try:
-        run_bridge(cfg)
+        claim(state, path)
+    except AlreadyRunning as exc:
+        print(f"serve: FAIL: {exc}", file=sys.stderr)
+        return 1
+    try:
+        run_bridge(cfg, stop_file=state / STOP_FILE, on_ready=lambda: mark_ready(state))
     except HermesBackendError as exc:
         print(f"hermes backend: FAIL: {exc}", file=sys.stderr)
         return 1
     except ServeError as exc:
         print(f"serve: FAIL: {exc}", file=sys.stderr)
         return 1
+    finally:
+        release(state)
     return 0
+
+
+def start(args: argparse.Namespace) -> int:
+    """Start the bridge in the background."""
+    from .background import start as start_in_background
+
+    target = _config_target(args)
+    if target is None:
+        return 1
+    cfg, path = target
+    if not _programs_ok(cfg):
+        return 1
+    return start_in_background(path, cfg.payments.state_path)
+
+
+def stop(args: argparse.Namespace) -> int:
+    from .background import stop as stop_background
+
+    target = _config_target(args)
+    if target is None:
+        return 1
+    return stop_background(target[0].payments.state_path)
+
+
+def restart(args: argparse.Namespace) -> int:
+    code = stop(args)
+    return code if code != 0 else start(args)
+
+
+def status(args: argparse.Namespace) -> int:
+    from .status import report
+
+    target = _config_target(args)
+    if target is None:
+        return 1
+    return report(target[0], offline=args.offline)
+
+
+def logs(args: argparse.Namespace) -> int:
+    from .background import LOG_FILE, follow, read_running, tail
+
+    target = _config_target(args)
+    if target is None:
+        return 1
+    state = target[0].payments.state_path
+    running = read_running(state)
+    log = Path(running.log) if running is not None and running.log else state / LOG_FILE
+    if not log.exists():
+        print("No log yet: it starts when you run `hermes fetchai-bridge start`.")
+        return 1
+    for line in tail(log, args.lines):
+        print(line)
+    if args.follow:
+        with contextlib.suppress(KeyboardInterrupt):
+            follow(log)
+    return 0
+
+
+CONFIG_HELP = "the bridge's config file (default: the one `setup` wrote)"
+
+
+def setup(args: argparse.Namespace) -> int:
+    """The setup wizard: plain-language questions that write the bridge's config."""
+    import json
+
+    from .agentverse import register
+    from .audit import managed_config_path
+    from .setup_wizard import Asker, ConsoleAsker, ScriptedAsker, run_setup
+
+    asker: Asker
+    if args.answers:
+        try:
+            source = sys.stdin.read() if args.answers == "-" else Path(args.answers).read_text()
+            answers = json.loads(source)
+        except (OSError, ValueError) as exc:
+            print(f"setup: FAIL: cannot read the answers ({exc})", file=sys.stderr)
+            return 1
+        if not isinstance(answers, dict):
+            print("setup: FAIL: the answers must be a JSON object", file=sys.stderr)
+            return 1
+        asker = ScriptedAsker(answers, echo=sys.stdout)
+    elif not sys.stdin.isatty():
+        print(
+            "setup: FAIL: setup asks questions; run it in a terminal (or give --answers <file>)",
+            file=sys.stderr,
+        )
+        return 2
+    else:
+        asker = ConsoleAsker()
+
+    def list_on_agentverse(cfg: BridgeConfig, seed: str, api_key: str) -> None:
+        register(cfg, seed, api_key)
+
+    path = Path(args.config) if args.config else managed_config_path()
+    return run_setup(asker, path, fund=_fund_from_faucet, list_on_agentverse=list_on_agentverse)
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -462,12 +598,43 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--version", action="version", version=f"%(prog)s {__version__}")
     sub = p.add_subparsers(dest="cmd", required=True)
     d = sub.add_parser("doctor", help="check a config file and the installed dependency pins")
-    d.add_argument("--config", default=None, help="config to check (default: the demo config)")
+    d.add_argument(
+        "--config", default=None, help="config to check (default: yours from setup, else the demo)"
+    )
     d.set_defaults(func=doctor)
+    st = sub.add_parser(
+        "setup", help="set up your agent by answering a few questions (again to change it)"
+    )
+    st.add_argument(
+        "--config", default=None, help="where to write the config (default: the managed one)"
+    )
+    st.add_argument(
+        "--answers",
+        default=None,
+        help="a JSON file of answers by question key, instead of asking (- reads stdin)",
+    )
+    st.set_defaults(func=setup)
+    for name, func, text in (
+        ("start", start, "start your agent in the background"),
+        ("stop", stop, "stop your agent, letting it finish what it is doing"),
+        ("restart", restart, "stop and start your agent (after changing its setup)"),
+    ):
+        command = sub.add_parser(name, help=text)
+        command.add_argument("--config", default=None, help=CONFIG_HELP)
+        command.set_defaults(func=func)
+    stt = sub.add_parser("status", help="what your agent is doing, in plain words")
+    stt.add_argument("--config", default=None, help=CONFIG_HELP)
+    stt.add_argument("--offline", action="store_true", help="do not ask the testnet for balances")
+    stt.set_defaults(func=status)
+    lgs = sub.add_parser("logs", help="what your agent has been printing")
+    lgs.add_argument("--config", default=None, help=CONFIG_HELP)
+    lgs.add_argument("--lines", type=int, default=40, help="how many lines (default 40)")
+    lgs.add_argument("--follow", action="store_true", help="keep printing new lines")
+    lgs.set_defaults(func=logs)
     ph = sub.add_parser("probe-hermes", help="check that Hermes' tools MCP server can be imported")
     ph.set_defaults(func=probe_hermes)
     s = sub.add_parser("serve", help="run the bridge uAgent until interrupted")
-    s.add_argument("--config", required=True)
+    s.add_argument("--config", default=None, help=CONFIG_HELP)
     s.set_defaults(func=serve)
     dm = sub.add_parser(
         "demo",
@@ -476,7 +643,7 @@ def build_parser() -> argparse.ArgumentParser:
     dm.add_argument("kind", choices=["local", "paid", "chat", "buy", "mailbox"])
     dm.set_defaults(func=demo)
     w = sub.add_parser("wallet", help="show the agent's address and income wallet")
-    w.add_argument("--config", required=True)
+    w.add_argument("--config", default=None, help=CONFIG_HELP)
     w.add_argument("--balance", action="store_true", help="also ask the ledger for the balance")
     w.add_argument(
         "--fund",
@@ -485,7 +652,7 @@ def build_parser() -> argparse.ArgumentParser:
     )
     w.set_defaults(func=wallet)
     lg = sub.add_parser("ledger", help="check that the configured ledger answers as testnet")
-    lg.add_argument("--config", required=True)
+    lg.add_argument("--config", default=None, help=CONFIG_HELP)
     lg.set_defaults(func=ledger)
     sl = sub.add_parser(
         "seller", help="see payments, try a service, pause selling, ban an agent, or back up"
@@ -496,7 +663,7 @@ def build_parser() -> argparse.ArgumentParser:
     sl.add_argument(
         "target", nargs="?", help="the service name (try) or the agent address (ban, unban)"
     )
-    sl.add_argument("--config", required=True)
+    sl.add_argument("--config", default=None, help=CONFIG_HELP)
     sl.add_argument("--status", default=None, help="only payments with this status (credits)")
     sl.add_argument("--reason", default=None, help="why, for ban")
     sl.add_argument("--request", default=None, help="what a buyer would ask, for try")
@@ -506,7 +673,7 @@ def build_parser() -> argparse.ArgumentParser:
     sl.set_defaults(func=seller)
     av = sub.add_parser("agentverse", help="list the bridge on Agentverse for ASI:One users")
     av.add_argument("action", choices=["register"])
-    av.add_argument("--config", required=True)
+    av.add_argument("--config", default=None, help=CONFIG_HELP)
     av.add_argument("--yes", action="store_true", help="do not ask for confirmation")
     av.set_defaults(func=agentverse)
     from .buyer_cli import add_parser as add_buyer_parser
@@ -515,9 +682,36 @@ def build_parser() -> argparse.ArgumentParser:
     return p
 
 
+# Set by the fetchai-bridge plugin to its own version.
+PLUGIN_VERSION_VAR = "HERMES_FETCH_AI_PLUGIN_VERSION"
+
+
+def _version_note() -> None:
+    """Say when the bridge and the Hermes plugin that runs it are different versions."""
+    import os
+
+    from . import __version__
+
+    plugin = os.environ.get(PLUGIN_VERSION_VAR)
+    if plugin and plugin != __version__:
+        print(
+            f"note: this bridge is version {__version__} and the fetchai-bridge plugin is "
+            f"{plugin}; to match them: hermes fetchai-bridge install",
+            file=sys.stderr,
+        )
+
+
 def main(argv: list[str] | None = None) -> int:
     args = build_parser().parse_args(argv)
-    return int(args.func(args))
+    _version_note()
+    try:
+        return int(args.func(args))
+    except BrokenPipeError:
+        # Whatever read the output stopped early (`| head`): stop quietly.
+        import os
+
+        os.dup2(os.open(os.devnull, os.O_WRONLY), sys.stdout.fileno())
+        return 1
 
 
 if __name__ == "__main__":

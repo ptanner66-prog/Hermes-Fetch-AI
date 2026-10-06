@@ -10,29 +10,37 @@ stdlib-only wrapper declared with ``python_runtime: external``:
   replies, and pay them (testnet FET). They do nothing until the owner turns
   on the ``buyer_tools`` setting, refuse while YOLO mode is on, and every
   payment asks the owner first through Hermes' own confirmation prompt;
-- the bundled skills tell the agent how to use the bridge and how to buy.
+- the bundled skills tell the agent how to use the bridge and how to buy;
+- ``hermes fetchai-bridge install`` installs the bridge (after asking), and
+  ``hermes fetchai-bridge setup`` creates the agent's key in Hermes' ``.env``
+  and runs the bridge's setup questions.
 """
 
 from __future__ import annotations
 
 import argparse
+import getpass
 import inspect
 import json
 import os
 import re
+import secrets
 import shutil
 import subprocess
 import sys
+import tempfile
 from collections.abc import Callable, Mapping
 from pathlib import Path
 from typing import Any
 
 PLUGIN_NAME = "fetchai-bridge"
+# Kept equal to plugin.yaml's version (a test checks); the bridge it installs.
+PLUGIN_VERSION = "1.0.0"
 BRIDGE_COMMAND = "hermes-fetch-ai"
-INSTALL_HINT = (
-    "uv tool install --python 3.12 "
-    '"hermes-fetch-ai @ git+https://github.com/ptanner66-prog/Hermes-Fetch-AI"'
-)
+REPOSITORY = "https://github.com/ptanner66-prog/Hermes-Fetch-AI"
+BRIDGE_REQUIREMENT = f"hermes-fetch-ai @ git+{REPOSITORY}@v{PLUGIN_VERSION}"
+INSTALL_HINT = f'uv tool install --python 3.12 "{BRIDGE_REQUIREMENT}"'
+UV_DOCS = "https://docs.astral.sh/uv/getting-started/installation/"
 # How long a Ctrl-C'd bridge gets to finish its own graceful shutdown.
 SHUTDOWN_GRACE_SECONDS = 30.0
 # Hermes loads every key in $HERMES_HOME/.env (model-provider API keys, for
@@ -88,16 +96,21 @@ BRIDGE_ENV = frozenset(
 # import path. Names shared with hermes_fetch_ai.config.
 HERMES_PYTHON_VAR = "HERMES_FETCH_AI_HERMES_PYTHON"
 HERMES_PYTHONPATH_VAR = "HERMES_FETCH_AI_HERMES_PYTHONPATH"
+# The bridge says when it and this plugin are different versions.
+PLUGIN_VERSION_VAR = "HERMES_FETCH_AI_PLUGIN_VERSION"
+# Where the bridge's setup reports what was chosen, for this plugin's own settings.
+SETUP_RESULT_VAR = "HERMES_FETCH_AI_SETUP_RESULT"
 
 _SKILLS_DIR = Path(__file__).resolve().parent / "skills"
 _DESCRIPTION = """\
-Run the Fetch.ai uAgents bridge. Arguments are passed unchanged to the
-separately installed hermes-fetch-ai command, for example:
+Put Hermes on Fetch.ai's agent network. First time:
 
-  hermes fetchai-bridge doctor
-  hermes fetchai-bridge demo local
-  hermes fetchai-bridge serve --config /absolute/path/to/bridge.yaml
-  hermes fetchai-bridge probe-hermes
+  hermes fetchai-bridge install    install the bridge (asks first)
+  hermes fetchai-bridge setup      a few questions: what to sell, whether to buy
+  hermes fetchai-bridge start      start your agent in the background
+
+Then: status, logs, stop, restart. Other arguments go to the separately
+installed hermes-fetch-ai command unchanged (doctor, demo local, serve, ...).
 """
 
 
@@ -117,27 +130,31 @@ def bridge_environment(
         if name.upper() in BRIDGE_ENV or name.upper().startswith("LC_")
     }
     env[HERMES_PYTHON_VAR] = hermes_python or sys.executable
+    env[PLUGIN_VERSION_VAR] = PLUGIN_VERSION
     hermes_pythonpath = source.get("PYTHONPATH", "")
     if hermes_pythonpath:
         env[HERMES_PYTHONPATH_VAR] = hermes_pythonpath
     return env
 
 
-def run_bridge(argv: list[str], configured: str = "") -> int:
+def run_bridge(
+    argv: list[str], configured: str = "", extra_env: Mapping[str, str] | None = None
+) -> int:
     """Run the bridge CLI with ``argv`` and return its exit status."""
     command = resolve_bridge_command(configured)
     if command is None:
         target = configured.strip() or BRIDGE_COMMAND
         print(
-            f"{PLUGIN_NAME}: {target!r} not found. Install the bridge in its own environment:\n"
-            f"  {INSTALL_HINT}\n"
+            f"{PLUGIN_NAME}: {target!r} not found. Install the bridge (it asks first):\n"
+            f"  hermes {PLUGIN_NAME} install\n"
             f"or set plugins.entries.{PLUGIN_NAME}.settings.command to its path.",
             file=sys.stderr,
         )
         return 1
     # The user ran this command explicitly. The bridge gets UAGENT_SEED (from
     # Hermes' .env or the plugin setting) and the other allowlisted variables.
-    process = subprocess.Popen([command, *argv], env=bridge_environment())
+    env = {**bridge_environment(), **(extra_env or {})}
+    process = subprocess.Popen([command, *argv], env=env)
     try:
         return process.wait()
     except KeyboardInterrupt:
@@ -167,12 +184,187 @@ def _register_skills(ctx: Any) -> None:
         register_skill(skill_md.parent.name, skill_md)
 
 
+# -- installing and setting up ------------------------------------------------------
+
+
+def _interactive() -> bool:
+    return sys.stdin.isatty() and sys.stdout.isatty()
+
+
+def _yes(question: str) -> bool:
+    return input(f"{question} [y/N] ").strip().lower() in ("y", "yes")
+
+
+def bridge_version(command: str) -> str | None:
+    """The installed bridge's version, or None if it does not say."""
+    try:
+        done = subprocess.run(
+            [command, "--version"],
+            capture_output=True,
+            text=True,
+            timeout=60,
+            check=False,
+            env=bridge_environment(),
+            stdin=subprocess.DEVNULL,
+        )
+    except (OSError, subprocess.TimeoutExpired):
+        return None
+    words = done.stdout.split()
+    return words[-1] if done.returncode == 0 and words else None
+
+
+def install_command() -> list[str] | None:
+    """How to install the bridge pinned to this plugin's version: uv, else pipx."""
+    uv = shutil.which("uv")
+    if uv:
+        return [uv, "tool", "install", "--force", "--python", "3.12", BRIDGE_REQUIREMENT]
+    pipx = shutil.which("pipx")
+    if pipx:
+        return [pipx, "install", "--force", "--python", "python3.12", BRIDGE_REQUIREMENT]
+    return None
+
+
+def install_bridge(argv: list[str], configured: str = "") -> int:
+    """`hermes fetchai-bridge install`: install the bridge, after asking (or with --yes)."""
+    found = resolve_bridge_command(configured)
+    if found:
+        version = bridge_version(found)
+        if version == PLUGIN_VERSION:
+            print(f"The bridge {version} is installed, the version this plugin needs.")
+            return 0
+        print(
+            f"The bridge installed is {version or 'of an unknown version'}; this plugin "
+            f"needs {PLUGIN_VERSION}."
+        )
+    command = install_command()
+    if command is None:
+        print(
+            "To install the bridge, first install uv (one command; see "
+            f"{UV_DOCS}), then run this again: hermes {PLUGIN_NAME} install"
+        )
+        return 1
+    print(
+        f"This installs the Hermes Fetch AI bridge {PLUGIN_VERSION} from GitHub, pinned to "
+        f"v{PLUGIN_VERSION}, in its own Python environment; nothing goes into Hermes'. It runs:"
+    )
+    print("  " + " ".join(command))
+    if "--yes" not in argv:
+        if not _interactive():
+            print("Run it again with --yes to go ahead, or run the command above yourself.")
+            return 2
+        if not _yes("Install it now?"):
+            print("Nothing was installed.")
+            return 1
+    env = bridge_environment()
+    env.update({k: v for k, v in os.environ.items() if k.startswith(("UV_", "PIPX_"))})
+    code = subprocess.call(command, env=env)
+    if code != 0:
+        print("The install did not finish; the messages above say why.")
+        return code
+    if resolve_bridge_command(configured) is None:
+        update_path = (
+            "pipx ensurepath" if "pipx" in Path(command[0]).name else "uv tool update-shell"
+        )
+        print(
+            "Installed, but your terminal cannot find hermes-fetch-ai yet: run "
+            f"`{update_path}`, open a new terminal, then: hermes fetchai-bridge setup"
+        )
+        return 0
+    print(f"Installed. Next: hermes {PLUGIN_NAME} setup")
+    return 0
+
+
+def save_secret(name: str, value: str) -> bool:
+    """Keep ``value`` in Hermes' .env as ``name`` (this plugin's own secret); True if it is."""
+    try:
+        from hermes_cli.config import get_env_value, save_env_value
+    except ImportError:
+        return False
+    try:
+        save_env_value(name, value)
+    except Exception:  # noqa: BLE001 - not saved, for whatever reason, is all that matters here
+        return False
+    if get_env_value(name) != value:  # an install whose .env this Hermes may not change
+        return False
+    os.environ[name] = value
+    return True
+
+
+def setup_bridge(ctx: Any, argv: list[str], configured: str = "") -> int:
+    """`hermes fetchai-bridge setup`: the agent's key, an Agentverse key, then the questions."""
+    if resolve_bridge_command(configured) is None:
+        print("First, the bridge itself needs installing.")
+        code = install_bridge([], configured)
+        if code != 0 or resolve_bridge_command(configured) is None:
+            return code or 1
+    answers = "--answers" in argv
+    if not answers and not _interactive():
+        print(f"setup asks questions; run it in a terminal: hermes {PLUGIN_NAME} setup")
+        return 2
+    if not os.environ.get("UAGENT_SEED"):
+        print("Your agent needs a secret key: its identity on Fetch.ai, and the key to its")
+        print("wallets. Making one now, and keeping it in Hermes' .env as UAGENT_SEED.")
+        if not save_secret("UAGENT_SEED", secrets.token_hex(32)):
+            print('Hermes did not keep it, so nothing was set up. Set the "uAgent seed" in')
+            print("this plugin's settings (at least 32 random characters), then run setup again.")
+            return 1
+    if not os.environ.get("AGENTVERSE_API_KEY") and not answers:
+        print("With an Agentverse API key, ASI:One users and agents anywhere can reach your")
+        print("agent through Fetch.ai's Agentverse. It is free: sign in at agentverse.ai, then")
+        print("Profile, API Keys. Without one, your agent works from this computer only.")
+        key = getpass.getpass("Paste your Agentverse API key, or press Enter to skip: ").strip()
+        if key and not save_secret("AGENTVERSE_API_KEY", key):
+            print("Hermes did not keep the key; setup goes on without it.")
+    with tempfile.TemporaryDirectory() as folder:
+        result_file = Path(folder) / "result.json"
+        code = run_bridge(["setup", *argv], configured, {SETUP_RESULT_VAR: str(result_file)})
+        try:
+            result = json.loads(result_file.read_text(encoding="utf-8"))
+        except (OSError, ValueError):
+            result = {}
+    if code == 0 and isinstance(result, dict):
+        _offer_buyer_tools(ctx, bool(result.get("buying")), interactive=not answers)
+    return code
+
+
+def _offer_buyer_tools(ctx: Any, buying: bool, *, interactive: bool) -> None:
+    """Line the plugin's "Let Hermes buy" setting up with the bridge's buying, if asked."""
+    on = buyer_tools_enabled(ctx)
+    set_config = getattr(ctx, "set_config", None)
+    if buying and not on:
+        if (
+            set_config is not None
+            and interactive
+            and _yes(
+                "Turn on Hermes' tools for working with other agents now? (the \"Let Hermes buy "
+                'from other agents" setting)'
+            )
+        ):
+            set_config("buyer_tools", True)
+            print("On. Hermes still asks you before every payment.")
+        else:
+            print(
+                'To let Hermes use it, turn on "Let Hermes buy from other agents" in this '
+                "plugin's settings."
+            )
+    elif on and not buying:
+        print(
+            'Note: "Let Hermes buy from other agents" is on, but your agent does not buy; '
+            "turn the setting off, or run setup again and say yes to buying."
+        )
+
+
 def register(ctx: Any) -> None:
     get_config = getattr(ctx, "get_config", None)
     configured = str(get_config("command", default="") or "") if get_config else ""
 
     def handle(args: argparse.Namespace) -> int:
-        return run_bridge(list(args.bridge_args) or ["--help"], configured)
+        argv = list(args.bridge_args) or ["--help"]
+        if argv[0] == "install":
+            return install_bridge(argv[1:], configured)
+        if argv[0] == "setup":
+            return setup_bridge(ctx, argv[1:], configured)
+        return run_bridge(argv, configured)
 
     ctx.register_cli_command(
         name=PLUGIN_NAME,

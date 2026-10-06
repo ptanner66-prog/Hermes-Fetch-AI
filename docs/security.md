@@ -53,7 +53,7 @@ The server module is version-dependent, and Hermes treats it as an internal inte
 
 Hermes' conversations and messaging MCP surface (`hermes mcp serve`: conversation reads, message sends, approvals) is out of scope and must never be bridged onto an agent network.
 
-The `fetchai-bridge` Hermes plugin adds no tools, hooks, or middleware, so it changes nothing the Hermes agent can do on its own. What it does is listed in its [README](../hermes-plugin/fetchai-bridge/README.md).
+The `fetchai-bridge` Hermes plugin adds no hooks or middleware. Its four tools for working with other agents are unavailable until the owner turns on its `buyer_tools` setting ([Buying](#buying-threats-and-controls) below). It changes no Hermes setting but its own: `setup` keeps the agent's key, and an Agentverse API key if the owner pastes one, in Hermes' `.env`, and offers to turn on `buyer_tools` ([Setup](#setup-install-and-the-background-agent) below). What it does is listed in its [README](../hermes-plugin/fetchai-bridge/README.md).
 
 ## Residual risks
 
@@ -66,6 +66,24 @@ The `fetchai-bridge` Hermes plugin adds no tools, hooks, or middleware, so it ch
   - `ecdsa` through `uagents-core` and `cosmpy`: `PYSEC-2026-1325`, a Minerva timing side channel in python-ecdsa signing and key generation (verification is not affected). python-ecdsa treats side channels as out of scope, so no fixed version exists. The bridge signs every response envelope with its agent key through this library. Remote timing over a network is far noisier than local timing, and the rate limits cap how many signatures a caller can trigger; an attacker who can time signing precisely on the same host is the realistic threat. Run the bridge on a host you control. Remove this exception when uAgents moves to a constant-time signing backend.
 
 Do not remove an audit exception without confirming that `uagents`, `cosmpy`, signing, and wallet behavior still work with the fixed dependency.
+
+## Setup, install, and the background agent
+
+| What | How it is protected |
+|------|---------------------|
+| The agent's secret key | `hermes fetchai-bridge setup` makes one (32 random bytes, as 64 hex characters) only when Hermes has none. It keeps it in Hermes' `.env` as `UAGENT_SEED` with Hermes' own `.env` writer, the way a plugin's secret setting is saved, and reads it back to check that Hermes kept it; if Hermes did not, setup stops. The key is never printed, and never written to the bridge's config. |
+| The Agentverse API key, and a guest's model key | Pasted without being shown on screen. The Agentverse key goes to Hermes' `.env` the same way. A research guest's key goes to its own keys file in the records folder, readable only by the owner, never to Hermes' keys. |
+| The bridge's config | `setup` checks every answer, then the whole config with the bridge's own rules, and writes it readable only by the owner (0600, in a 0700 folder) in one step, so a half-written config never exists. A config it did not write is replaced only when the owner says so, and kept as `bridge.yaml.bak`. |
+| What gets installed | `hermes fetchai-bridge install` asks first (or takes `--yes`), shows the command it runs, and installs only the bridge version that matches the plugin, from the project's GitHub repository at the tag `v<version>`, into an environment of its own; nothing goes into Hermes' environment. Nothing updates on its own: a new bridge arrives only when the owner installs a newer plugin and runs `install` again. |
+| The background agent's output | `serve.log` is readable only by the owner, because it names the agents this one deals with. The bridge's own log lines redact seed- and key-shaped text. |
+| Two bridges with one set of records | `serve` records itself in `serve.json` and refuses to start while another bridge runs with the same records folder. Before this, a second bridge, or an owner command such as `seller pause` run while the bridge worked, could take a paid request in progress for an interrupted one, so it could run twice. Now only `serve`, once it holds the records folder, recovers interrupted work, when it starts (`tests/test_store.py`, `tests/test_background.py`). |
+| Stopping | `stop` asks the bridge to finish its work, and stops it by force only after 40 seconds. A paid request cut short that way runs again when its buyer asks again; a payment cut short in the middle of sending is marked for `buyer check`, never resent. |
+
+Residual risks:
+
+- **The install trusts GitHub and the tag.** The install pins a git tag, not a hash, and whoever controls the repository can move a tag. It is as trustworthy as the repository owner's account; on a machine that matters, check the tag's commit before installing.
+- **The keys are in Hermes' `.env`.** See [Buying: residual risks](#buying-residual-risks): a Hermes tricked into using its terminal could read them.
+- **`start` is not a service manager.** An agent started with `start` that crashes, or whose computer restarts, stays stopped until someone runs `start` again; `status` says so. [`production.md`](production.md#running-in-the-background) shows how to run it under one.
 
 ## Payments
 

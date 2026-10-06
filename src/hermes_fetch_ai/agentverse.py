@@ -1,4 +1,4 @@
-"""Listing a selling bridge on Agentverse, so ASI:One users can find it and chat with it.
+"""Listing the bridge on Agentverse, so ASI:One users and other agents can reach it.
 
 Registration goes through Agentverse's API with the owner's API key. It
 proves the agent's identity by signing a challenge, and never spends from
@@ -31,18 +31,35 @@ Register = Callable[
 ]
 
 
-def protocol_digests() -> list[str]:
-    """The protocols a selling bridge speaks: chat, payment (seller), and MCP."""
-    return [
-        Protocol(spec=chat_protocol_spec).digest,
-        Protocol(spec=payment_protocol_spec, role="seller").digest,
-        Protocol(spec=mcp_protocol_spec, role="server").digest,
-    ]
+def protocol_digests(cfg: BridgeConfig | None = None) -> list[str]:
+    """The protocols the bridge speaks: chat, payment (as seller, buyer, or both), and MCP."""
+    selling = cfg is None or bool(cfg.services)
+    digests = [Protocol(spec=chat_protocol_spec).digest]
+    if selling:
+        digests.append(Protocol(spec=payment_protocol_spec, role="seller").digest)
+    if cfg is not None and cfg.buying.enabled:
+        digests.append(Protocol(spec=payment_protocol_spec, role="buyer").digest)
+    digests.append(Protocol(spec=mcp_protocol_spec, role="server").digest)
+    return digests
 
 
 def readme(cfg: BridgeConfig) -> str:
     """The agent's Agentverse README: what it sells, at what price, and how to order."""
     services = cfg.services
+    if not services:
+        return "\n".join(
+            [
+                f"# {cfg.agent.name}",
+                "",
+                cfg.agent.description,
+                "",
+                (
+                    "A Hermes agent on Fetch.ai's Dorado test network. It buys services from "
+                    "other agents for its owner, who approves every payment; it sells nothing."
+                ),
+                "",
+            ]
+        )
     example = next(iter(services), "service")
     lines = [
         f"# {cfg.agent.name}",
@@ -106,13 +123,16 @@ def registration(cfg: BridgeConfig) -> AgentverseRegistrationRequest:
     return AgentverseRegistrationRequest(
         name=cfg.agent.name,
         endpoint=endpoint,
-        protocols=protocol_digests(),
+        protocols=protocol_digests(cfg),
         type="mailbox" if mailbox else "uagent",
         description=cfg.agent.description,
         readme=readme(cfg),
         handle=cfg.agent.handle,
-        starter_prompts=["What services do you offer, and what do they cost?"]
-        + ([f"{first}: <your request>"] if first else []),
+        starter_prompts=(
+            ["What services do you offer, and what do they cost?", f"{first}: <your request>"]
+            if first
+            else None  # it sells nothing, so there is nothing to ask it for
+        ),
         active=True,
     )
 

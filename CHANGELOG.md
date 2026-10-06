@@ -9,7 +9,7 @@ All notable changes are documented here. The project follows [semantic versionin
 - Sell services for testnet FET ([`docs/payments.md`](docs/payments.md)). Services the owner defines appear to other agents as `service.<name>` tools. An unpaid call gets the price and payment terms; the buyer pays on Fetch's testnet with the quote as the memo and repeats the call with the transaction hash. The bridge reads the transaction from the ledger itself, binds it to a signed quote for that buyer and request, and records it so it can never be used twice, also across restarts. Off unless `payments.enabled` is set; mainnet is locked.
 - `command` service runner: runs the owner's program with the request on stdin and sends back what it prints, without a shell, in an empty temporary folder, with an environment allowlist, a timeout, and an output cap. Failures on the seller's side keep the buyer's payment for a retry.
 - Each service runs `max_running` requests at once with `max_waiting` more in line; when the line is full, buyers are told it is busy before they pay. A selling bridge handles each message in its own task, so a long job never holds up other requests. A buyer who missed a paid answer can collect it again with the same payment for an hour.
-- Example services: a defensive code security review by an AI model on the seller's own machine, with no tools ([`examples/services/code_review.py`](examples/services/code_review.py)), and a template for your own program, with [`examples/paid-services.yaml`](examples/paid-services.yaml).
+- Example services: a defensive code security review by an AI model on the seller's own machine, with no tools ([`hermes_fetch_ai.local_review`](src/hermes_fetch_ai/local_review.py), shipped with the bridge so the setup wizard can offer it), and a template for your own program, with [`examples/paid-services.yaml`](examples/paid-services.yaml).
 - CLI: `demo paid` (an offline sale with a simulated ledger), `wallet` (addresses and, with `--balance`, the income wallet's balance), `ledger` (checks the ledger endpoint is the testnet), and `seller credits | try | pause | resume | ban | unban | backup`. `doctor` reports payments and fails when a service program is missing; `serve` refuses to start then.
 - `examples/call_bridge.py` can pay for a service on testnet with `--pay`, from the wallet of `HERMES_FETCH_PAYER_SEED`, up to `--max-fet`.
 - Tested on Fetch's real testnet: a paid call, replays, a copied transaction, an underpayment of one `atestfet`, a wrong memo, and a restart ([results](docs/payments.md#tested-on-the-real-testnet)).
@@ -20,12 +20,19 @@ All notable changes are documented here. The project follows [semantic versionin
 - `hermes-fetch-ai buyer find | message | inbox | show | pay | decline | check | purchases | status`, through a local control channel (127.0.0.1, a token in a 0600 file); `message` and `pay` wait for the other agent's answer, and `inbox --wait` waits for the next reply. `wallet --fund` gets free test FET for the buying wallet; `demo buy` shows a purchase offline.
 - Hermes plugin: tools `fetchai_find_agents`, `fetchai_message_agent`, `fetchai_read_replies`, and `fetchai_pay`, unavailable until the new `buyer_tools` setting is on; they refuse while YOLO mode is on, and `fetchai_pay` pays only after the user accepts in Hermes' confirmation prompt, then returns the seller's answer. Messages reach the bridge through standard input, not the command line. A `buy` skill, and a `config` setting.
 - Tested on Fetch's real testnet: a purchase between two bridges, with the seller verifying the payment on the ledger ([results](docs/buying.md#what-is-tested)).
+- Setup without editing files ([README](README.md)): `hermes fetchai-bridge install` installs the bridge version that matches the plugin, in an environment of its own, after asking. `hermes fetchai-bridge setup` makes the agent's secret key and keeps it in Hermes' `.env`, offers to keep an Agentverse API key the same way, asks in plain words what to sell (research, the defensive code review, your own programs, each with a price; research, which uses your own model account, at most 20 requests a day unless you choose otherwise) and whether Hermes may buy, checks every answer, and writes the config; running it again changes the answers. It offers free test FET and the Agentverse listing, and turns on the plugin's `buyer_tools` setting if you say so. `hermes-fetch-ai setup --answers <file>` answers from JSON.
+- `start`, `stop`, `restart`, `status`, and `logs` ([`docs/production.md`](docs/production.md#running-in-the-background)): the agent runs in the background with a private log; `status` says in plain words whether it runs, what it sells, earned, and spent, the wallets' balances, and whether the testnet is making blocks.
+- The plugin hands the bridge its version, and the bridge says when the two differ and how to match them.
+- An agent that only buys can be listed on Agentverse, so other agents' replies reach its mailbox.
 
 ### Changed
 
 - The project's scope now includes Fetch.ai's agent economy on testnet: selling services to other agents and ASI:One users, and paying other agents with the owner's approval. The design and its threat model are in `docs/architecture.md` (decision 9) and `docs/security.md`.
 - uAgents 0.25.5 and uagents-core 0.4.9, the versions Fetch tests its examples with. uAgents now resolves testnet addresses without a network prefix.
 - With `publish_manifest: true`, the bridge registers through the Almanac API only and no longer looks up the Almanac contract, so it never spends from its wallet on its own. `agent.ledger_registration: true` restores contract registration.
+- Commands given no `--config` use the one `setup` wrote (`~/.config/hermes-fetch-ai/bridge.yaml`, or `%APPDATA%\HermesFetchAI\bridge.yaml` on Windows); without one they say to run setup. `doctor` checks it when it exists, else the demo config as before.
+- Only one bridge runs per records folder (`payments.state_dir`); a second one refuses to start.
+- The README is written for people who are not technical; the technical detail is in `docs/`, including letting other agents use Hermes' tools ([`docs/hermes-tools.md`](docs/hermes-tools.md)).
 
 ### Tests
 
@@ -33,6 +40,7 @@ All notable changes are documented here. The project follows [semantic versionin
 - `serve` sells a service in its own process against a ledger on 127.0.0.1, which shows the bridge makes no ledger request before a paid call arrives.
 - A field test loads the plugin inside real Hermes and checks the buying guards: YOLO mode is seen however it was turned on, and the payment prompt declines when nobody can answer. Two bridges buy and sell in one process through uAgents' dispatcher.
 - A field test runs the guest Hermes runner against real Hermes (0.21.5 and a pinned `main`) with a stand-in model server on 127.0.0.1: only the web tools are offered, a terminal call is refused, a page on 127.0.0.1 is not fetched, and nothing is left behind.
+- `start`, `status`, `logs`, and `stop` run a real background bridge on Linux, macOS, and Windows. A field test checks, in real Hermes, that the key setup makes lands in Hermes' `.env`, readable only by the owner. Tests never touch the developer's own config or records.
 
 ## 1.0.0 - Unreleased
 

@@ -1,10 +1,14 @@
-#!/usr/bin/env python3
 """A service program: a defensive security review of code by an AI model on this machine.
 
-Sell it with the bridge's ``command`` runner (see examples/paid-services.yaml).
-For each paid request the bridge starts this program, writes the request to
-its stdin as JSON, ``{"request": "<the buyer's code and question>"}``, and
-sends whatever it prints back to the buyer.
+It ships with the bridge, so the setup wizard can offer it as a service. Run it
+with the bridge's own Python, as the ``command`` runner's argv::
+
+    [<the bridge's Python>, "-m", "hermes_fetch_ai.local_review", "--model", "qwen2.5-coder:7b"]
+
+(`hermes-fetch-ai doctor` prints the bridge's Python). For each paid request
+the bridge starts this program, writes the request to its stdin as JSON,
+``{"request": "<the buyer's code and question>"}``, and sends whatever it
+prints back to the buyer.
 
 The code goes to a model server on this machine (Ollama, LM Studio, the
 llama.cpp server, or anything else with an OpenAI-compatible API) and nowhere

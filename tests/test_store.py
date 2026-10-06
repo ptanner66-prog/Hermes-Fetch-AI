@@ -110,6 +110,10 @@ def test_interrupted_runs_are_retryable_after_a_restart(tmp_path):
     store.close()
     reopened = Store.open(path)
     try:
+        # Opening the records (an owner command, while the bridge may run) leaves runs alone;
+        # the bridge recovers them when it starts.
+        assert reopened.credit("ref-1").status == "running"
+        assert reopened.recover() == 1
         assert reopened.credit("ref-1").status == "paid"
         assert reopened.tx_used("A" * 64)
     finally:

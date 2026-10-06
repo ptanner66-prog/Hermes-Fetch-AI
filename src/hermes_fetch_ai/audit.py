@@ -82,5 +82,14 @@ def default_state_dir() -> Path:
     return Path(base) / "hermes-fetch-ai"
 
 
+def managed_config_path() -> Path:
+    """The config `setup` writes; commands use it when they are given no --config."""
+    if os.name == "nt":
+        base = os.environ.get("APPDATA") or str(Path.home() / "AppData" / "Roaming")
+        return Path(base) / "HermesFetchAI" / "bridge.yaml"
+    base = os.environ.get("XDG_CONFIG_HOME") or str(Path.home() / ".config")
+    return Path(base) / "hermes-fetch-ai" / "bridge.yaml"
+
+
 def default_audit_path() -> Path:
     return default_state_dir() / "audit.jsonl"

@@ -292,7 +292,11 @@ class Store:
 
     @classmethod
     def open(cls, path: Path) -> Store:
-        """Open (or create) the store at ``path`` and recover interrupted runs."""
+        """Open (or create) the store at ``path``.
+
+        Owner commands open it while the bridge runs, so this never touches
+        runs in progress; ``serve`` calls ``recover`` when it starts.
+        """
         path.parent.mkdir(parents=True, exist_ok=True)
         if os.name != "nt":
             # The database and its WAL files take their permissions from the
@@ -304,7 +308,6 @@ class Store:
         conn.execute("PRAGMA busy_timeout=5000")
         store = cls(conn, path)
         store._migrate()
-        store.recover()
         return store
 
     def close(self) -> None:
@@ -478,7 +481,12 @@ class Store:
         return credit
 
     def recover(self) -> int:
-        """After a crash, let interrupted runs be retried; returns how many."""
+        """When the bridge starts: runs the last one left unfinished may be retried.
+
+        Only the one bridge running with these records may call this (``serve``
+        does, once it holds the records folder), never an owner command: it
+        would make a run in progress look interrupted.
+        """
         with self._transaction() as conn:
             cursor = conn.execute("UPDATE credits SET status = 'paid' WHERE status = 'running'")
         return cursor.rowcount
@@ -514,6 +522,15 @@ class Store:
             (sender, subject, digest),
         ).fetchone()
         return _credit(row) if row else None
+
+    def earned_since(self, since_ms: int) -> tuple[int, int]:
+        """Paid requests since ``since_ms``, and what they paid (refunds left out)."""
+        row = self._conn.execute(
+            "SELECT COUNT(*), COALESCE(SUM(CAST(amount_base AS INTEGER)), 0) FROM credits"
+            " WHERE paid_ms >= ? AND status != 'refunded'",
+            (since_ms,),
+        ).fetchone()
+        return int(row[0]), int(row[1])
 
     def credits(self, status: str | None = None, limit: int = 100) -> list[Credit]:
         if status is None:

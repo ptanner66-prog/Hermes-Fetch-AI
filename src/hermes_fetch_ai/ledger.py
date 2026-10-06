@@ -193,6 +193,19 @@ class LcdLedgerReader:
             return None
         raise LedgerUnavailable(f"unexpected transaction response (HTTP {status})")
 
+    async def latest_block_ms(self) -> int:
+        """When the newest block was made (Unix ms): a chain that stopped stays behind."""
+        status, body = await self._get("/cosmos/base/tendermint/v1beta1/blocks/latest")
+        try:
+            if status != 200:
+                raise ValueError(f"HTTP {status}")
+            made = _time_ms(body["block"]["header"]["time"])
+            if made is None:
+                raise ValueError("no block time")
+            return made
+        except (KeyError, TypeError, ValueError) as exc:
+            raise LedgerUnavailable(f"unexpected block response ({exc})") from None
+
     async def balance(self, address: str, denom: str) -> int:
         status, body = await self._get(
             f"/cosmos/bank/v1beta1/balances/{address}/by_denom?denom={denom}"

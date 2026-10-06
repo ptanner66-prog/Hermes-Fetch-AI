@@ -282,8 +282,9 @@ def _read_control_file(path: Path) -> dict[str, Any]:
         data = json.loads(path.read_text(encoding="utf-8"))
     except FileNotFoundError:
         raise ControlError(
-            "the bridge is not running with buying enabled; start it with "
-            "`hermes-fetch-ai serve --config <your config>` (buying.enabled: true)"
+            "your agent is not running with buying on: start it with "
+            "`hermes fetchai-bridge start` (say yes to buying in `hermes fetchai-bridge setup` "
+            "first)"
         ) from None
     except (OSError, ValueError) as exc:
         raise ControlError(f"cannot read {path}: {exc}") from None

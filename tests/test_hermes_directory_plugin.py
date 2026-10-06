@@ -27,18 +27,22 @@ STDLIB_IMPORTS = {
     "__future__",
     "argparse",
     "collections",
+    "getpass",
     "inspect",
     "json",
     "os",
     "pathlib",
     "re",
+    "secrets",
     "shutil",
     "subprocess",
     "sys",
+    "tempfile",
     "typing",
 }
-# Hermes' own modules (its approval prompt), imported inside functions only.
-HERMES_MODULES = {"tools"}
+# Hermes' own modules (its approval prompt, and its .env writer for this plugin's
+# own secrets), imported inside functions only.
+HERMES_MODULES = {"tools", "hermes_cli"}
 BUYER_TOOLS = {
     "fetchai_find_agents",
     "fetchai_message_agent",
@@ -104,7 +108,8 @@ def test_manifest_is_catalog_ready():
     project = tomllib.loads(Path("pyproject.toml").read_text(encoding="utf-8"))["project"]
     assert manifest["name"] == PLUGIN_DIR.name == plugin.PLUGIN_NAME
     assert manifest["description"]
-    assert manifest["version"] == project["version"]
+    assert manifest["version"] == project["version"] == plugin.PLUGIN_VERSION
+    assert plugin.BRIDGE_REQUIREMENT.endswith(f"@v{plugin.PLUGIN_VERSION}")
     assert manifest["requires_hermes"].startswith(">=")
     # The bridge's pinned dependencies must never be installed into Hermes' environment.
     assert manifest["python_runtime"] == "external"
@@ -246,7 +251,7 @@ def test_missing_bridge_explains_how_to_install(capsys, tmp_path):
     missing = str(tmp_path / "nowhere" / "hermes-fetch-ai")
     assert plugin.run_bridge(["doctor"], configured=missing) == 1
     err = capsys.readouterr().err
-    assert plugin.INSTALL_HINT in err
+    assert "hermes fetchai-bridge install" in err
     assert "plugins.entries.fetchai-bridge.settings.command" in err
 
 
