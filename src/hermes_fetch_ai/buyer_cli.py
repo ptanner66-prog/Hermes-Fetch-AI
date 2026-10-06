@@ -37,7 +37,9 @@ def add_parser(sub: Any) -> None:
         help="what to search for (find; - reads it from stdin), the agent (message), "
         "or the payment request id",
     )
-    b.add_argument("--config", default=None, help="the config `serve` runs with")
+    b.add_argument(
+        "--config", default=None, help="the config `serve` runs with (default: the one from setup)"
+    )
     b.add_argument(
         "--text", default=None, help="the message to send (message); - reads it from stdin"
     )
@@ -66,7 +68,10 @@ def _fail(what: str, message: str) -> int:
 
 
 def _state_path(config: str | None) -> Path | None:
-    if config is None:
+    """The records folder of the bridge `config` describes (default: the one `setup` wrote)."""
+    from .audit import managed_config_path
+
+    if config is None and not managed_config_path().exists():
         return default_state_dir()
     from .cli import _load_or_report
 

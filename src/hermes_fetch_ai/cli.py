@@ -38,7 +38,19 @@ def default_config_path() -> Path:
     return example_config_path("local-direct.yaml")
 
 
-def _load_or_report(path: str | Path) -> BridgeConfig | None:
+def _load_or_report(path: str | Path | None) -> BridgeConfig | None:
+    """The config at ``path``, or the one `setup` wrote; None (with the reason) if unusable."""
+    if path is None:
+        from .audit import managed_config_path
+
+        path = managed_config_path()
+        if not path.exists():
+            print(
+                "config: FAIL: no config yet; run `hermes fetchai-bridge setup` "
+                "(or pass --config <file>)",
+                file=sys.stderr,
+            )
+            return None
     try:
         return load_config(path)
     except ValidationError as exc:
@@ -50,13 +62,21 @@ def _load_or_report(path: str | Path) -> BridgeConfig | None:
 
 def doctor(args: argparse.Namespace) -> int:
     from . import __version__
+    from .audit import managed_config_path
 
     print(f"hermes-fetch-ai {__version__}")
-    config_path = Path(args.config) if args.config else default_config_path()
+    print(f"python: {sys.executable}")
+    note = ""
+    if args.config:
+        config_path = Path(args.config)
+    elif managed_config_path().exists():
+        config_path, note = managed_config_path(), " (written by setup)"
+    else:
+        config_path = default_config_path()
+        note = " (the demo config; run `hermes fetchai-bridge setup` to make yours)"
     cfg = _load_or_report(config_path)
     if cfg is None:
         return 1
-    note = "" if args.config else " (the demo config; pass --config to check yours)"
     print(f"config: ok: {config_path}{note}")
     pin_problems = check_pins()
     if pin_problems:
@@ -455,6 +475,9 @@ def serve(args: argparse.Namespace) -> int:
     return 0
 
 
+CONFIG_HELP = "the bridge's config file (default: the one `setup` wrote)"
+
+
 def build_parser() -> argparse.ArgumentParser:
     from . import __version__
 
@@ -462,12 +485,14 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--version", action="version", version=f"%(prog)s {__version__}")
     sub = p.add_subparsers(dest="cmd", required=True)
     d = sub.add_parser("doctor", help="check a config file and the installed dependency pins")
-    d.add_argument("--config", default=None, help="config to check (default: the demo config)")
+    d.add_argument(
+        "--config", default=None, help="config to check (default: yours from setup, else the demo)"
+    )
     d.set_defaults(func=doctor)
     ph = sub.add_parser("probe-hermes", help="check that Hermes' tools MCP server can be imported")
     ph.set_defaults(func=probe_hermes)
     s = sub.add_parser("serve", help="run the bridge uAgent until interrupted")
-    s.add_argument("--config", required=True)
+    s.add_argument("--config", default=None, help=CONFIG_HELP)
     s.set_defaults(func=serve)
     dm = sub.add_parser(
         "demo",
@@ -476,7 +501,7 @@ def build_parser() -> argparse.ArgumentParser:
     dm.add_argument("kind", choices=["local", "paid", "chat", "buy", "mailbox"])
     dm.set_defaults(func=demo)
     w = sub.add_parser("wallet", help="show the agent's address and income wallet")
-    w.add_argument("--config", required=True)
+    w.add_argument("--config", default=None, help=CONFIG_HELP)
     w.add_argument("--balance", action="store_true", help="also ask the ledger for the balance")
     w.add_argument(
         "--fund",
@@ -485,7 +510,7 @@ def build_parser() -> argparse.ArgumentParser:
     )
     w.set_defaults(func=wallet)
     lg = sub.add_parser("ledger", help="check that the configured ledger answers as testnet")
-    lg.add_argument("--config", required=True)
+    lg.add_argument("--config", default=None, help=CONFIG_HELP)
     lg.set_defaults(func=ledger)
     sl = sub.add_parser(
         "seller", help="see payments, try a service, pause selling, ban an agent, or back up"
@@ -496,7 +521,7 @@ def build_parser() -> argparse.ArgumentParser:
     sl.add_argument(
         "target", nargs="?", help="the service name (try) or the agent address (ban, unban)"
     )
-    sl.add_argument("--config", required=True)
+    sl.add_argument("--config", default=None, help=CONFIG_HELP)
     sl.add_argument("--status", default=None, help="only payments with this status (credits)")
     sl.add_argument("--reason", default=None, help="why, for ban")
     sl.add_argument("--request", default=None, help="what a buyer would ask, for try")
@@ -506,7 +531,7 @@ def build_parser() -> argparse.ArgumentParser:
     sl.set_defaults(func=seller)
     av = sub.add_parser("agentverse", help="list the bridge on Agentverse for ASI:One users")
     av.add_argument("action", choices=["register"])
-    av.add_argument("--config", required=True)
+    av.add_argument("--config", default=None, help=CONFIG_HELP)
     av.add_argument("--yes", action="store_true", help="do not ask for confirmation")
     av.set_defaults(func=agentverse)
     from .buyer_cli import add_parser as add_buyer_parser

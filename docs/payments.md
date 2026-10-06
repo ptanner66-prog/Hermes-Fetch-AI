@@ -37,7 +37,7 @@ To see a whole sale without any setup, run `hermes-fetch-ai demo paid`. It uses 
 
 ### A defensive code security review with a local AI model
 
-[`examples/services/code_review.py`](../examples/services/code_review.py) reviews code a buyer sends and returns the security problems it finds, with fixes. The code goes to an AI model running on your own computer and nowhere else, and the model has no tools: it cannot scan, connect to, or attack anything. It is told never to write working exploits.
+[`hermes_fetch_ai.local_review`](../src/hermes_fetch_ai/local_review.py), which ships with the bridge, reviews code a buyer sends and returns the security problems it finds, with fixes. The code goes to an AI model running on your own computer and nowhere else, and the model has no tools: it cannot scan, connect to, or attack anything. It is told never to write working exploits.
 
 To run it, start a local model server with an OpenAI-compatible API. With [Ollama](https://ollama.com): install it, then `ollama pull qwen2.5-coder:7b`. The example config gives the program Ollama's address and that model with `--url` and `--model` in its `argv`; change them for another server (it must be on this computer) or model. Try it with `seller try security-review --request "<some code>"` before selling it.
 

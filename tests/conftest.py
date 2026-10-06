@@ -16,6 +16,14 @@ def clear_seed(monkeypatch):
     monkeypatch.delenv("UAGENT_SEED", raising=False)
 
 
+@pytest.fixture(autouse=True)
+def no_owner_config(monkeypatch, tmp_path_factory):
+    """Commands without --config read the config `setup` wrote; never the developer's own."""
+    config_home = tmp_path_factory.mktemp("config-home")
+    monkeypatch.setenv("XDG_CONFIG_HOME", str(config_home))
+    monkeypatch.setenv("APPDATA", str(config_home))  # where it lives on Windows
+
+
 def _is_loopback(address) -> bool:
     if not isinstance(address, tuple):  # a Unix socket path
         return True

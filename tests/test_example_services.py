@@ -25,7 +25,8 @@ from hermes_fetch_ai.config import (
 from hermes_fetch_ai.services import CommandRunner, program_problems
 
 EXAMPLES = Path(__file__).resolve().parents[1] / "examples"
-CODE_REVIEW = EXAMPLES / "services" / "code_review.py"
+# The security review ships with the bridge; services run it with the bridge's Python.
+CODE_REVIEW = [sys.executable, "-m", "hermes_fetch_ai.local_review"]
 WORD_COUNT = EXAMPLES / "services" / "word_count.py"
 FAKE_HERMES = Path(__file__).resolve().parent / "fakes" / "fake_hermes"
 SEED = "example-services-test-" + "identity-material-not-real"
@@ -73,10 +74,11 @@ def model() -> Iterator[FakeModelServer]:
 
 
 def run_program(
-    program: Path, request: str, *args: str, **env: str
+    program: Path | list[str], request: str, *args: str, **env: str
 ) -> subprocess.CompletedProcess[str]:
+    command = program if isinstance(program, list) else [sys.executable, str(program)]
     return subprocess.run(
-        [sys.executable, str(program), *args],
+        [*command, *args],
         input=json.dumps({"request": request}),
         capture_output=True,
         text=True,
@@ -121,9 +123,7 @@ def test_code_review_fails_retryably_when_the_model_server_is_down(unused_tcp_po
 async def test_code_review_through_the_command_runner(model, monkeypatch):
     monkeypatch.setenv("REVIEW_MODEL_URL", model.url)
     runner = CommandRunner(
-        CommandRunnerConfig(
-            type="command", argv=[sys.executable, str(CODE_REVIEW)], pass_env=["REVIEW_MODEL_URL"]
-        )
+        CommandRunnerConfig(type="command", argv=CODE_REVIEW, pass_env=["REVIEW_MODEL_URL"])
     )
     result = await runner.run("import pickle\npickle.loads(data)")
     assert result.ok and result.text.strip() == ANSWER
@@ -147,7 +147,9 @@ def test_paid_services_example_loads_and_flags_its_placeholders(monkeypatch):
     assert research.toolsets == ["web"] and research.python is None
     review = cfg.services["security-review"]
     assert review.input.check_urls is False and review.price == "0.1"
-    assert review.runner.argv[2:] == [
+    assert review.runner.argv[1:] == [
+        "-m",
+        "hermes_fetch_ai.local_review",
         "--url",
         "http://127.0.0.1:11434/v1",
         "--model",
@@ -155,9 +157,7 @@ def test_paid_services_example_loads_and_flags_its_placeholders(monkeypatch):
     ]
     assert review.disclaimer and "not a penetration test" in review.disclaimer
     problems = program_problems(cfg)
-    assert any(
-        "/path/to/Hermes-Fetch-AI/examples/services/code_review.py not found" in p for p in problems
-    )
+    assert "service security-review: program /path/to/bridge/python not found" in problems
     # Outside `hermes fetchai-bridge`, the guest needs to be told where Hermes is.
     assert any(p.startswith("service research: Hermes' Python is unknown") for p in problems)
 
@@ -171,9 +171,7 @@ def test_example_with_real_paths_passes_doctor_and_try(tmp_path, monkeypatch, ca
     monkeypatch.setenv(HERMES_PYTHONPATH_VAR, str(FAKE_HERMES))
     text = (EXAMPLES / "paid-services.yaml").read_text(encoding="utf-8")
     text = text.replace("/usr/bin/python3", json.dumps(sys.executable))
-    text = text.replace(
-        "/path/to/Hermes-Fetch-AI/examples/services/code_review.py", json.dumps(str(CODE_REVIEW))
-    )
+    text = text.replace("/path/to/bridge/python", json.dumps(sys.executable))
     text = text.replace(
         "/path/to/Hermes-Fetch-AI/examples/services/word_count.py", json.dumps(str(WORD_COUNT))
     )
