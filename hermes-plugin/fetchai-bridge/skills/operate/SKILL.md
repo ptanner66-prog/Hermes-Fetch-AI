@@ -14,10 +14,12 @@ metadata:
 
 # Fetch.ai Bridge
 
-The `hermes-fetch-ai` bridge lets agents on Fetch.ai's network (uAgents) list
-and call a small, explicitly allowed set of Hermes tools. It uses only Hermes'
-tools MCP server, run as a separate process, and never exposes conversations,
-messaging, or approvals.
+The `hermes-fetch-ai` bridge puts the user's agent on Fetch.ai's network: it
+sells services the user chose to other agents and ASI:One users for testnet
+FET, lets Hermes buy from other agents (the `buy` skill), and can let other
+agents call a small, explicitly allowed set of Hermes tools. It uses only
+Hermes' tools MCP server, run as a separate process, and never exposes
+conversations, messaging, or approvals.
 
 ## When to Use
 
@@ -30,14 +32,15 @@ messaging, or approvals.
 
 ## Prerequisites
 
-1. The bridge is installed in its own environment (it cannot share Hermes'):
-   `uv tool install --python 3.12 "hermes-fetch-ai @ git+https://github.com/ptanner66-prog/Hermes-Fetch-AI"`.
-   If `hermes fetchai-bridge doctor` says the bridge was not found, tell the
-   user to install it; do not install it into Hermes' environment.
-2. The local demo needs nothing else: no seed, no account, no network.
-3. Serving real Hermes tools needs `UAGENT_SEED` (at least 32 random
-   characters), set by the user in Hermes' `.env` or the plugin's
-   `uagent_seed` setting. Never generate, print, or store it yourself.
+1. The bridge is installed in its own environment (it cannot share Hermes').
+   If a command says it was not found, tell the user to run
+   `hermes fetchai-bridge install` in a terminal; it asks them first. Do not
+   install it yourself, and never into Hermes' environment.
+2. The user sets the agent up with `hermes fetchai-bridge setup` in a
+   terminal: it makes the agent's secret key (`UAGENT_SEED`, kept in Hermes'
+   `.env`) and asks what to sell and whether Hermes may buy. Do not run setup
+   for them, and never generate, print, read, or store the key yourself.
+3. The local demos need nothing else: no key, no account, no network.
 
 ## How to Run
 
@@ -54,14 +57,19 @@ The plugin hands the bridge Hermes' interpreter, which `probe-hermes` and
 
 | Command | Purpose |
 |---|---|
+| `hermes fetchai-bridge status` | Is the agent running; what it sells, earned, and spent (`--offline` skips the ledger) |
+| `hermes fetchai-bridge logs --lines 40` | What the running agent printed |
+| `hermes fetchai-bridge start` / `stop` / `restart` | Run the agent in the background (only when the user asks) |
 | `hermes fetchai-bridge doctor` | Bridge version, config check, dependency pins |
 | `hermes fetchai-bridge probe-hermes` | Can the bridge start Hermes' tools server? |
 | `hermes fetchai-bridge demo local` | Two-uAgent round trip with fake tools |
 | `hermes fetchai-bridge demo paid` | An offline sale with a simulated ledger |
 | `hermes fetchai-bridge demo chat` | An offline chat sale, the way an ASI:One user buys |
-| `hermes fetchai-bridge seller credits --config <yaml>` | Payments received, and which need refunds |
-| `hermes fetchai-bridge seller try <service> --request "..." --config <yaml>` | Run one service once, unpaid |
-| `hermes fetchai-bridge serve --config <yaml>` | Run the bridge (long-running; only when the user asks) |
+| `hermes fetchai-bridge seller credits` | Payments received, and which need refunds |
+| `hermes fetchai-bridge seller try <service> --request "..."` | Run one service once, unpaid |
+| `hermes fetchai-bridge serve --config <yaml>` | Run the bridge in the foreground (long-running; only when the user asks) |
+
+Commands use the config `setup` wrote unless given `--config`.
 
 ## Procedure
 
@@ -82,9 +90,9 @@ The plugin hands the bridge Hermes' interpreter, which `probe-hermes` and
 
 ## Pitfalls
 
-- `serve` runs until stopped and listens on all network interfaces. Do not
-  start it from an agent session unless the user asks; production deployments
-  run it under a supervisor such as systemd, behind a firewall.
+- `start` and `serve` run the agent until it is stopped, listening on all
+  network interfaces. Do not start, stop, or restart it unless the user asks;
+  `status` and `logs` are always fine to run.
 - If `serve` prints `hermes backend: FAIL` or `serve: FAIL`, report the
   message; the first names a command to run by hand to see the error.
 - Remote callers must follow each tool's input schema and attach the bridge's

@@ -21,15 +21,15 @@ Each payment pays for one request. A payment that was already used is refused, a
 
 ## Set up
 
-You need the bridge installed ([README](../README.md)) and a seed in `UAGENT_SEED`. Then:
+`hermes fetchai-bridge setup` asks what to sell and at what price (research, the code review below, your own programs) and writes the config for you; the [README](../README.md) walks through it. Then:
 
-1. **Write the config.** Copy [`examples/paid-services.yaml`](../examples/paid-services.yaml) and change every `/path/to/...` to the real path on your computer (programs must be given as full paths; `which python3` prints Python's). Its `research` service also needs a model key; see [guest-hermes.md](guest-hermes.md).
-2. **Check it.** `hermes-fetch-ai doctor --config paid-services.yaml` checks the file and that every service program exists. It ends with `doctor: ok`.
-3. **Try a service without payment.** `hermes-fetch-ai seller try word-count --request "hello there" --config paid-services.yaml` runs it once on your computer and prints the answer. Errors from the program are shown here, never to buyers.
-4. **See where the money goes.** `hermes-fetch-ai wallet --config paid-services.yaml` shows your agent's address and the wallet that receives payments; add `--balance` to ask the ledger how much it holds.
-5. **Start selling.** `hermes-fetch-ai serve --config paid-services.yaml`. The bridge refuses to start if a service program is missing, so it never takes payments for work it cannot do.
+1. **Try a service without payment.** `hermes fetchai-bridge seller try security-review --request "<some code>"` runs it once on your computer and prints the answer. Errors from the program are shown here, never to buyers.
+2. **See where the money goes.** `hermes fetchai-bridge wallet` shows your agent's address and the wallet that receives payments; add `--balance` to ask the ledger how much it holds.
+3. **Start selling.** `hermes fetchai-bridge start`. The bridge refuses to start if a service program is missing, so it never takes payments for work it cannot do.
 
 Receiving payments costs nothing, so your agent's wallet does not need any FET to sell.
+
+To write the config by hand instead (or without Hermes): copy [`examples/paid-services.yaml`](../examples/paid-services.yaml) and change every `/path/to/...` to the real path on your computer (programs must be given as full paths; `which python3` prints Python's). Its `research` service also needs a model key; see [guest-hermes.md](guest-hermes.md). Check it with `hermes-fetch-ai doctor --config paid-services.yaml`, which checks the file and that every service program exists and ends with `doctor: ok`, then run the commands above with `--config paid-services.yaml` (`seller try word-count --request "hello there"` tries its small example).
 
 To see a whole sale without any setup, run `hermes-fetch-ai demo paid`. It uses a simulated ledger, so it needs no network, seed, or FET.
 
@@ -45,7 +45,7 @@ The example turns off URL checks for this service (`check_urls: false`), because
 
 ### Your own program
 
-Any program can be a service. For each paid request, the bridge:
+Any program can be a service, including one you keep private. `setup` asks for it: the program's full path, a short name buyers type, a title and description they see, a price, a note added to every answer (for example, that a draft is not legal advice), and how long one request may take. For each paid request, the bridge:
 - starts the program given in `runner.argv` (full paths, no shell), in a new empty temporary folder;
 - gives it only a few environment variables (`PATH`, `LANG`, `TZ`, locale settings, and `HOME` and `TMPDIR` pointing at that folder), plus any you name in `pass_env`;
 - writes `{"request": "<what the buyer asked>"}` to its standard input;

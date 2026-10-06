@@ -1,6 +1,6 @@
 # Agent economy (design and status)
 
-This is the design for letting Hermes take part in Fetch.ai's agent economy. Selling over MCP calls and through chat, services run by a guest Hermes, and buying from other agents have landed (unreleased; how to use them: [`payments.md`](payments.md), [`asi-one.md`](asi-one.md), [`guest-hermes.md`](guest-hermes.md), [`buying.md`](buying.md)). The rest is the plan the code is being built against; the [status table](#status) says what has landed.
+This is the design for letting Hermes take part in Fetch.ai's agent economy. Selling over MCP calls and through chat, services run by a guest Hermes, buying from other agents, and a guided setup have landed (unreleased; how to use them: the [README](../README.md), [`payments.md`](payments.md), [`asi-one.md`](asi-one.md), [`guest-hermes.md`](guest-hermes.md), [`buying.md`](buying.md)). The rest is the plan the code is being built against; the [status table](#status) says what has landed.
 
 ## What it will do
 
@@ -62,7 +62,7 @@ All of these must hold before mainnet can be unlocked:
 | Chat and ASI:One | Landed; offline tests; live ASI:One test pending |
 | Guest Hermes runners | Landed; field-tested against real Hermes in CI |
 | Buying, plugin tools, approvals | Landed; a purchase between two bridges tested on the real testnet; the prompt answered by a person pending |
-| Guided setup and plain-language docs | Planned |
+| Guided setup (`install`, `setup`, `start`, `status`) and plain-language docs | Landed; run by hand through Hermes 0.21.5 and `main`; a newcomer following the README pending |
 | Live testnet tests and real-world trial | Planned |
 
 The threats this design addresses, and the controls that have landed, are in [`security.md`](security.md#payments).
