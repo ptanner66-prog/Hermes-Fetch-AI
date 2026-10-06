@@ -40,7 +40,7 @@ HEADER = (
     "# Run setup again to change it; it keeps settings you add by hand.\n"
 )
 DEFAULT_PORT = 8000
-HANDLE_HINT = "3 to 20 lowercase letters, digits, - or _, starting with a letter or digit"
+HANDLE_HINT = "3 to 20 lowercase letters, digits, or -, starting with a letter or digit"
 # Set by the fetchai-bridge plugin: where to tell it what was chosen.
 RESULT_VAR = "HERMES_FETCH_AI_SETUP_RESULT"
 
@@ -82,6 +82,7 @@ RESEARCH_SERVICE: dict[str, Any] = {
     "disclaimer": (
         "Researched by an AI agent from public web pages. Check the sources before you rely on it."
     ),
+    "example": "What causes the large tides in the Bay of Fundy?",
 }
 RESEARCH_INSTRUCTIONS = (
     "Research the client's question with web search, then answer in a few short paragraphs, "
@@ -99,6 +100,7 @@ REVIEW_SERVICE: dict[str, Any] = {
         "Automated review by an AI model. It can miss problems and is not a penetration "
         "test or a security guarantee."
     ),
+    "example": 'def find(name): return db.execute("SELECT * FROM users WHERE name = \'" + name + "\'")',
 }
 
 
@@ -244,7 +246,7 @@ def check_handle(text: str) -> str:
     if not handle:
         return ""
     if not (3 <= len(handle) <= 20 and handle[0].isalnum()) or any(
-        not (c.isalnum() and c.isascii()) and c not in "-_" for c in handle
+        not (c.isalnum() and c.isascii()) and c != "-" for c in handle
     ):
         raise SetupError(f"A handle is {HANDLE_HINT}.")
     return handle
@@ -761,6 +763,11 @@ class Wizard:
                 "for review by a licensed attorney; not legal advice.)",
                 check=check_optional_text(500),
             )
+            example = ask.ask(
+                "own.example",
+                "An example request buyers can try, shown on Agentverse (or leave it empty)",
+                check=check_optional_text(200),
+            )
             seconds = ask.ask(
                 "own.timeout",
                 "Most seconds one request may take",
@@ -776,6 +783,8 @@ class Wizard:
             }
             if disclaimer:
                 service["disclaimer"] = disclaimer
+            if example:
+                service["example"] = example
             services[name] = service
         return services
 

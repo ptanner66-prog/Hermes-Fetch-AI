@@ -65,9 +65,11 @@ class AgentConfig(BaseModel):
     # Accepted only so that a seed in YAML gets a clear error; see validate_cross_fields.
     seed: str | None = None
     endpoint: str | None = None
-    description: str = "Hermes Fetch AI bridge"
+    # Agentverse shows at most 300 characters as the agent's short description.
+    description: str = Field(default="Hermes Fetch AI bridge", max_length=300)
     # The agent's handle on Agentverse; ASI:One users can write @handle to reach it.
-    handle: str | None = Field(default=None, pattern=r"^[a-z0-9][a-z0-9_-]{2,19}$")
+    # Agentverse keeps only lowercase letters, digits, and '-' (it drops '_' and '.').
+    handle: str | None = Field(default=None, pattern=r"^[a-z0-9][a-z0-9-]{2,19}$")
 
 
 class HermesMCPConfig(BaseModel):
@@ -443,6 +445,8 @@ class ServiceConfig(BaseModel):
     runner: RunnerConfig
     # Appended to every answer, e.g. "A first draft for review by a professional."
     disclaimer: str | None = Field(default=None, max_length=500)
+    # A request a buyer could send, shown on Agentverse and offered to ASI:One users.
+    example: str | None = Field(default=None, min_length=1, max_length=200)
     max_runs_per_day: int = Field(default=200, ge=1, le=100_000)
     # Runs at once, and requests that may wait for one; beyond that, callers
     # are told the service is busy before they pay.

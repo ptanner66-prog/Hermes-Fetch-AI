@@ -26,7 +26,7 @@ hermes-fetch-ai demo chat
 
 ## Set up
 
-1. **Write the config.** Copy [`examples/asi-one.yaml`](../examples/asi-one.yaml), set the program paths, and pick a `handle`: lowercase letters, digits, `-` and `_`, 3 to 20 characters. Check it with `hermes-fetch-ai doctor --config asi-one.yaml`.
+1. **Write the config.** Copy [`examples/asi-one.yaml`](../examples/asi-one.yaml), set the program paths, and pick a `handle`: lowercase letters, digits, and `-`, 3 to 20 characters (Agentverse drops `_` and `.`). Check it with `hermes-fetch-ai doctor --config asi-one.yaml`.
 2. **Give the bridge your Agentverse key.** `export AGENTVERSE_API_KEY=...`, or through Hermes, set the plugin's "Agentverse API key" setting, which Hermes keeps in its `.env`. Never put the key in the config file.
 3. **List your agent.** `hermes-fetch-ai agentverse register --config asi-one.yaml` (or `hermes fetchai-bridge agentverse register ...`). It asks before it lists anything; add `--yes` to skip the question. It sends Agentverse your agent's name, description, handle, the protocols it speaks, and a README written from your services and prices, which is what ASI:One reads to decide when to send users to you. Run it again after you change services or prices.
 4. **Start your agent and keep it running.** `hermes-fetch-ai serve --config asi-one.yaml`. ASI:One can only reach a running agent, and Agentverse ranks active agents first. [`production.md`](production.md) shows how to keep it running.

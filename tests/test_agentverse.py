@@ -56,11 +56,23 @@ def test_a_mailbox_agent_registers_the_mailbox_and_its_protocols():
     assert request.endpoint == "https://agentverse.ai/v2/agents/mailbox/submit"
     assert request.type == "mailbox" and request.handle == "hermes-reviews"
     assert request.protocols[0] == CHAT_DIGEST and len(request.protocols) == 3
+    # Never a placeholder: ASI:One would send it, "<your request>" and all.
+    assert request.starter_prompts == ["What services do you offer, and what do they cost?"]
+    assert request.active is True
+
+
+def test_service_examples_become_starter_prompts_and_readme_examples():
+    data = config().model_dump()
+    data["services"]["security-review"]["example"] = "def f(x): return eval(x)"
+    cfg = BridgeConfig.model_validate(data)
+    request = agentverse.registration(cfg)
     assert request.starter_prompts == [
         "What services do you offer, and what do they cost?",
-        "security-review: <your request>",
+        "security-review: def f(x): return eval(x)",
     ]
-    assert request.active is True
+    text = agentverse.readme(cfg)
+    assert "`security-review: def f(x): return eval(x)`" in text  # how to order
+    assert "## Examples\n\n- `security-review: def f(x): return eval(x)`" in text
 
 
 def test_an_endpoint_agent_needs_a_public_endpoint():
@@ -85,10 +97,18 @@ def test_register_passes_the_key_and_the_seed_to_agentverse():
     assert (credentials.agentverse_api_key, credentials.agent_seed_phrase) == (API_KEY, SEED)
 
 
-@pytest.mark.parametrize("handle", ["ab", "Has-Caps", "x" * 21, "-lead", "has space"])
+@pytest.mark.parametrize(
+    "handle", ["ab", "Has-Caps", "x" * 21, "-lead", "has space", "has_underscore", "has.dot"]
+)
 def test_handles_are_short_lowercase_names(handle):
     with pytest.raises(ValueError, match="handle"):
         config(handle=handle)
+
+
+def test_a_description_fits_agentverses_short_description():
+    config(description="x" * 300)
+    with pytest.raises(ValueError, match="description"):
+        config(description="x" * 301)
 
 
 @pytest.fixture

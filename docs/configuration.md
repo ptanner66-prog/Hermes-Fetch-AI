@@ -19,8 +19,8 @@ The examples in [`examples/`](../examples) are complete configs: `local-direct.y
 | `ledger_registration` | `false` | With `publish_manifest`, also register on the Almanac contract on the Fetch ledger, which spends fees from the agent's wallet. Off, the bridge never looks the contract up and never spends on its own. |
 | `enable_agent_inspector` | `false` | uAgents' Agent Inspector. Its `/connect` and `/disconnect` endpoints are unauthenticated; enable it only while connecting a mailbox. |
 | `dev_random_seed` | `false` | Use a new random identity on every start, for demos. With `false`, `UAGENT_SEED` is required. |
-| `description` | `Hermes Fetch AI bridge` | Shown in the published manifest and on Agentverse. |
-| `handle` | none | The agent's handle on Agentverse, which ASI:One users can write as `@handle`: lowercase letters, digits, `-` and `_`, 3 to 20 characters. Used by `agentverse register`. |
+| `description` | `Hermes Fetch AI bridge` | Shown in the published manifest and on Agentverse, at most 300 characters. |
+| `handle` | none | The agent's handle on Agentverse, which ASI:One users can write as `@handle`: lowercase letters, digits, and `-`, 3 to 20 characters (Agentverse drops `_` and `.`). Used by `agentverse register`. |
 | `seed` | | Always rejected: the seed comes only from `UAGENT_SEED`. |
 
 ## `hermes_mcp`
@@ -94,6 +94,7 @@ The services this agent sells, by name: `services: {<name>: {...}}`. Each appear
 | `input.check_urls` | `true` | Reject requests that contain URLs to local or private addresses. Turn it off only for a service that never fetches anything, such as a code review. |
 | `runner` | required | What does the work: `{type: command, ...}` or `{type: hermes, ...}` (below), or `{type: echo}`, which answers with the request (demos and tests). |
 | `disclaimer` | none | Added to the end of every answer, up to 500 characters. |
+| `example` | none | A request a buyer could send, up to 200 characters. `agentverse register` shows it in the listing's README and offers it to ASI:One users as a starter prompt; without one, the listing offers only "What services do you offer?". |
 | `max_runs_per_day` | `200` | Runs per 24 hours across all buyers. |
 | `max_running` | `1` | Requests the service works on at once. |
 | `max_waiting` | `4` | Requests that may wait for a run. Beyond that, buyers are told the service is busy before they pay. |
