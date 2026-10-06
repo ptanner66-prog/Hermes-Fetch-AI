@@ -38,8 +38,8 @@ Under `plugins.entries.fetchai-bridge.settings` (also shown in the Desktop app's
 | Key | Purpose |
 |-----|---------|
 | `command` | Path to `hermes-fetch-ai` if it is not on PATH |
-| `uagent_seed` | Secret, stored as `UAGENT_SEED` in Hermes' `.env`: the bridge's stable identity for `serve` (at least 32 random characters) |
-| `agentverse_api_key` | Secret, stored as `AGENTVERSE_API_KEY` in Hermes' `.env`: used by `agentverse register`, which lists a selling bridge on Agentverse for ASI:One users, and sent with agent searches if set |
+| `uagent_seed` | Secret, stored as `UAGENT_SEED` in Hermes' `.env`: your agent's secret key (at least 32 random characters), its identity and the key to its wallets; setup makes it |
+| `agentverse_api_key` | Secret, stored as `AGENTVERSE_API_KEY` in Hermes' `.env`: used by `agentverse register`, which lists your agent on Agentverse, where ASI:One users and other agents find it, and sent with agent searches if set |
 | `buyer_tools` | Off by default. "Let Hermes buy from other agents": turns on the four buying tools ([buying guide](https://github.com/ptanner66-prog/Hermes-Fetch-AI/blob/main/docs/buying.md)) |
 | `config` | The bridge config `serve` runs with, if it keeps its records outside the default folder |
 
