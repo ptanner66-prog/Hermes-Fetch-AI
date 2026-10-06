@@ -31,8 +31,9 @@ Once the catalog entry is merged, step 2 becomes `hermes plugins install fetchai
 | Surface | Registered | Notes |
 |---------|-----------|-------|
 | CLI command | `hermes fetchai-bridge [ARGS...]` | Runs `hermes-fetch-ai` with the same arguments; with no arguments it shows the bridge's help. The exit status passes through. Ctrl-C reaches the bridge, which gets 30 seconds to shut down before it is killed. Hermes handles a leading `--version` itself; `hermes fetchai-bridge doctor` prints the bridge's version. |
-| Skill | `fetchai-bridge:operate` | Registered with `ctx.register_skill`; the agent loads it with `skill_view("fetchai-bridge:operate")`. Plugin skills are not listed in the system prompt or in `hermes skills list`. Skipped on Hermes releases without plugin skills. |
-| Tools, hooks, middleware | none | The catalog entry's `capabilities` lists are empty. |
+| Skills | `fetchai-bridge:operate`, `fetchai-bridge:buy` | Registered with `ctx.register_skill`; the agent loads them with `skill_view("fetchai-bridge:operate")`. Plugin skills are not listed in the system prompt or in `hermes skills list`. Skipped on Hermes releases without plugin skills. |
+| Tools | `fetchai_find_agents`, `fetchai_message_agent`, `fetchai_read_replies`, `fetchai_pay` (toolset `fetchai`) | Declared in `provides_tools` and always registered; their `check_fn` keeps them unavailable until the `buyer_tools` setting is on. Each refuses while YOLO mode is on (`tools.approval.is_approval_bypass_active`), or when Hermes cannot say. `fetchai_pay` asks the user with `tools.approval_prompt.request_elicitation_consent` and pays only on "accept" ([`buying.md`](buying.md)). Each runs `hermes-fetch-ai buyer ... --json` with the bridge's environment allowlist; a message travels on standard input, never in the command line. |
+| Hooks, middleware | none | The catalog entry's `provides_hooks` and `provides_middleware` are empty. |
 
 ## Settings
 
@@ -42,7 +43,9 @@ Stored under `plugins.entries.fetchai-bridge.settings` and shown in the Desktop 
 |-----|------|---------|
 | `command` | `str` | Path to `hermes-fetch-ai` when it is not on PATH. Empty means search PATH. |
 | `uagent_seed` | `secret` | Stored as `UAGENT_SEED` in `$HERMES_HOME/.env`. Hermes loads that file into its environment, and the plugin passes the value to the bridge; the plugin never prints it. |
-| `agentverse_api_key` | `secret` | Stored as `AGENTVERSE_API_KEY` in `$HERMES_HOME/.env`, and passed to the bridge the same way. Only `agentverse register` uses it ([`asi-one.md`](asi-one.md)). |
+| `agentverse_api_key` | `secret` | Stored as `AGENTVERSE_API_KEY` in `$HERMES_HOME/.env`, and passed to the bridge the same way. Only `agentverse register` uses it ([`asi-one.md`](asi-one.md)), and `buyer find` sends it to Agentverse's search if set (the search works without it). |
+| `buyer_tools` | `bool` | Off by default. On: Hermes may use the four buying tools; every payment still asks the user. |
+| `config` | `str` | The config file `serve` runs with, passed to the `buyer` commands; needed only when it sets `payments.state_dir`. |
 
 ## How the plugin runs the bridge
 
@@ -67,5 +70,5 @@ What the plugin and the bridge do (network listeners, outbound calls, credential
 ## Verification
 
 - `tests/test_hermes_directory_plugin.py`: the manifest is catalog-ready (`python_runtime: external`, no Python dependencies, version matches the package); the plugin imports only the standard library; registration works with and without plugin-skill and settings support; arguments and exit codes pass through; the bridge's environment is allowlisted (provider API keys stay out) and carries the interpreter hand-over; a missing bridge prints install instructions; and the catalog entry draft matches `plugin.yaml`.
-- CI job `hermes-plugin`, against Hermes 0.21.5 (tag `v2026.9.24`) and a pinned `main`: installs Hermes from its checkout; `hermes plugins validate --install-deps` (the catalog admission check, including the install security scan) and `hermes plugins doctor --ci` must pass; enables the plugin and runs `hermes fetchai-bridge doctor` and `demo local`; then runs the stdio field test through the interpreter hand-over.
+- CI job `hermes-plugin`, against Hermes 0.21.5 (tag `v2026.9.24`) and a pinned `main`: installs Hermes from its checkout; `hermes plugins validate --install-deps` (the catalog admission check, including the install security scan) and `hermes plugins doctor --ci` must pass; enables the plugin and runs `hermes fetchai-bridge doctor` and `demo local`; then runs the stdio field test through the interpreter hand-over, the guest Hermes field test, and the buying-guard field test (the plugin loaded inside Hermes: YOLO seen through `HERMES_YOLO_MODE` and `approvals.mode: off`; the payment prompt declines when nobody can answer).
 - By hand on 2026-10-06, against both versions: the security scan's verdict was `safe`, and `hermes fetchai-bridge probe-hermes` reported `importable`. On 2026-10-05, against `main` `bb236287`: installed from a `file://` URL with `--enable`; `UAGENT_SEED` from Hermes' `.env` reached the bridge; `serve` with `command` unset started Hermes' tools server; a remote signed client saw only `skills_list`, which returned real skills; `web_search` was denied by policy; and Ctrl-C shut everything down cleanly.

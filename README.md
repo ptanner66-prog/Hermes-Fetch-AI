@@ -127,6 +127,10 @@ Payments are off unless you turn them on, and mainnet is locked. The guide cover
 
 The same services can be sold in plain language to [ASI:One](https://asi1.ai) users, Fetch.ai's chat assistant: they write `security-review: <code>`, approve ASI:One's payment card, and get the answer. `hermes-fetch-ai demo chat` shows such a sale offline; [`docs/asi-one.md`](docs/asi-one.md) shows how to list your agent on Agentverse with `hermes-fetch-ai agentverse register`.
 
+## Buy from other agents (testnet)
+
+Hermes can find other agents on Fetch.ai, talk to them, and pay them for their services, with you approving every payment. Turn on the plugin's "Let Hermes buy from other agents" setting and `buying.enabled` in the bridge's config, fund the bridge's buying wallet with free test FET (`hermes-fetch-ai wallet --config <file> --fund`), keep `serve` running, and ask Hermes. Each payment shows you the amount, the seller, and where the money goes in Hermes' own confirmation prompt; nothing is paid without your "yes", Hermes does not talk to other agents while YOLO mode is on, and the bridge caps each payment and each day. `hermes-fetch-ai demo buy` shows a purchase offline; the guide is [`docs/buying.md`](docs/buying.md).
+
 ## Status
 
 | Tier | What it proves | State |
@@ -138,6 +142,7 @@ The same services can be sold in plain language to [ASI:One](https://asi1.ai) us
 | Agentverse mailbox | A remote uAgent reaches the bridge through Agentverse | Manual and not yet verified end to end; [`docs/agentverse-mailbox.md`](docs/agentverse-mailbox.md) |
 | Paid services | A bridge process sells a service: price, a payment verified on the ledger, one run, replays refused | CI against a ledger on 127.0.0.1 (`tests/test_serve_paid.py`); by hand on Fetch's testnet, including replayed, copied, underpaid, and wrong-memo payments ([results](docs/payments.md#tested-on-the-real-testnet)) |
 | Chat and ASI:One | A chat buyer orders in plain text, pays without a memo, and gets the answer | CI between two real uAgents in one process (`tests/test_chat_flow.py`, `demo chat`); a live test with a real ASI:One user is pending ([`docs/asi-one.md`](docs/asi-one.md#what-is-tested)) |
+| Buying | Hermes finds, messages, and pays another agent, with the owner approving each payment | CI: two bridges in one process (`demo buy`); the plugin's YOLO check and payment prompt inside real Hermes 0.21.5 and `main`. By hand on Fetch's testnet: a whole purchase between two bridges ([results](docs/buying.md#what-is-tested)). The prompt answered by a person is pending |
 | Guest Hermes | A paid request runs in a separate, throwaway Hermes with only the service's tools | CI against Hermes 0.21.5 and a pinned `main` with a stand-in model server: only the web tools offered, a terminal call refused, a page on 127.0.0.1 not fetched (`tests/test_field_guest_hermes.py`) |
 
 ## Hermes compatibility
@@ -147,12 +152,13 @@ The same services can be sold in plain language to [ASI:One](https://asi1.ai) us
 
 ## Hermes plugin
 
-[`hermes-plugin/fetchai-bridge`](hermes-plugin/fetchai-bridge) is a Hermes directory plugin. It requires Hermes 0.21.5 or later; CI tests 0.21.5 and a pinned `main`. It is stdlib-only, registers no tools or hooks, and never patches Hermes:
+[`hermes-plugin/fetchai-bridge`](hermes-plugin/fetchai-bridge) is a Hermes directory plugin. It requires Hermes 0.21.5 or later; CI tests 0.21.5 and a pinned `main`. It is stdlib-only, registers no hooks, and never patches Hermes or changes its settings:
 
 - `hermes fetchai-bridge <args>` runs the separately installed `hermes-fetch-ai` with the same arguments (`doctor`, `demo local`, `serve --config ...`, `seller credits --config ...`, and the rest).
 - It hands the bridge Hermes' interpreter and import path, so `serve` starts Hermes' tools server the way Hermes does, and it passes the bridge only an allowlisted environment, so Hermes' provider API keys never reach it.
-- It ships an `operate` skill the agent loads with `skill_view("fetchai-bridge:operate")`.
-- Settings: `command` (the path to `hermes-fetch-ai` if it is not on PATH), `uagent_seed` (a secret stored as `UAGENT_SEED` in Hermes' `.env`), and `agentverse_api_key` (a secret stored as `AGENTVERSE_API_KEY`, used only to list a selling bridge on Agentverse).
+- It ships `operate` and `buy` skills the agent loads with `skill_view("fetchai-bridge:operate")`.
+- Four tools let Hermes find, message, and pay other agents, and read their replies. They are off until you turn on `buyer_tools`, refuse while YOLO mode is on, and pay only after you approve each payment in Hermes' confirmation prompt ([`docs/buying.md`](docs/buying.md)).
+- Settings: `command` (the path to `hermes-fetch-ai` if it is not on PATH), `uagent_seed` (a secret stored as `UAGENT_SEED` in Hermes' `.env`), `agentverse_api_key` (a secret stored as `AGENTVERSE_API_KEY`, to list a selling bridge on Agentverse), `buyer_tools` (off by default), and `config` (the bridge config, for the buying tools).
 
 Details and the full list of what it does are in [`docs/hermes-plugin.md`](docs/hermes-plugin.md) and the [plugin README](hermes-plugin/fetchai-bridge/README.md).
 
@@ -195,7 +201,7 @@ Deployment notes, including a systemd unit, are in [`docs/production.md`](docs/p
 - [x] Sell services you define to other agents for FET, with each payment verified on the ledger (testnet; unreleased, [`docs/payments.md`](docs/payments.md)).
 - [ ] Reach Hermes from ASI:One in plain language, with ASI:One's testnet payment card (built and tested offline; live test pending, [`docs/asi-one.md`](docs/asi-one.md)).
 - [x] Sell work done by Hermes itself, such as research, through a guest Hermes that never sees yours (unreleased, [`docs/guest-hermes.md`](docs/guest-hermes.md)).
-- [ ] Let Hermes find and pay other agents, asking you before every payment.
+- [x] Let Hermes find and pay other agents, asking you before every payment (testnet; unreleased, [`docs/buying.md`](docs/buying.md)).
 - [ ] Guided setup (`hermes fetchai-bridge setup`) and plain-language docs.
 
 ## Documentation
@@ -214,6 +220,7 @@ Deployment notes, including a systemd unit, are in [`docs/production.md`](docs/p
 | [`docs/payments.md`](docs/payments.md) | Selling services for testnet FET: setup, prices, your controls, what buyers see |
 | [`docs/asi-one.md`](docs/asi-one.md) | Selling to ASI:One users through chat: listing on Agentverse, order codes, what is tested |
 | [`docs/guest-hermes.md`](docs/guest-hermes.md) | Services run by a guest Hermes, such as research: what a guest can and cannot do, setup, keys |
+| [`docs/buying.md`](docs/buying.md) | Letting Hermes buy from other agents: approvals, limits, the buying wallet, what is tested |
 | [`docs/agent-economy.md`](docs/agent-economy.md) | Design and status of the agent economy: selling, chat with ASI:One, buying |
 
 ## Development

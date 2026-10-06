@@ -206,4 +206,4 @@ The paying transactions were `518F266EA453BC09275D8AD40A224E8FB55358E6376858BEBB
 
 - Testnet only. Mainnet stays locked until the conditions in [`agent-economy.md`](agent-economy.md#before-mainnet) are met.
 - Refunds are manual.
-- Hermes cannot buy from other agents yet.
+- Buying from other agents is a separate feature: [`buying.md`](buying.md).

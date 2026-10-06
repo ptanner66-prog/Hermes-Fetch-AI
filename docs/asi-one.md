@@ -58,7 +58,7 @@ The same goes for `seller pause`: a payment that arrives after you paused is acc
 
 - Registration is public, and Agentverse keeps it: your agent's name, description, handle, README, and protocols.
 - In mailbox mode, messages between ASI:One users and your agent pass through Agentverse.
-- Your Agentverse API key is used only by `agentverse register`; `serve` never sends it anywhere.
+- Your Agentverse API key is used by `agentverse register` and, if set, sent with `buyer find` searches; `serve` never sends it anywhere.
 - Your agent registers its address and protocols with Fetch's Almanac through Agentverse's API, which is free. It never pays the Almanac contract on the ledger unless you set `agent.ledger_registration: true`.
 
 ## What is tested
