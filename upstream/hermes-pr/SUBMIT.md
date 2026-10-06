@@ -11,10 +11,15 @@ owner's account (catalog rule 5).
 
 ## 1. Pick the commit to pin
 
-1. Merge the plugin to `main` here and wait for CI to pass on the merge commit, including
-   both `hermes plugin + field test` jobs.
-2. Get the full SHA: `git fetch origin main && git rev-parse origin/main`.
-3. Optionally tag `v1.0.0` on that commit. The catalog still pins the SHA.
+1. Bump the version past the last release, in `pyproject.toml`, `plugin.yaml`,
+   `PLUGIN_VERSION` in `hermes-plugin/fetchai-bridge/__init__.py`, and the entry's `version`
+   (a test keeps them equal), and set the date in `CHANGELOG.md`.
+2. Merge to `main` here and wait for CI to pass on the merge commit, including both
+   `hermes plugin + field test` jobs. Run the "Live testnet" workflow on it too.
+3. Get the full SHA: `git fetch origin main && git rev-parse origin/main`.
+4. Tag `v<version>` on that commit and push the tag. This is required: `hermes fetchai-bridge
+   install` installs the bridge from that tag. Never move it afterwards. The catalog pins
+   the plugin by SHA.
 
 ## 2. Re-run the catalog checks at that commit
 
@@ -70,10 +75,11 @@ commit range being adopted, so keep plugin changes small and described in `CHANG
 ## What this submission is not
 
 - No Hermes core changes and no self-updating code.
-- No code of its own that moves funds. The bridge's `fetch1...` wallet derives from
-  `UAGENT_SEED`; with Almanac registration enabled (`publish_manifest: true`, off in the
-  example config), uAgents can pay the registration fee from that wallet. The entry, the
-  PR body, and the plugin README disclose this.
+- No mainnet money. Payments run on Fetch's testnet only, and Hermes' buying tools pay only
+  after the user accepts Hermes' confirmation prompt, within the bridge's per-payment,
+  per-seller, and daily limits. Almanac contract registration, which can pay fees from the
+  agent's wallet, is off unless configured. The entry, the PR body, and the plugin README
+  disclose all of this.
 - No conversations/messaging surface; the bridge reaches only the Hermes tools MCP
   server, allowlisted and in a separate process.
 - If a maintainer ever asks for an in-tree optional skill instead, start from the plugin's

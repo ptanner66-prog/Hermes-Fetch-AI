@@ -28,7 +28,7 @@ hermes-fetch-ai demo chat
 
 1. **Write the config.** Copy [`examples/asi-one.yaml`](../examples/asi-one.yaml), set the program paths, and pick a `handle`: lowercase letters, digits, and `-`, 3 to 20 characters (Agentverse drops `_` and `.`). Check it with `hermes-fetch-ai doctor --config asi-one.yaml`.
 2. **Give the bridge your Agentverse key.** `export AGENTVERSE_API_KEY=...`, or through Hermes, set the plugin's "Agentverse API key" setting, which Hermes keeps in its `.env`. Never put the key in the config file.
-3. **List your agent.** `hermes-fetch-ai agentverse register --config asi-one.yaml` (or `hermes fetchai-bridge agentverse register ...`). It asks before it lists anything; add `--yes` to skip the question. It sends Agentverse your agent's name, description, handle, the protocols it speaks, and a README written from your services and prices, which is what ASI:One reads to decide when to send users to you. Run it again after you change services or prices.
+3. **List your agent.** `hermes-fetch-ai agentverse register --config asi-one.yaml` (or `hermes fetchai-bridge agentverse register ...`). It asks before it lists anything; add `--yes` to skip the question. It sends Agentverse your agent's name, description, handle, the protocols it speaks, and a README written from your services and prices, which is what ASI:One reads to decide when to send users to you. Run it again after you change services or prices. Give each service an `example` request: the listing offers it to ASI:One users as a starter prompt. Agentverse's setup guide also suggests a custom avatar and keywords that match how people ask for help; add those on your agent's page at agentverse.ai.
 4. **Start your agent and keep it running.** `hermes-fetch-ai serve --config asi-one.yaml`. ASI:One can only reach a running agent, and Agentverse ranks active agents first. [`production.md`](production.md) shows how to keep it running.
 5. **Say hello.** In ASI:One, write `@your-handle what can you do?`, or use the agent's address (`agent1q...`, printed by `hermes-fetch-ai wallet --config asi-one.yaml`).
 
@@ -48,6 +48,10 @@ When a payment does carry the reference (a label), your agent uses that instead.
 
 A payment takes a few seconds to appear on the ledger. Your agent waits up to about 50 seconds. If the payment is still not there, it tells the buyer so, and the buyer sends `check` a minute later. Nothing is lost while waiting.
 
+## Answers that take a while
+
+ASI:One waits about a minute for an agent's reply (longer for agents with good ratings), and up to four minutes once the agent has started replying. So as soon as a payment is confirmed, your agent says "Payment confirmed. Working on ... now.", and the answer follows. Keep the services ASI:One users buy under about four minutes (a service's `runner.timeout_seconds`).
+
 ## If your agent restarts
 
 Orders waiting for payment are kept in memory. If your agent restarts between the order and the payment, the payment is still accepted, and your agent asks the buyer to send the request again; it then runs without another payment. Payments themselves are always recorded on disk.
@@ -64,7 +68,7 @@ The same goes for `seller pause`: a payment that arrives after you paused is acc
 ## What is tested
 
 - Offline, in CI: the whole conversation above between two real uAgents agents in one process, with the payment request in the shape of Fetch's own ASI:One payment example (`fet_direct` FET funds, the agent's wallet as recipient, `provider_agent_wallet`, and `fet_network: stable-testnet`), payments without a reference, someone else's payment, payments that are slow to appear, a declined payment, a restart, and a busy service.
-- Not yet: a real ASI:One user paying a real listing. That needs your Agentverse and ASI:One logins, and its results will be recorded here. Until then, three things are unconfirmed: whether ASI:One sends the reference back with the payment, how it rounds amounts, and whether its payment card needs anything more.
+- Not yet: a real ASI:One user paying a real listing. That needs your Agentverse and ASI:One logins, and its results will be recorded here. Until then, these are unconfirmed: whether ASI:One sends the reference back with the payment (a reference your agent did not issue is treated as none, and the amount decides), whether its wallet keeps every digit of the order code, whether its payment card needs anything more, and whether listing a mailbox agent with an API key is all Agentverse needs to deliver its messages (Fetch's guides connect a mailbox through the Agent Inspector, which [`agentverse-mailbox.md`](agentverse-mailbox.md) also describes).
 
 ## Problems
 

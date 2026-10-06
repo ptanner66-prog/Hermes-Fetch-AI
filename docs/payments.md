@@ -202,6 +202,10 @@ After the change that keeps paid answers for an hour, a third paid call worked t
 
 The paying transactions were `518F266EA453BC09275D8AD40A224E8FB55358E6376858BEBB4BD7F557FA36C4`, `CB458BF7CC9F1E782E67A1EF0018EC1AFE74DA014BECCF12D4B11EC719B7F320`, and `1A3478D40D70D520441C832DBF0EEE03C8010860F49C84457A2E8AEAB31E2733`; the audit log and logs held only shortened hashes and addresses.
 
+## Dorado's future
+
+Fetch expects to retire Dorado after the move to ASI, in favor of a new testnet, Eridanus (chain `eridanus-1`, denomination `atestasi`). The bridge is fixed to Dorado (`dorado-1`, `atestfet`) on purpose, and `status` warns when Dorado stops making blocks. Moving to another network will take a new release, not a settings change, because ASI:One's payment card names the network too.
+
 ## Limits of this version
 
 - Testnet only. Mainnet stays locked until the conditions in [`agent-economy.md`](agent-economy.md#before-mainnet) are met.

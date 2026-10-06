@@ -1,6 +1,6 @@
 name: fetchai-bridge
 version: 1.0.0
-description: Run the Fetch.ai uAgents bridge for allowlisted Hermes tools
+description: Sell work to other AI agents and buy from them on Fetch.ai's testnet, approving every payment
 author: Porter Tanner (ptanner66-prog)
 manifest_version: 2
 api_version: 1

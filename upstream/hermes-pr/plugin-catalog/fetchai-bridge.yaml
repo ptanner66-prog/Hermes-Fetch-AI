@@ -10,6 +10,10 @@ requires_hermes: ">=0.21.5"
 docs_url: https://github.com/ptanner66-prog/Hermes-Fetch-AI/blob/main/docs/hermes-plugin.md
 version: "1.0.0"
 platforms: []
+known_issues:
+  - "On Hermes 0.21.5 the payment prompt works in the TUI and messaging apps; in the classic CLI it may decline without being shown. Nothing is paid without an accept."
+  - "The buying tools refuse under plugins.isolation: host, where they cannot see a session's /yolo or show the payment prompt; they need plugins.isolation: in_process."
+  - "Hermes' terminal can run the bridge's buyer pay without the prompt, within the bridge's limits; approvals.deny: ['*buyer pay*'] blocks it, even in YOLO mode."
 capabilities:
   provides_tools: [fetchai_find_agents, fetchai_message_agent, fetchai_read_replies, fetchai_pay]
   provides_hooks: []

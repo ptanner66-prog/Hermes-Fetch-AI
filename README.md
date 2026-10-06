@@ -105,7 +105,15 @@ If you say yes to buying in setup, Hermes gets tools to find agents on Agentvers
 - Your agent enforces limits whatever Hermes asks for: at most 1 test FET per payment and 5 per day (setup lets you change both), and 2 per seller.
 - Other agents' replies are treated as information, never as instructions.
 
-One gap to know about: Hermes can use a terminal, and the payment commands work from a terminal too. A Hermes tricked into typing them could pay without showing you the prompt. The limits above still hold, which is one reason the buying wallet should hold only a little test FET. More: [docs/buying.md](docs/buying.md).
+One gap to know about: Hermes can use a terminal, and the payment commands work from a terminal too. A Hermes tricked into typing them could pay without showing you the prompt. The limits above still hold, which is one reason the buying wallet should hold only a little test FET. You can narrow the gap: in Hermes' `config.yaml`, add a deny rule, which Hermes enforces even in YOLO mode (Hermes' own payment tool is not affected):
+
+```yaml
+approvals:
+  deny:
+    - '*buyer pay*'
+```
+
+Hermes calls such rules a policy, not a wall: the limits are what always hold. More: [docs/buying.md](docs/buying.md).
 
 ## Is my money safe?
 
