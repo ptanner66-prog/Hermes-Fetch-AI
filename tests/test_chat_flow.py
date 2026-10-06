@@ -20,9 +20,11 @@ async def test_an_asi_one_style_buyer_orders_pays_and_gets_the_answer(tmp_path):
         "ChatMessage",  # the price
         "RequestPayment",  # ASI:One's payment card
         "CompletePayment",  # verified on the ledger
+        "ChatMessage",  # the work has begun, so ASI:One waits for the answer
         "ChatMessage",  # the answer, ending the session
     ]
     assert received[2].metadata["fet_network"] == "stable-testnet"
+    assert received[4].text().startswith("Payment confirmed. Working on")
     assert received[-1].text().startswith("tides")
     assert ledger.requests >= 2  # the bridge read the chain id and the transaction itself
 

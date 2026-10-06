@@ -1,6 +1,6 @@
 name: fetchai-bridge
 version: 1.0.0
-description: Run the Fetch.ai uAgents bridge for allowlisted Hermes tools
+description: Sell work to other AI agents and buy from them on Fetch.ai's testnet, approving every payment
 author: Porter Tanner (ptanner66-prog)
 manifest_version: 2
 api_version: 1
@@ -18,7 +18,7 @@ config_schema:
     type: bool
     default: false
     label: Let Hermes buy from other agents
-    description: Gives Hermes tools to find other agents on Fetch.ai, message them, and pay them in testnet FET from the bridge's buying wallet. Every payment asks you first, and the tools refuse while YOLO mode is on. Needs a running bridge with buying.enabled.
+    description: Gives Hermes tools to find other agents on Fetch.ai, message them, and pay them in test FET from your agent's buying wallet. Every payment asks you first, and the tools refuse while YOLO mode is on. Needs your agent running with buying on - say yes to buying in `hermes fetchai-bridge setup`, then run `hermes fetchai-bridge start`.
   config:
     type: str
     default: ""
@@ -33,9 +33,9 @@ config_schema:
     type: secret
     env: UAGENT_SEED
     label: uAgent seed
-    description: Stable bridge identity for `serve` (at least 32 random characters). Kept in Hermes' .env and passed to the bridge through the environment.
+    description: Your agent's secret key (at least 32 random characters), which `hermes fetchai-bridge setup` makes for you. It is the agent's identity and unlocks its wallets - keep a copy somewhere safe and never share it. Kept in Hermes' .env and passed to the bridge through the environment.
   agentverse_api_key:
     type: secret
     env: AGENTVERSE_API_KEY
     label: Agentverse API key
-    description: Only for `agentverse register`, which lists a selling bridge on Agentverse so ASI:One users can find it. Kept in Hermes' .env and passed to the bridge through the environment.
+    description: For `agentverse register`, which lists your agent on Agentverse, where ASI:One users and other agents find it; also sent with agent searches. Kept in Hermes' .env and passed to the bridge through the environment.

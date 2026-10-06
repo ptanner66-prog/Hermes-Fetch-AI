@@ -18,11 +18,13 @@ async def test_hermes_asks_pays_and_gets_the_answer(tmp_path):
         "text",  # the price, with this order's code
         "payment_request",  # nothing paid until the owner approves
         "payment_complete",  # the seller verified the payment on the ledger
+        "text",  # the work has begun
         "text",  # the answer
         "end",
     ]
     assert len({e.session for e in replies}) == 1  # one conversation, one session
-    assert replies[3].body.startswith("tides")
+    assert replies[3].body.startswith("Payment confirmed. Working on")
+    assert replies[4].body.startswith("tides")
     assert purchase.status == "completed" and purchase.tx_hash
     tx = await ledger.get_tx(purchase.tx_hash)
     # Paid from the buying wallet with the seller's reference as the memo.

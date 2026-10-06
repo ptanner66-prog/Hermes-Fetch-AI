@@ -74,7 +74,7 @@ def readme(cfg: BridgeConfig) -> str:
                 "",
             ]
         )
-    example = next(iter(services), "service")
+    examples = [f"{name}: {svc.example}" for name, svc in services.items() if svc.example]
     lines = [
         f"# {cfg.agent.name}",
         "",
@@ -95,7 +95,7 @@ def readme(cfg: BridgeConfig) -> str:
         "",
         "Send a message that starts with the service name, then your request:",
         "",
-        f"`{example}: <your request>`",
+        f"`{examples[0] if examples else next(iter(services)) + ': <your request>'}`",
         "",
         (
             "Any other message gets the list of services and prices. Before anything runs "
@@ -103,6 +103,7 @@ def readme(cfg: BridgeConfig) -> str:
             "are the order's code."
         ),
         "",
+        *(["## Examples", "", *[f"- `{text}`" for text in examples], ""] if examples else []),
         "## Payments",
         "",
         (
@@ -133,7 +134,10 @@ def registration(cfg: BridgeConfig) -> AgentverseRegistrationRequest:
             "Agentverse needs to reach the agent: set agent.mode: mailbox, or set "
             "agent.endpoint to a public https:// address"
         )
-    first = next(iter(cfg.services), None) if sells_through_chat(cfg) else None
+    selling = sells_through_chat(cfg) and bool(cfg.services)
+    examples = [
+        f"{name}: {svc.example}" for name, svc in cfg.services.items() if selling and svc.example
+    ]
     return AgentverseRegistrationRequest(
         name=cfg.agent.name,
         endpoint=endpoint,
@@ -143,8 +147,8 @@ def registration(cfg: BridgeConfig) -> AgentverseRegistrationRequest:
         readme=readme(cfg),
         handle=cfg.agent.handle,
         starter_prompts=(
-            ["What services do you offer, and what do they cost?", f"{first}: <your request>"]
-            if first
+            ["What services do you offer, and what do they cost?", *examples[:3]]
+            if selling
             else None  # it sells nothing, so there is nothing to ask it for
         ),
         active=True,

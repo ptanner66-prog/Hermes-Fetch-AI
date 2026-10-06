@@ -16,7 +16,7 @@ version: 1
 agent:
   name: hermes_reviews
   description: Defensive code security reviews by a local AI model, for testnet FET.
-  handle: hermes-reviews  # lowercase, 3-20 characters; pick your own
+  handle: hermes-reviews  # lowercase letters, digits and -, 3-20 characters; pick your own
   mode: mailbox  # Agentverse relays messages, so no public address is needed
   publish_manifest: true  # registers through the Almanac API; never spends from the wallet
   enable_agent_inspector: false
@@ -34,6 +34,9 @@ services:
       An AI model on the seller's machine reads only the code you send;
       nothing is scanned, contacted, or attacked.
     price: "0.1"
+    # A request a buyer could send: shown on Agentverse, offered to ASI:One users.
+    example: >-
+      def find(name): return db.execute("SELECT * FROM users WHERE name = '" + name + "'")
     input:
       max_chars: 20000
       check_urls: false  # URLs inside code are text to review; nothing fetches them

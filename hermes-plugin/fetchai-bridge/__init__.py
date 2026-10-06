@@ -516,8 +516,25 @@ def buyer_tools_enabled(ctx: Any) -> bool:
     return bool(value)
 
 
+# Hermes' plugin host (`plugins.isolation: host`) runs tools in a process of their own.
+PLUGIN_HOST_MODULE = "hermes_cli.plugin_host_child"
+
+
+def in_plugin_host() -> bool:
+    """True when Hermes runs this plugin in its plugin host process.
+
+    There a tool runs away from the conversation: it cannot see a session's
+    /yolo, and nobody can be asked to approve a payment, so the buying tools
+    refuse, as they do whenever Hermes cannot say whether YOLO mode is on.
+    """
+    spec = getattr(sys.modules.get("__main__"), "__spec__", None)
+    return getattr(spec, "name", None) == PLUGIN_HOST_MODULE or PLUGIN_HOST_MODULE in sys.modules
+
+
 def yolo_active() -> bool | None:
     """Whether Hermes skips its approvals right now (YOLO); None if it cannot tell."""
+    if in_plugin_host():
+        return None
     try:
         from tools.approval import is_approval_bypass_active
     except ImportError:
@@ -607,6 +624,12 @@ def _guarded(ctx: Any, work: Callable[[dict[str, Any]], str]) -> Callable[..., s
     def handler(args: dict[str, Any], **_: Any) -> str:
         if not buyer_tools_enabled(ctx):
             return _refusal("buying from other agents is turned off in the fetchai-bridge settings")
+        if in_plugin_host():
+            return _refusal(
+                "the tools for working with other agents need Hermes to run this plugin in its "
+                "own process (plugins.isolation: in_process): in the plugin host they cannot see "
+                "YOLO mode or ask you to approve a payment"
+            )
         yolo = yolo_active()
         if yolo is None:
             return _refusal(
@@ -621,6 +644,8 @@ def _guarded(ctx: Any, work: Callable[[dict[str, Any]], str]) -> Callable[..., s
             return _refusal(str(exc))
         except (TypeError, ValueError, OverflowError) as exc:
             return _refusal(f"bad arguments: {exc}")
+        except Exception as exc:  # noqa: BLE001 - Hermes tools return errors, never raise
+            return _refusal(f"the bridge's answer could not be read ({type(exc).__name__})")
 
     return handler
 
@@ -772,16 +797,23 @@ def pay(ctx: Any, args: dict[str, Any]) -> str:
     if wait is not None:
         argv += ["--wait", str(wait)]
     timeout = _SEND_SECONDS + (wait if wait is not None else _BRIDGE_WAIT_SECONDS)
+    # Once the user approved, any failure may come after the payment was sent: refusals
+    # (limits, an approval that no longer matches) send nothing, but a bridge that stopped,
+    # timed out, or answered in a way this cannot read may have paid. Never say it did not.
     try:
         paid = run_bridge_json(argv, ctx, timeout=timeout + _COMMAND_SECONDS)
-    except RuntimeError as exc:
-        # Refusals (limits, an approval that no longer matches) send nothing, but
-        # a bridge that stopped or timed out may have paid: never say it did not.
+        return _paid(purchase_id, paid)
+    except Exception as exc:  # noqa: BLE001 - every failure gets the same, safe answer
+        problem = str(exc) if isinstance(exc, RuntimeError) else type(exc).__name__
         return _refusal(
-            f"{exc}. The payment may or may not have been made; before anything else, "
+            f"{problem}. The payment may or may not have been made; before anything else, "
             f"see its state with `hermes fetchai-bridge buyer check {purchase_id}`. "
             "A payment request is never paid twice."
         )
+
+
+def _paid(purchase_id: str, paid: Any) -> str:
+    """What Hermes is told after `buyer pay` answered."""
     status = paid.get("status")
     summaries = {
         "completed": "paid, and the seller confirmed it",

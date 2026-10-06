@@ -112,6 +112,7 @@ def test_a_first_setup_that_sells_and_buys(tmp_path, monkeypatch, state):
         "own.description": "A first draft of a motion from your facts.",
         "own.price": "0.5",
         "own.disclaimer": "A first draft for review by a licensed attorney; not legal advice.",
+        "own.example": "Draft a motion to extend the deadline by 30 days.",
         "buy": True,
         "buy.max_payment": "0.5",
         "buy.max_per_day": "3",
@@ -143,6 +144,9 @@ def test_a_first_setup_that_sells_and_buys(tmp_path, monkeypatch, state):
     legal = cfg.services["legal-draft"]
     assert legal.runner.argv == [str(tool)] and legal.price == "0.5"
     assert legal.disclaimer and "licensed attorney" in legal.disclaimer
+    # Examples become Agentverse starter prompts, so ASI:One users can try a service.
+    assert legal.example == "Draft a motion to extend the deadline by 30 days."
+    assert research.example and cfg.services["security-review"].example
     assert cfg.buying.enabled
     assert (cfg.buying.max_payment, cfg.buying.max_per_day) == ("0.5", "3")
     assert cfg.buying.max_per_seller_per_day == "2"
@@ -284,8 +288,9 @@ def test_checks():
     assert agent_name("  Hermes Research Desk! ") == "hermes_research_desk"
     with pytest.raises(SetupError):
         agent_name("!!!")
-    assert check_handle("@Hermes_Desk") == "hermes_desk" and check_handle("") == ""
-    for bad in ("ab", "-abc", "a" * 21, "héllo"):
+    assert check_handle("@Hermes-Desk") == "hermes-desk" and check_handle("") == ""
+    # Agentverse drops '_' and '.', so @hermes_desk would not reach the agent.
+    for bad in ("ab", "-abc", "a" * 21, "héllo", "hermes_desk", "hermes.desk"):
         with pytest.raises(SetupError):
             check_handle(bad)
     assert check_price("0.050") == "0.05"

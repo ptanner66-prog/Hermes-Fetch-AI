@@ -145,6 +145,8 @@ def guest_settings(runner: HermesRunnerConfig) -> dict[str, Any]:
             "allow_private_urls": False,
             "redact_secrets": True,
             "allow_lazy_installs": False,
+            # Tirith scans terminal commands, and a guest has no terminal; left on, Hermes
+            # would look for its binary and may download it.
             "tirith_enabled": False,
         },
         "approvals": {"single_query_mode": "deny", "unattended_mode": "deny", "cron_mode": "deny"},

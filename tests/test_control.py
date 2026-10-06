@@ -160,9 +160,11 @@ def test_buying_from_the_command_line(running, capsys):
     assert running.cli(*pay, "--recipient", shown["recipient"], "--wait", "5", "--json") == 0
     paid = json.loads(capsys.readouterr().out)
     assert paid["status"] == "completed"
-    # Paying waits for the seller's answer, not just its confirmation of the payment.
-    assert [r["kind"] for r in paid["replies"]] == ["payment_complete", "text", "end"]
-    assert paid["replies"][1]["body"] == "tides"  # the echo service's answer
+    # Paying waits for the seller's answer, not just its confirmation of the payment, nor
+    # its note that the work has begun: until it ends the conversation.
+    assert [r["kind"] for r in paid["replies"]] == ["payment_complete", "text", "text", "end"]
+    assert paid["replies"][1]["body"].startswith("Payment confirmed. Working on")
+    assert paid["replies"][2]["body"] == "tides"  # the echo service's answer
     assert paid["last_id"] == paid["replies"][-1]["id"]
     assert running.cli("purchases") == 0
     assert f"{purchase_id}  completed" in capsys.readouterr().out
@@ -227,7 +229,7 @@ def test_paying_waits_for_an_answer_that_comes_after_the_confirmation(running, c
     _, shown = quote(running, capsys)
     assert running.cli(*pay_args(shown), "--wait", "20", "--json") == 0
     paid = json.loads(capsys.readouterr().out)
-    assert [r["kind"] for r in paid["replies"]] == ["payment_complete", "text", "end"]
+    assert [r["kind"] for r in paid["replies"]] == ["payment_complete", "text", "text", "end"]
 
 
 def test_a_payment_the_seller_was_not_told_about_returns_at_once(running, capsys, monkeypatch):

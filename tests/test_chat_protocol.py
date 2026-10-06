@@ -147,7 +147,7 @@ class Shop:
             funds=request.accepted_funds[0],
             recipient=request.recipient,
             transaction_id=tx_hash,
-            reference=request.reference if reference else None,
+            reference=request.reference if reference is True else (reference or None),
             metadata={"buyer_fet_wallet": "fetch1buyerwallet"},
         )
         await self.chat.on_commit(ctx, sender, msg)
@@ -159,6 +159,12 @@ def shop(tmp_path):
     s = Shop(tmp_path)
     yield s
     s.close()
+
+
+def confirmed(shop, message, service="research"):
+    """Whether ``message`` says the payment was confirmed and the work has begun."""
+    title = shop.desk.cfg.services[service].title
+    return text_of(message) == f"Payment confirmed. Working on **{title}** now."
 
 
 async def order(shop, text="research: tides", ctx=None, sender=BUYER):
@@ -200,13 +206,17 @@ async def test_a_paid_order_asks_for_payment_in_the_shape_asi_one_shows(shop):
     assert request.metadata["provider_agent_wallet"] == PAYOUT
     assert request.metadata["fet_network"] == "stable-testnet"
     assert request.metadata["mainnet"] == "false"
+    assert request.metadata["content"] == "Please complete the payment to start Research a topic."
 
 
 async def test_a_paid_order_runs_once_the_payment_is_on_the_ledger(shop):
     request = await order(shop)
     tx_hash = shop.pay(request)  # no memo, as ASI:One's wallet pays
-    (complete, answer) = await shop.commit(request, tx_hash)
+    (complete, working, answer) = await shop.commit(request, tx_hash)
     assert complete == (BUYER, CompletePayment(transaction_id=tx_hash))
+    # Said at once, since ASI:One waits longer once an agent starts replying.
+    assert working[0] == BUYER and confirmed(shop, working[1])
+    assert not ends_session(working[1])
     assert answer[0] == BUYER
     assert text_of(answer[1]) == "tides\n\n— Check the sources yourself."
     assert ends_session(answer[1])
@@ -222,10 +232,22 @@ async def test_a_commit_without_the_reference_finds_the_order_by_its_amount(shop
     first = await order(shop, "research: one", ctx=ctx)
     second = await order(shop, "research: two", ctx=ctx)
     tx_hash = shop.pay(first)  # pays the older order; the code in the amount says so
-    (complete, answer) = await shop.commit(first, tx_hash, ctx=ctx, reference=False)
+    (complete, working, answer) = await shop.commit(first, tx_hash, ctx=ctx, reference=False)
+    assert confirmed(shop, working[1])
     assert complete[1] == CompletePayment(transaction_id=tx_hash)
     assert text_of(answer[1]).startswith("one")
     assert [o.reference for o in shop.chat.orders.of(BUYER)] == [second.reference]
+
+
+async def test_a_commit_with_a_reference_the_wallet_made_up_is_matched_by_amount(shop):
+    # Fetch's own examples pass their session as the reference; a wallet may send back
+    # one of its own. Only a reference this bridge issued is looked up as one.
+    request = await order(shop)
+    tx_hash = shop.pay(request)
+    (complete, working, answer) = await shop.commit(request, tx_hash, reference="asi1-session-7f3a")
+    assert confirmed(shop, working[1])
+    assert complete == (BUYER, CompletePayment(transaction_id=tx_hash))
+    assert text_of(answer[1]).startswith("tides")
 
 
 async def test_someone_elses_payment_cannot_pay_for_your_order(shop):
@@ -250,7 +272,8 @@ async def test_someone_elses_payment_cannot_pay_for_your_order(shop):
     )
     assert isinstance(stolen[0][1], CancelPayment)
     # The victim's own commit still works.
-    (complete, answer) = await shop.commit(victim, victim_tx)
+    (complete, working, answer) = await shop.commit(victim, victim_tx)
+    assert confirmed(shop, working[1])
     assert complete[1] == CompletePayment(transaction_id=victim_tx)
     assert text_of(answer[1]).startswith("mine")
 
@@ -279,7 +302,8 @@ async def test_a_payment_not_on_the_ledger_yet_is_checked_again(shop, monkeypatc
     paid = await shop.ledger.get_tx(shop.pay(request))
     shop.ledger.add(dataclasses.replace(paid, hash=missing))
     replies = await shop.say("check")
-    (complete, answer) = replies
+    (complete, working, answer) = replies
+    assert confirmed(shop, working[1])
     assert complete[1] == CompletePayment(transaction_id=missing)
     assert text_of(answer[1]).startswith("tides")
 
@@ -379,7 +403,8 @@ async def test_a_failed_run_keeps_the_payment_for_a_resend(tmp_path):
     shop = Shop(tmp_path, runners={"research": Flaky()})
     try:
         request = await order(shop)
-        (_, failed) = await shop.commit(request, shop.pay(request))
+        (_, working, failed) = await shop.commit(request, shop.pay(request))
+        assert confirmed(shop, working[1])
         assert text_of(failed[1]) == (
             "The model server is down; your payment is kept, so send the same request "
             "again to retry."

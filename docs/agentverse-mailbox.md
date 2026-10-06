@@ -20,11 +20,12 @@ endpoint.
    python -c "import secrets; print(secrets.token_hex(32))"
    ```
 
-3. Optionally, testnet funds for the agent's `fetch1...` wallet, which is derived from the
-   seed. With `publish_manifest: true`, uAgents registers through the Almanac API and also
-   on the Almanac contract, paying the contract's registration fee from that wallet. Without
-   enough funds it logs a warning and skips the on-chain registration. Never fund it from a
-   wallet that holds real money, and stay on `network: testnet` while you try this.
+3. Nothing to fund. With `publish_manifest: true` the bridge registers through the Almanac
+   API only, which costs nothing. Only with `agent.ledger_registration: true` as well does
+   uAgents also register on the Almanac contract, paying its fee from the agent's
+   `fetch1...` wallet (derived from the seed); without enough funds it logs a warning and
+   skips that step. Never fund it from a wallet that holds real money, and stay on
+   `network: testnet` while you try this.
 
 ## Steps
 

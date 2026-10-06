@@ -200,4 +200,6 @@ def test_asi_one_example_sells_through_chat_on_agentverse(monkeypatch):
     assert cfg.agent.publish_manifest and not cfg.agent.ledger_registration
     request = registration(cfg)
     assert (request.type, request.handle) == ("mailbox", "hermes-reviews")
-    assert "`security-review: <your request>`" in (request.readme or "")
+    # The example request is what the README shows and ASI:One offers as a starter prompt.
+    assert "`security-review: def find(name):" in (request.readme or "")
+    assert request.starter_prompts and request.starter_prompts[1].startswith("security-review: ")

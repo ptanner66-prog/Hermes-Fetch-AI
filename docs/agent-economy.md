@@ -64,6 +64,7 @@ All of these must hold before mainnet can be unlocked:
 | Buying, plugin tools, approvals | Landed; a purchase between two bridges tested on the real testnet; the prompt answered by a person pending |
 | Guided setup (`install`, `setup`, `start`, `status`) and plain-language docs | Landed; run by hand through Hermes 0.21.5 and `main`; a newcomer following the README pending |
 | Live testnet tests and canaries | Landed: opt-in tests and a manual workflow; all passed on the real testnet on 2026-10-06 |
+| Checked against Hermes' and Fetch.ai's documentation | Done on 2026-10-06; what it found and fixed, and what is left for the trial, is in [`validation.md`](validation.md) |
 | Real-world trial (ASI:One, the Agentverse mailbox, the prompt answered by a person) | Planned, with the owner |
 
 The threats this design addresses, and the controls that have landed, are in [`security.md`](security.md#payments).

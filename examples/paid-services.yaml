@@ -34,6 +34,8 @@ services:
       searches the public web for you; it cannot reach the seller's computer,
       files, or accounts.
     price: "0.05"
+    # A request a buyer could send: shown on Agentverse, offered to ASI:One users.
+    example: What causes the large tides in the Bay of Fundy?
     runner:
       # A guest Hermes: a separate Hermes run for each request, in a throwaway
       # home folder, with only the web search tools. Guide: docs/guest-hermes.md.
@@ -63,6 +65,9 @@ services:
       An AI model on the seller's machine reads only the code you send;
       nothing is scanned, contacted, or attacked.
     price: "0.1"
+    # A request a buyer could send: shown on Agentverse, offered to ASI:One users.
+    example: >-
+      def find(name): return db.execute("SELECT * FROM users WHERE name = '" + name + "'")
     input:
       max_chars: 20000
       check_urls: false  # URLs inside code are text to review; nothing fetches them
@@ -85,6 +90,7 @@ services:
     title: Word count
     description: Counts the words in your text. A template to replace with your own program.
     price: "0.01"
+    example: The quick brown fox jumps over the lazy dog.
     runner:
       type: command
       argv: [/usr/bin/python3, /path/to/Hermes-Fetch-AI/examples/services/word_count.py]
