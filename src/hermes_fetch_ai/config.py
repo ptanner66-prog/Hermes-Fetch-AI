@@ -261,6 +261,10 @@ class ServiceConfig(BaseModel):
     # Appended to every answer, e.g. "A first draft for review by a professional."
     disclaimer: str | None = Field(default=None, max_length=500)
     max_runs_per_day: int = Field(default=200, ge=1, le=100_000)
+    # Runs at once, and requests that may wait for one; beyond that, callers
+    # are told the service is busy before they pay.
+    max_running: int = Field(default=1, ge=1, le=32)
+    max_waiting: int = Field(default=4, ge=0, le=1000)
 
     @field_validator("price")
     @classmethod

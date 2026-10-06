@@ -221,7 +221,9 @@ class Seller:
         existing = self.store.credit(proof.reference)
         if existing is not None and existing.tx_hash == tx_hash:
             if existing.status != "paid":
-                raise PaymentRefused(credit_problem(existing.status), status="used")
+                # "done": the request ran; its buyer may ask for the answer again.
+                status = "done" if existing.status == "done" else "used"
+                raise PaymentRefused(credit_problem(existing.status), status=status)
             return existing
         if self.store.tx_used(tx_hash):
             raise PaymentRefused("payment already used", status="used")

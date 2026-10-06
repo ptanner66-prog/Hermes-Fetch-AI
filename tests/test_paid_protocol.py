@@ -131,10 +131,13 @@ async def test_payment_required_does_not_use_up_the_request_id(bridge):
     )
     paid = await bridge.call(paid_args)
     assert (paid.result, paid.error) == ("topic", None)
-    # The exact paid message cannot run twice: the payment is used up (checked
-    # before the replay cache, so the buyer gets the more specific reason).
+    # A copy of the exact paid message is refused; the buyer's own new message
+    # with the same payment gets the same answer, and the service does not run again.
     replayed = await bridge.call(paid_args)
-    assert "already used" in replayed.error
+    assert replayed.error == "replay detected"
+    proof = {"reference": terms["reference"], "tx_hash": tx_hash}
+    again = await bridge.call(replay_args({"request": "topic"}, payment=proof))
+    assert (again.result, again.error) == ("topic", None)
 
 
 async def test_paid_call_runs_once_even_across_restarts(bridge):
@@ -142,9 +145,9 @@ async def test_paid_call_runs_once_even_across_restarts(bridge):
     proof = {"reference": terms["reference"], "tx_hash": bridge.pay(terms)}
     assert (await bridge.call(replay_args({"request": "topic"}, payment=proof))).result == "topic"
     bridge.close()
-    bridge.restart()  # fresh replay cache, same payment records
+    bridge.restart()  # fresh replay cache and no kept answers; same payment records
     again = await bridge.call(replay_args({"request": "topic"}, payment=proof))
-    assert "already used" in again.error
+    assert "already used for a completed request" in again.error
 
 
 async def test_audit_records_payments_in_short_form_only(bridge):

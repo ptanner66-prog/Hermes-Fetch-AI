@@ -6,6 +6,7 @@ import os
 import signal
 import sys
 import textwrap
+import time
 
 import pytest
 from pydantic import ValidationError
@@ -349,8 +350,20 @@ async def test_paid_service_flow(desk, ledger):
     assert not paid.is_error
     assert paid.text == "hello\n\n— Check the sources yourself."
     assert paid.audit["payment"] == "verified" and paid.audit["tx_short"].endswith(tx_hash[-4:])
+    # The buyer who missed the answer gets it again, without running the service again.
     again = await call(desk, "service.research", proof=proof)
-    assert again.is_error and "already used" in again.text
+    assert (again.is_error, again.text, again.audit["payment"]) == (False, paid.text, "repeat")
+    assert desk.seller.store.runs_since("research", 0) == 1
+    # Anyone else presenting the (public) reference and transaction gets nothing.
+    thief = await call(desk, "service.research", proof=proof, sender="agent1qthief")
+    assert thief.is_error and "does not match" in thief.text
+    # A copied message (a request ID already seen) gets nothing either.
+    copied = await call(desk, "service.research", proof=proof, remember=lambda: (False, "replay"))
+    assert copied.is_error and copied.text == "replay"
+    # After an hour the answer is gone.
+    desk._clock = lambda: time.monotonic() + 3601
+    gone = await call(desk, "service.research", proof=proof)
+    assert gone.is_error and "already used for a completed request" in gone.text
 
 
 async def test_paid_request_must_match_the_quote(desk, ledger):
@@ -452,3 +465,117 @@ def test_service_tool_for_free_service():
     c = cfg()
     tool = service_tool("free", c.services["free"], c)
     assert tool["_meta"]["hermes_fetch_ai"]["price"] == "0"
+
+
+class HeldRunner:
+    """A runner that holds its run until released."""
+
+    def __init__(self):
+        self.started = asyncio.Event()
+        self.release = asyncio.Event()
+
+    async def run(self, request):
+        self.started.set()
+        await self.release.wait()
+        return ServiceResult(request, ok=True)
+
+
+def one_at_a_time_desk(tmp_path, ledger, runner):
+    c = cfg(
+        {
+            "research": {
+                "title": "Research a topic",
+                "description": "Finds sources.",
+                "price": "0.05",
+                "runner": {"type": "echo"},
+                "max_running": 1,
+                "max_waiting": 0,
+            }
+        }
+    )
+    seller = Seller(
+        payments=c.payments,
+        store=Store.open(tmp_path / "payments.sqlite3"),
+        key=quote_key("only for these tests, at least thirty-two characters"),
+        payout=PAYOUT,
+        ledger_factory=lambda: ledger,
+    )
+    return ServiceDesk(c, seller, runners={"research": runner})
+
+
+async def pay_for(desk, ledger, request):
+    terms = parse_payment_terms((await call(desk, "service.research", request=request)).text)
+    tx_hash = ledger.pay(
+        payer="fetch1buyerwallet",
+        recipient=terms["recipient"],
+        amount_base=int(terms["amount_base"]),
+        memo=terms["memo"],
+    )
+    return PaymentProof(terms["reference"], tx_hash)
+
+
+async def test_a_busy_service_refuses_before_anyone_pays(tmp_path, ledger):
+    held = HeldRunner()
+    desk = one_at_a_time_desk(tmp_path, ledger, held)
+    try:
+        first, second = await pay_for(desk, ledger, "one"), await pay_for(desk, ledger, "two")
+        running = asyncio.create_task(call(desk, "service.research", request="one", proof=first))
+        await held.started.wait()
+        # No price is quoted while every place is taken.
+        busy = await call(desk, "service.research", request="three")
+        assert busy.is_error and busy.text == "this service is busy; try again in a few minutes"
+        # A paid request that finds the line full keeps its payment for later.
+        waiting = await call(desk, "service.research", request="two", proof=second)
+        assert waiting.is_error and "your payment is kept" in waiting.text
+        assert desk.seller.store.credit(second.reference).status == "paid"
+        held.release.set()
+        assert (await running).text == "one"
+        later = await call(desk, "service.research", request="two", proof=second)
+        assert (later.is_error, later.text) == (False, "two")
+    finally:
+        desk.seller.store.close()
+
+
+async def test_only_the_newest_answers_are_kept(tmp_path, ledger, monkeypatch):
+    monkeypatch.setattr(services, "_MAX_KEPT_ANSWERS", 1)
+    desk = one_at_a_time_desk(tmp_path, ledger, EchoRunner())
+    try:
+        first = await pay_for(desk, ledger, "one")
+        await call(desk, "service.research", request="one", proof=first)
+        second = await pay_for(desk, ledger, "two")
+        await call(desk, "service.research", request="two", proof=second)
+        assert (await call(desk, "service.research", request="two", proof=second)).text == "two"
+        forgotten = await call(desk, "service.research", request="one", proof=first)
+        assert forgotten.is_error and "already used for a completed request" in forgotten.text
+    finally:
+        desk.seller.store.close()
+
+
+@pytest.mark.skipif(os.name == "nt", reason="checks the process with os.kill")
+async def test_cancelling_a_run_kills_the_program(tmp_path):
+    pid_file = tmp_path / "service.pid"
+    argv = program(
+        tmp_path,
+        f"""
+        import os, time
+        with open({str(pid_file)!r}, "w") as f:
+            f.write(str(os.getpid()))
+        time.sleep(60)
+        """,
+    )
+    task = asyncio.create_task(command_runner(argv).run("x"))
+    for _ in range(200):
+        if pid_file.exists() and pid_file.read_text():
+            break
+        await asyncio.sleep(0.05)
+    task.cancel()
+    with pytest.raises(asyncio.CancelledError):
+        await task
+    pid = int(pid_file.read_text())
+    for _ in range(200):
+        try:
+            os.kill(pid, 0)
+        except ProcessLookupError:
+            return
+        await asyncio.sleep(0.05)
+    pytest.fail("the service program kept running after its run was cancelled")

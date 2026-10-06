@@ -104,7 +104,7 @@ The JSONL audit log is the operational signal: decisions, reasons, durations, si
 - `backend unavailable` errors;
 - `send_status: failure`;
 - repeated `args exceed max_args_bytes`, URL, or shell-character rejections;
-- when selling: records with `payment: invalid` or `payment: mismatch` (someone probing the payment checks), `payment: pending` that never clears (the ledger endpoint is down), and `decision: error` from a service (its program is failing).
+- when selling: records with `payment: invalid` or `payment: mismatch` (someone probing the payment checks), `payment: pending` that never clears (the ledger endpoint is down), `decision: error` from a service (its program is failing), and frequent `this service is busy` refusals (raise `max_running` or `max_waiting` if the machine can take more).
 
 `hermes-fetch-ai doctor --config /etc/hermes-fetch-ai/bridge.yaml` checks the config and the dependency pins; it does not contact a running bridge. For health, watch the process and the audit log.
 

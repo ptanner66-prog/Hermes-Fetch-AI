@@ -104,6 +104,10 @@ def build_agent(
         "publish_agent_details": cfg.agent.publish_manifest,
         "enable_agent_inspector": cfg.agent.enable_agent_inspector,
         "description": cfg.agent.description,
+        # uAgents handles one message at a time by default. A paid service can
+        # run for minutes, so a seller handles each message in its own task;
+        # each service's run slots bound the work.
+        "handle_messages_concurrently": cfg.payments.enabled,
     }
     if cfg.agent.publish_manifest:
         # Leave registration to uAgents' default ledger-backed policy, so a
@@ -128,6 +132,9 @@ async def _process_one(agent: Agent) -> None:
     # in-process demo needs to stay deterministic.
     schema_digest, sender, message, session = await asyncio.wait_for(agent._message_queue.get(), 2)
     await agent._process_single_message(schema_digest, sender, message, session)
+    # An agent that handles messages concurrently runs the handler as a task.
+    if agent._message_tasks:
+        await asyncio.gather(*list(agent._message_tasks))
 
 
 async def local_dispatch_request(

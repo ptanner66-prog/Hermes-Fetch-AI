@@ -7,6 +7,7 @@ bridge selling services does not contact the ledger until a paid call arrives.
 
 from __future__ import annotations
 
+import asyncio
 import json
 import os
 import subprocess
@@ -108,9 +109,7 @@ def ledger() -> Iterator[LoopbackLedger]:
         server.server_close()
 
 
-@pytest.fixture
-def seller(tmp_path: Path, unused_tcp_port: int, ledger: LoopbackLedger):
-    port = unused_tcp_port
+def start_seller(tmp_path: Path, port: int, ledger: LoopbackLedger, services: str):
     endpoint = f"http://127.0.0.1:{port}/submit"
     cfg = tmp_path / "seller.yaml"
     cfg.write_text(
@@ -128,13 +127,7 @@ def seller(tmp_path: Path, unused_tcp_port: int, ledger: LoopbackLedger):
         "  enabled: true\n"
         f"  ledger_url: http://127.0.0.1:{ledger.server_address[1]}\n"
         f"  state_dir: {json.dumps(str(tmp_path / 'state'))}\n"
-        "services:\n"
-        "  research:\n"
-        "    title: Research a topic\n"
-        "    description: Finds sources.\n"
-        '    price: "0.05"\n'
-        "    runner: {type: echo}\n"
-        "logging:\n"
+        "services:\n" + services + "logging:\n"
         f"  audit_path: {json.dumps(str(tmp_path / 'audit.jsonl'))}\n",
         encoding="utf-8",
     )
@@ -151,11 +144,54 @@ def seller(tmp_path: Path, unused_tcp_port: int, ledger: LoopbackLedger):
     )
     try:
         _wait_for_port(port)
+    except BaseException:
+        proc.kill()
+        proc.wait(timeout=10)
+        raise
+    return proc, endpoint
+
+
+def stop(proc: subprocess.Popen[str]) -> None:
+    if proc.poll() is None:
+        proc.kill()
+        proc.wait(timeout=10)
+
+
+@pytest.fixture
+def seller(tmp_path: Path, unused_tcp_port: int, ledger: LoopbackLedger):
+    research = (
+        "  research:\n"
+        "    title: Research a topic\n"
+        "    description: Finds sources.\n"
+        '    price: "0.05"\n'
+        "    runner: {type: echo}\n"
+    )
+    proc, endpoint = start_seller(tmp_path, unused_tcp_port, ledger, research)
+    try:
         yield proc, endpoint
     finally:
-        if proc.poll() is None:
-            proc.kill()
-            proc.wait(timeout=10)
+        stop(proc)
+
+
+@pytest.fixture
+def slow_seller(tmp_path: Path, unused_tcp_port: int, ledger: LoopbackLedger):
+    script = tmp_path / "slow.py"
+    script.write_text(
+        "import json, sys, time\njson.load(sys.stdin)\ntime.sleep(3)\nprint('done')\n"
+    )
+    slow = (
+        "  slow:\n"
+        "    title: Slow\n"
+        "    description: Takes three seconds.\n"
+        "    runner:\n"
+        "      type: command\n"
+        f"      argv: {json.dumps([sys.executable, str(script)])}\n"
+    )
+    proc, endpoint = start_seller(tmp_path, unused_tcp_port, ledger, slow)
+    try:
+        yield proc, endpoint
+    finally:
+        stop(proc)
 
 
 async def test_paid_call_through_serve(seller, ledger, tmp_path):
@@ -163,12 +199,12 @@ async def test_paid_call_through_serve(seller, ledger, tmp_path):
     address = Identity.from_seed(SEED, 0).address
     resolver = RulesBasedResolver({address: endpoint})
 
-    async def call(args: dict[str, Any]) -> CallToolResponse:
+    async def call(args: dict[str, Any], sender: Identity = BUYER) -> CallToolResponse:
         reply = await send_sync_message(
             address,
             CallTool(tool="service.research", args=args),
             response_type=CallToolResponse,
-            sender=BUYER,
+            sender=sender,
             resolver=resolver,
             timeout=20,
         )
@@ -194,9 +230,13 @@ async def test_paid_call_through_serve(seller, ledger, tmp_path):
     assert (paid.result, paid.error) == ("tides", None)
     assert ledger.requests == [NODE_INFO, TXS + TX_HASH]
 
-    # The same payment again, in a fresh message, is refused without asking the ledger.
+    # The buyer asking again gets the same answer; another agent presenting the
+    # same (public) payment gets nothing. Neither asks the ledger again.
     again = await call(replay_args({"request": "tides"}, payment=proof))
-    assert again.result is None and "already used" in (again.error or "")
+    assert (again.result, again.error) == ("tides", None)
+    thief = Identity.from_seed("serve-paid-test-thief-" + "identity-material", 0)
+    stolen = await call(replay_args({"request": "tides"}, payment=proof), sender=thief)
+    assert (stolen.result, stolen.error) == (None, "quote does not match this call")
     assert len(ledger.requests) == 2
 
     rc = _request_graceful_stop(proc)
@@ -245,3 +285,29 @@ def test_example_client_pays_only_within_its_limits(seller, ledger):
     assert too_dear.returncode == 1, too_dear.stderr[-2000:]
     assert "refusing to pay 0.05 FET: more than --max-fet 0.01" in too_dear.stderr
     assert ledger.requests == []
+
+
+async def test_a_long_run_does_not_hold_up_other_requests(slow_seller, ledger):
+    _, endpoint = slow_seller
+    address = Identity.from_seed(SEED, 0).address
+    resolver = RulesBasedResolver({address: endpoint})
+    run = asyncio.create_task(
+        send_sync_message(
+            address,
+            CallTool(tool="service.slow", args=replay_args({"request": "x"})),
+            response_type=CallToolResponse,
+            sender=BUYER,
+            resolver=resolver,
+            timeout=30,
+        )
+    )
+    await asyncio.sleep(0.5)  # the three-second run has started
+    started = time.monotonic()
+    listed = await send_sync_message(
+        address, ListTools(), response_type=ListToolsResponse, resolver=resolver, timeout=20
+    )
+    assert time.monotonic() - started < 2.0, "the listing waited for the run"
+    assert isinstance(listed, ListToolsResponse)
+    reply = await run
+    assert isinstance(reply, CallToolResponse) and reply.result == "done"
+    assert ledger.requests == []  # a free service never touches the ledger

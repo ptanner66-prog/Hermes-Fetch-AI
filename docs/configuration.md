@@ -63,7 +63,7 @@ How buyers pay for services ([`payments.md`](payments.md)). Fetch's testnet only
 
 | Key | Default | Meaning |
 |-----|---------|---------|
-| `enabled` | `false` | Sell the services under `services`. Needs `agent.network: testnet`. |
+| `enabled` | `false` | Sell the services under `services`. Needs `agent.network: testnet`. A selling bridge handles each incoming message in its own task, so a long run never holds up other requests. |
 | `network` | `testnet` | The only accepted value; `mainnet` is locked until a security review. |
 | `chain_id` | `dorado-1` | The testnet chain. The bridge checks that the ledger reports it before verifying any payment, and refuses payments otherwise. |
 | `denom` | `atestfet` | The testnet unit: 1 FET = 10^18 `atestfet`. |
@@ -91,6 +91,8 @@ The services this agent sells, by name: `services: {<name>: {...}}`. Each appear
 | `runner` | required | What does the work: `{type: command, ...}` (below), or `{type: echo}`, which answers with the request (demos and tests). |
 | `disclaimer` | none | Added to the end of every answer, up to 500 characters. |
 | `max_runs_per_day` | `200` | Runs per 24 hours across all buyers. |
+| `max_running` | `1` | Requests the service works on at once. |
+| `max_waiting` | `4` | Requests that may wait for a run. Beyond that, buyers are told the service is busy before they pay. |
 
 A `command` runner:
 

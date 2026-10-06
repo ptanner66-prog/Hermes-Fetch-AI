@@ -42,7 +42,8 @@ def test_demo_paid_walks_through_a_sale(capsys):
     out = capsys.readouterr().out
     assert "price: 0.05 testnet FET" in out
     assert "answer: hello" in out
-    assert "same payment again: this payment was already used" in out
+    assert "same payment from another agent: quote does not match this call" in out
+    assert "same payment from the buyer: the same answer, without running" in out
 
 
 def test_doctor_reports_payments(paid_config, capsys):

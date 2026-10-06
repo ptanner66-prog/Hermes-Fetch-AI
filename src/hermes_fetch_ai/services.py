@@ -18,18 +18,21 @@ import signal
 import sys
 import tempfile
 import time
-from collections.abc import Callable, Mapping
+from collections import OrderedDict
+from collections.abc import AsyncIterator, Callable, Mapping
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Protocol
 
 from .arg_validator import validate_args
 from .config import BridgeConfig, CommandRunnerConfig, RunnerConfig, ServiceConfig
+from .ledger import normalize_tx_hash
 from .logging import get_logger
 from .money import format_fet
 from .quotes import request_digest
 from .result_normalizer import error_result, text_result
 from .seller import PaymentProof, PaymentRefused, Seller, short_reference, short_tx
+from .store import Credit
 
 logger = get_logger("hermes_fetch_ai")
 
@@ -37,6 +40,9 @@ SERVICE_PREFIX = "service."
 _DAY_MS = 86_400_000
 # How long a killed service program gets to finish going away.
 _STOP_SECONDS = 5.0
+# A paid answer is kept in memory this long, so a buyer who missed it can ask again.
+_ANSWER_TTL_SECONDS = 3600.0
+_MAX_KEPT_ANSWERS = 64
 # Environment a service program always gets; anything else must be listed in pass_env.
 _BASE_ENV = ("PATH", "LANG", "LANGUAGE", "TZ", "SYSTEMROOT", "WINDIR", "COMSPEC", "PATHEXT")
 
@@ -108,6 +114,10 @@ class CommandRunner:
             except TimeoutError:
                 await self._stop(process)
                 return ServiceResult("", ok=False, problem="the service took too long")
+            except asyncio.CancelledError:
+                # The bridge is stopping: never leave the program running behind it.
+                self._kill(process)
+                raise
             # A program stopped for writing too much still produced an answer.
             if process.returncode != 0 and not overflowed:
                 return ServiceResult(
@@ -249,6 +259,43 @@ def service_tool(name: str, svc: ServiceConfig, cfg: BridgeConfig) -> dict[str, 
     }
 
 
+class ServiceBusy(Exception):
+    """Every running and waiting place for a service is taken."""
+
+
+class RunSlots:
+    """Runs of one service: at most ``running`` at once and ``waiting`` more in line."""
+
+    def __init__(self, running: int, waiting: int) -> None:
+        self._semaphore = asyncio.Semaphore(running)
+        self._limit = running + waiting
+        self._inside = 0
+
+    def busy(self) -> bool:
+        return self._inside >= self._limit
+
+    @contextlib.asynccontextmanager
+    async def slot(self) -> AsyncIterator[None]:
+        """Wait for a run; raise ServiceBusy at once if the line is full."""
+        if self.busy():
+            raise ServiceBusy
+        self._inside += 1
+        try:
+            async with self._semaphore:
+                yield
+        finally:
+            self._inside -= 1
+
+
+@dataclass(frozen=True)
+class _KeptAnswer:
+    tx_hash: str
+    text: str
+    output_bytes: int
+    truncated: bool
+    expires: float
+
+
 @dataclass
 class ServiceOutcome:
     """A service call's response plus what the audit log should record."""
@@ -279,6 +326,12 @@ class ServiceDesk:
         if runners:
             self.runners.update(runners)
         self._tool_names = {service_tool_name(name): name for name in cfg.services}
+        self._slots = {
+            name: RunSlots(svc.max_running, svc.max_waiting) for name, svc in cfg.services.items()
+        }
+        # Paid answers by quote reference, oldest first; memory only, never on disk.
+        self._answers: OrderedDict[str, _KeptAnswer] = OrderedDict()
+        self._clock = time.monotonic
 
     def has(self, tool_name: str) -> bool:
         return tool_name in self._tool_names
@@ -296,6 +349,30 @@ class ServiceDesk:
     def _refuse(self, text: str, *, decision: str = "denied", **audit: Any) -> ServiceOutcome:
         capped = error_result(text, self.cfg.policy.max_output_bytes)
         return ServiceOutcome(capped.text, True, decision, text.split(":", 1)[0], audit=audit)
+
+    def _keep(self, reference: str, tx_hash: str, outcome: ServiceOutcome) -> None:
+        now = self._clock()
+        self._answers[reference] = _KeptAnswer(
+            tx_hash,
+            outcome.text,
+            outcome.output_bytes,
+            outcome.truncated,
+            now + _ANSWER_TTL_SECONDS,
+        )
+        while self._answers and (
+            len(self._answers) > _MAX_KEPT_ANSWERS
+            or next(iter(self._answers.values())).expires <= now
+        ):
+            self._answers.popitem(last=False)
+
+    def _kept(self, proof: PaymentProof) -> _KeptAnswer | None:
+        kept = self._answers.get(proof.reference)
+        if kept is None or kept.expires <= self._clock():
+            return None
+        with contextlib.suppress(ValueError):
+            if normalize_tx_hash(proof.tx_hash) == kept.tx_hash:
+                return kept
+        return None
 
     async def call(
         self,
@@ -335,11 +412,16 @@ class ServiceDesk:
             return self._refuse("this service has reached its limit for today; try again tomorrow")
 
         price = svc.price_base
+        slots = self._slots[name]
+        busy = "this service is busy; try again in a few minutes"
         credit = None
         audit: dict[str, Any] = {}
         if price:
             digest = request_digest(args)
             if proof is None:
+                # Never ask for money that cannot be worked off soon.
+                if slots.busy():
+                    return self._refuse(busy)
                 quote, reference = self.seller.quote(
                     kind="call", sender=sender, subject=name, digest=digest, amount_base=price
                 )
@@ -358,7 +440,23 @@ class ServiceDesk:
             try:
                 credit = await self.seller.redeem(proof, sender=sender, subject=name, digest=digest)
             except PaymentRefused as exc:
-                return self._refuse(exc.reason, payment=exc.status)
+                # The quote check inside redeem proved this is the buyer who paid,
+                # and the replay check stops a copied message from collecting it.
+                kept = self._kept(proof) if exc.status == "done" else None
+                if kept is None:
+                    return self._refuse(exc.reason, payment=exc.status)
+                ok, why = remember_replay()
+                if not ok:
+                    return self._refuse(why, payment=exc.status)
+                return ServiceOutcome(
+                    kept.text,
+                    False,
+                    "allowed",
+                    "answer sent again",
+                    output_bytes=kept.output_bytes,
+                    truncated=kept.truncated,
+                    audit={"payment": "repeat", "credit": short_reference(proof.reference)},
+                )
             audit = {
                 "payment": "verified",
                 "credit": short_reference(credit.reference),
@@ -366,16 +464,35 @@ class ServiceDesk:
                 "tx_short": short_tx(credit.tx_hash),
                 "payer_short": short_tx(credit.payer),
             }
+        elif slots.busy():
+            return self._refuse(busy)
 
         ok, why = remember_replay()
         if not ok:
             return self._refuse(why, **audit)
+        try:
+            async with slots.slot():
+                return await self._run(name, svc, sender, args, credit, audit, now_ms)
+        except ServiceBusy:
+            kept_payment = "; your payment is kept, so you can repeat the call shortly"
+            return self._refuse(busy + (kept_payment if credit else ""), **audit)
+
+    async def _run(
+        self,
+        name: str,
+        svc: ServiceConfig,
+        sender: str,
+        args: dict[str, Any],
+        credit: Credit | None,
+        audit: dict[str, Any],
+        now_ms: int,
+    ) -> ServiceOutcome:
         if credit is not None:
             try:
                 credit = self.seller.begin(credit)
             except PaymentRefused as exc:
                 return self._refuse(exc.reason, **audit)
-        store.record_run(subject=name, sender=sender, now_ms=now_ms)
+        self.seller.store.record_run(subject=name, sender=sender, now_ms=now_ms)
         try:
             result = await self.runners[name].run(str(args["request"]))
         except Exception:  # a runner bug must not lose the payment
@@ -395,7 +512,7 @@ class ServiceDesk:
         if svc.disclaimer:
             answer = f"{answer}\n\n— {svc.disclaimer}"
         capped = text_result(answer, self.cfg.policy.max_output_bytes)
-        return ServiceOutcome(
+        outcome = ServiceOutcome(
             capped.text,
             False,
             "allowed",
@@ -404,6 +521,9 @@ class ServiceDesk:
             truncated=capped.truncated,
             audit=audit,
         )
+        if credit is not None:
+            self._keep(credit.reference, credit.tx_hash, outcome)
+        return outcome
 
     async def aclose(self) -> None:
         await self.seller.aclose()

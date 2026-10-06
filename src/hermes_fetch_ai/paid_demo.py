@@ -1,7 +1,8 @@
-"""An offline walk through selling a service: quote, pay, run, and refuse reuse.
+"""An offline walk through selling a service: quote, pay, run, and guard the payment.
 
-Two uAgents talk through uAgents' in-process dispatcher, and payments go to
-an in-memory ledger, so the demo needs no network, seed, or funds.
+Three uAgents (a seller, a buyer, and a stranger) talk through uAgents'
+in-process dispatcher, and payments go to an in-memory ledger, so the demo
+needs no network, seed, or funds.
 """
 
 from __future__ import annotations
@@ -62,6 +63,10 @@ async def run_paid_demo(state_dir: Path) -> list[str]:
         client_cfg = cfg.model_copy(deep=True)
         client_cfg.agent.name = cfg.agent.name + "_client"
         client = build_agent(client_cfg, shim)
+        # Another identity: dev_random_seed gives every agent its own address.
+        stranger_cfg = cfg.model_copy(deep=True)
+        stranger_cfg.agent.name = cfg.agent.name + "_stranger"
+        stranger = build_agent(stranger_cfg, shim)
         try:
             first = await local_dispatch_request(
                 bridge,
@@ -88,15 +93,31 @@ async def run_paid_demo(state_dir: Path) -> list[str]:
                 CallToolResponse,
             )
             lines.append(f"answer: {paid.result if paid.result is not None else paid.error}")
+            # The memo and the transaction are public on the ledger, so anyone can copy them.
+            stolen = await local_dispatch_request(
+                bridge,
+                stranger,
+                CallTool(tool=tool, args=replay_args({"request": "hello"}, payment=proof)),
+                CallToolResponse,
+            )
+            lines.append(f"same payment from another agent: {stolen.error}")
             again = await local_dispatch_request(
                 bridge,
                 client,
                 CallTool(tool=tool, args=replay_args({"request": "hello"}, payment=proof)),
                 CallToolResponse,
             )
-            lines.append(f"same payment again: {again.error}")
+            repeated = again.result is not None and again.result == paid.result
+            lines.append(
+                "same payment from the buyer: "
+                + (
+                    "the same answer, without running the service again"
+                    if repeated
+                    else str(again.error)
+                )
+            )
         finally:
-            dispatcher.unregister(bridge.address, bridge)
-            dispatcher.unregister(client.address, client)
+            for agent in (bridge, client, stranger):
+                dispatcher.unregister(agent.address, agent)
             await desk.aclose()
     return lines

@@ -9,7 +9,7 @@ Your bridge can sell services to other AI agents on Fetch.ai's network and get p
 3. **The other agent pays.** It sends FET on Fetch's ledger (the public record of every payment), labels the payment with the code your bridge gave it, and asks again with its receipt.
 4. **Your bridge checks the payment itself.** It looks the payment up on the ledger and never takes the buyer's word for it. If the payment is right, the service runs once and the buyer gets the answer.
 
-Each payment pays for one request. A payment that was already used is refused, also after your bridge restarts, and so is a payment that someone copied from the public ledger.
+Each payment pays for one request. A payment that was already used is refused, also after your bridge restarts, and so is a payment that someone copied from the public ledger. A buyer who missed the answer can ask again with the same payment within an hour and gets the same answer, without the work being done twice.
 
 ## Words used here
 
@@ -78,7 +78,7 @@ Every amount is handled as a whole number of the smallest unit (1 FET = 10^18 `a
 | `seller backup --to <new file>` | Copies the payment records, safely, even while the bridge runs. |
 | `wallet --balance` | Shows how much FET the income wallet holds. |
 
-Each service also has `max_runs_per_day` (200 by default), so strangers cannot run up unlimited work, and every buyer is held to the bridge's per-sender rate limits.
+Each service also has `max_runs_per_day` (200 by default), so strangers cannot run up unlimited work, and every buyer is held to the bridge's per-sender rate limits. A service runs `max_running` requests at once (1 by default) with up to `max_waiting` more in line (4 by default). When the line is full, new buyers are told the service is busy before they are asked to pay, and a buyer who already paid keeps the payment for a later try. While one service works, the bridge keeps answering everyone else.
 
 ### Payment states
 
@@ -152,6 +152,8 @@ A service appears in `ListTools` as the tool `service.<name>`, with one string a
 
    If the reply is `payment pending: ...`, the ledger has not shown the payment yet: wait a few seconds and repeat this call.
 
+4. **Missed the answer?** A service can take minutes, longer than a short synchronous wait. Repeat step 3 (same identity, same arguments, same proof, fresh replay metadata) within an hour to get the answer again; the service does not run twice. The answer is kept in the seller's memory only, so it is gone after an hour or a restart.
+
 [`examples/call_bridge.py`](../examples/call_bridge.py) does all three: set `HERMES_FETCH_PAYER_SEED` to a seed whose wallet holds testnet FET and run it with `--tool service.<name> --request "..." --pay`. It prints the paying wallet's address, pays only on testnet, and never pays more than `--max-fet` (0.1 by default). To get free testnet FET for that wallet from Fetch's faucet:
 
 ```bash
@@ -168,7 +170,9 @@ python -c "from cosmpy.aerial.client import NetworkConfig; from cosmpy.aerial.fa
 | `payment invalid: the transaction memo must be the quote reference` | The memo is missing or different. |
 | `payment invalid: ...` | Some other part of the payment is wrong: recipient, denomination, more than a plain transfer, more than one payer, failed on the ledger, made before the quote, or arrived after it expired. |
 | `payment already used` | This transaction already paid for something. |
-| `this payment was already used for a completed request` | The request this payment bought already ran. |
+| `this payment was already used for a completed request` | The request this payment bought already ran, and its answer is no longer kept (after an hour, or after the seller restarted). |
+| `this service is busy; try again in a few minutes` | Every running and waiting place for the service is taken. No payment was asked for. |
+| `this service is busy; ...; your payment is kept, so you can repeat the call shortly` | You paid, but the line filled up meanwhile. Repeat the call with the same proof later. |
 | `quote does not match this call` | The reference was issued to another agent or for other arguments. Pay and call from the same identity with the same arguments. |
 | `quote expired` | The quote's redeem window has passed. Ask for a new price. |
 | `this quote was already paid by another transaction; ...` | You paid twice for one quote; the second payment is recorded so the seller can refund it. |
@@ -190,7 +194,9 @@ On 2026-10-06 a bridge running `serve` sold the `word-count` service on Fetch's 
 | A real payment of the full price with the wrong memo | `payment invalid: the transaction memo must be the quote reference` |
 | The used transaction again after a restart | `payment already used` |
 
-The paying transactions were `518F266EA453BC09275D8AD40A224E8FB55358E6376858BEBB4BD7F557FA36C4` and `CB458BF7CC9F1E782E67A1EF0018EC1AFE74DA014BECCF12D4B11EC719B7F320`; the audit log and logs held only shortened hashes and addresses.
+After the change that keeps paid answers for an hour, a third paid call worked the same way; the buyer repeating it with the same payment got the same answer without the service running again, and another agent presenting that payment got `quote does not match this call`.
+
+The paying transactions were `518F266EA453BC09275D8AD40A224E8FB55358E6376858BEBB4BD7F557FA36C4`, `CB458BF7CC9F1E782E67A1EF0018EC1AFE74DA014BECCF12D4B11EC719B7F320`, and `1A3478D40D70D520441C832DBF0EEE03C8010860F49C84457A2E8AEAB31E2733`; the audit log and logs held only shortened hashes and addresses.
 
 ## Limits of this version
 
