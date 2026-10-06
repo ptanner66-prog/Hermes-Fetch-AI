@@ -4,9 +4,11 @@ A short post for Fetch.ai's developer community, from the repository owner's acc
 docs point developers to its Discord, <https://discord.gg/fetchai>; post it in the developer
 channel there. The Innovation Lab is also on X as [@fetch_ai_IL](https://x.com/fetch_ai_IL). It
 also asks four things about ASI:One's payment card that Fetch.ai's docs leave open. None of them
-blocks anything: the bridge handles every possible answer, and one test purchase in ASI:One shows
-the real ones ([`docs/validation.md`](../../docs/validation.md#open-for-the-real-world-trial)).
-Asking puts the answers on record and starts a conversation.
+blocks setup, and one test purchase in ASI:One shows the real answers
+([`docs/validation.md`](../../docs/validation.md#open-for-the-real-world-trial)). Whatever they
+are, the bridge never delivers without a verified payment. Only one could need a code change: if
+the card rounds amounts, the order codes must get coarser, or chat sales are refused. Asking puts
+the answers on record and starts a conversation.
 Post it once the fet-example pull request is open, and link that too.
 
 ---
