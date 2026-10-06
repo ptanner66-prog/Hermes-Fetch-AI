@@ -41,6 +41,14 @@ PROBE = textwrap.dedent(
     out = {"yolo": plugin.yolo_active()}
     if sys.argv[2:] == ["ask"]:
         out["consent"] = plugin.ask_owner("Pay 0.05 testnet FET to another agent?", "field test")
+        # Hermes' prompt itself: a prompt that raised would also read as "decline" above.
+        import inspect
+        from tools.approval_prompt import request_elicitation_consent as prompt
+        out["parameters"] = sorted(inspect.signature(prompt).parameters)
+        try:
+            out["prompt"] = prompt("Pay 0.05 testnet FET?", "field test", title="Pay another agent?")
+        except Exception as exc:
+            out["prompt"] = "raised " + type(exc).__name__
     if sys.argv[2:] == ["save"]:
         out["saved"] = plugin.save_secret("UAGENT_SEED", "f" * 64)
     print(json.dumps(out))
@@ -85,8 +93,14 @@ def test_the_plugin_sees_yolo_mode_however_it_is_turned_on(tmp_path):
 
 def test_the_payment_prompt_declines_when_nobody_can_answer(tmp_path):
     # A one-shot run (`hermes chat -q`), and a process with no session or terminal.
-    assert probe(tmp_path, ask=True, HERMES_SINGLE_QUERY_SESSION="1")["consent"] == "decline"
-    assert probe(tmp_path, ask=True)["consent"] == "decline"
+    for result in (
+        probe(tmp_path, ask=True, HERMES_SINGLE_QUERY_SESSION="1"),
+        probe(tmp_path, ask=True),
+    ):
+        assert result["consent"] == "decline"
+        # It declined because nobody can answer, not because the prompt broke or changed.
+        assert result["prompt"] == "decline"
+        assert {"message", "description", "title"} <= set(result["parameters"])
 
 
 def test_setup_keeps_the_agents_key_in_hermes_env(tmp_path):
