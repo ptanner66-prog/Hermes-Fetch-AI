@@ -4,7 +4,7 @@ import sys
 import pytest
 
 from hermes_fetch_ai.audit import AuditWriter
-from hermes_fetch_ai.config import load_config
+from hermes_fetch_ai.config import HERMES_PYTHON_VAR, load_config
 
 
 def test_hermes_backed_example_exposes_only_skills_list_publicly():
@@ -14,6 +14,7 @@ def test_hermes_backed_example_exposes_only_skills_list_publicly():
 
 
 def test_production_hermes_config_requires_a_stable_seed(monkeypatch):
+    monkeypatch.setenv(HERMES_PYTHON_VAR, "/hermes/venv/bin/python")
     with pytest.raises(ValueError, match="UAGENT_SEED is required"):
         load_config("examples/hermes-stdio.yaml")
     monkeypatch.setenv("UAGENT_SEED", "production-config-test-" + "identity-material")
@@ -25,6 +26,7 @@ def test_production_hermes_config_requires_a_stable_seed(monkeypatch):
 
 def test_hermes_example_denylists_match_and_use_exact_tool_names(monkeypatch):
     monkeypatch.setenv("UAGENT_SEED", "production-config-test-" + "identity-material")
+    monkeypatch.setenv(HERMES_PYTHON_VAR, "/hermes/venv/bin/python")
     stdio = load_config("examples/hermes-stdio.yaml").policy.denied_tools
     local = load_config("examples/hermes-local.yaml").policy.denied_tools
     assert stdio == local

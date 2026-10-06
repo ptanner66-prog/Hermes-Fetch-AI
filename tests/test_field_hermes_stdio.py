@@ -5,12 +5,16 @@ Skipped unless both env vars are set:
   HERMES_FETCH_FIELD_TEST=1
   HERMES_FETCH_HERMES_PYTHON=/path/to/hermes-venv/bin/python
 
-Operator setup (one time). Current hermes-agent needs Python 3.14; on older
-interpreters its dependencies are skipped and the tools server fails to start:
+Operator setup (one time). hermes-agent only supports installs from a
+checkout. Use the Python version its checkout names in .python-version (3.11
+for the 0.21.5 release, 3.14 for main); on an older interpreter its
+dependencies are skipped and the tools server fails to start:
 
-  uv venv -p 3.14 /tmp/hermes-venv
+  uv venv -p <version> /tmp/hermes-venv
   uv pip install --python /tmp/hermes-venv/bin/python -e "<hermes-agent checkout>[mcp]"
   mkdir -p $HERMES_HOME/skills && copy at least one bundled skill there
+
+CI's hermes-plugin job runs this against Hermes 0.21.5 and a pinned main.
 
 Callers must follow the served inputSchema. hermes-agent v0.16.x wrapped
 every tool's arguments in one required ``kwargs`` object; newer releases
@@ -28,7 +32,7 @@ from uagents_adapter.mcp.protocol import (
     ListToolsResponse,
 )
 
-from hermes_fetch_ai.config import load_config
+from hermes_fetch_ai.config import HERMES_PYTHON_VAR, load_config
 from hermes_fetch_ai.direct_protocol import replay_args
 from hermes_fetch_ai.mcp_shim import HermesMCPClientShim
 from hermes_fetch_ai.uagent_app import build_agent, local_dispatch_request
@@ -50,8 +54,10 @@ def _args_for(tool, flat_args):
 def _field_cfg(tmp_path, monkeypatch):
     # The production config requires a stable identity; use test-only material.
     monkeypatch.setenv("UAGENT_SEED", "field-test-" + "identity-material-not-a-real-seed")
+    # Hand over Hermes' interpreter the way the fetchai-bridge plugin does, so the
+    # example config's unset `command` resolves to it.
+    monkeypatch.setenv(HERMES_PYTHON_VAR, os.environ["HERMES_FETCH_HERMES_PYTHON"])
     cfg = load_config("examples/hermes-stdio.yaml")
-    cfg.hermes_mcp.command = os.environ["HERMES_FETCH_HERMES_PYTHON"]
     cfg.logging.audit_path = str(tmp_path / "field-audit.jsonl")
     return cfg
 

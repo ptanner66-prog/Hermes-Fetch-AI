@@ -12,6 +12,11 @@ from pydantic import BaseModel, ConfigDict, Field, ValidationError, field_valida
 from .audit import default_audit_path
 
 MIN_SEED_LENGTH = 32
+# Set by the fetchai-bridge Hermes plugin (hermes-plugin/fetchai-bridge): the
+# interpreter and import path Hermes itself runs on, used to start Hermes' tools
+# MCP server when hermes_mcp.command is left unset.
+HERMES_PYTHON_VAR = "HERMES_FETCH_AI_HERMES_PYTHON"
+HERMES_PYTHONPATH_VAR = "HERMES_FETCH_AI_HERMES_PYTHONPATH"
 SEED_HINT = 'generate one with: python -c "import secrets; print(secrets.token_hex(32))"'
 
 _SECRET_WORDS = r"(?:seed|secret|token|api[_-]?key|password|mailbox[_-]?key)"
@@ -113,8 +118,15 @@ class BridgeConfig(BaseModel):
     def validate_cross_fields(self) -> BridgeConfig:
         if self.version != 1:
             raise ValueError("only config version 1 is supported")
-        if self.hermes_mcp.mode == "stdio" and not self.hermes_mcp.command:
-            raise ValueError("hermes_mcp.command is required for stdio mode")
+        if (
+            self.hermes_mcp.mode == "stdio"
+            and not self.hermes_mcp.command
+            and not os.environ.get(HERMES_PYTHON_VAR)
+        ):
+            raise ValueError(
+                "hermes_mcp.command is required for stdio mode unless the bridge runs "
+                "through `hermes fetchai-bridge`, which supplies Hermes' own interpreter"
+            )
         if self.agent.mode == "mailbox" and self.agent.dev_random_seed:
             raise ValueError("mailbox mode requires a stable UAGENT_SEED")
         if self.agent.seed:

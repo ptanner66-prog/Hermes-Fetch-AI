@@ -2,6 +2,7 @@ import pytest
 from pydantic import ValidationError
 
 from hermes_fetch_ai.config import (
+    HERMES_PYTHON_VAR,
     BridgeConfig,
     ConfigError,
     format_validation_error,
@@ -60,6 +61,14 @@ def test_chat_rejected():
 def test_stdio_requires_command():
     with pytest.raises(ValidationError, match="command"):
         BridgeConfig(agent={"dev_random_seed": True}, hermes_mcp={"mode": "stdio"})
+
+
+def test_stdio_command_can_come_from_the_hermes_plugin(monkeypatch):
+    with pytest.raises(ValidationError, match="hermes fetchai-bridge"):
+        BridgeConfig(agent={"dev_random_seed": True}, hermes_mcp={"mode": "stdio"})
+    monkeypatch.setenv(HERMES_PYTHON_VAR, "/hermes/venv/bin/python")
+    cfg = BridgeConfig(agent={"dev_random_seed": True}, hermes_mcp={"mode": "stdio"})
+    assert cfg.hermes_mcp.command is None
 
 
 def test_audit_path_defaults_per_platform():

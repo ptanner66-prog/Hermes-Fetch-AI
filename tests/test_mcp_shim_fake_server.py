@@ -6,8 +6,13 @@ from types import SimpleNamespace
 
 import pytest
 
-from hermes_fetch_ai.config import BridgeConfig
-from hermes_fetch_ai.mcp_shim import HermesBackendError, HermesMCPClientShim, filtered_env
+from hermes_fetch_ai.config import HERMES_PYTHON_VAR, HERMES_PYTHONPATH_VAR, BridgeConfig
+from hermes_fetch_ai.mcp_shim import (
+    HermesBackendError,
+    HermesMCPClientShim,
+    filtered_env,
+    stdio_parameters,
+)
 
 
 def cfg(**kw):
@@ -202,3 +207,56 @@ async def test_tool_error_text_is_size_capped():
 async def test_unstarted_shim_does_not_pretend_to_have_no_tools():
     with pytest.raises(RuntimeError, match="not started"):
         await HermesMCPClientShim(cfg(hermes_mcp={"mode": "fake"})).list_tools()
+
+
+def test_explicit_stdio_command_wins_over_the_plugin_handover(monkeypatch):
+    monkeypatch.setenv(HERMES_PYTHON_VAR, "/hermes/venv/bin/python")
+    monkeypatch.setenv(HERMES_PYTHONPATH_VAR, "/hermes/checkout")
+    params = stdio_parameters(cfg(hermes_mcp={"mode": "stdio", "command": "cmd", "args": ["--serve"]}))
+    assert (params.command, params.args) == ("cmd", ["--serve"])
+    assert params.env is not None and "PYTHONPATH" not in params.env
+    assert params.env["HERMES_QUIET"] == "1" and params.env["HERMES_REDACT_SECRETS"] == "true"
+
+
+def test_unset_stdio_command_uses_the_hermes_that_launched_the_bridge(monkeypatch):
+    monkeypatch.setenv(HERMES_PYTHON_VAR, "/hermes/venv/bin/python")
+    monkeypatch.setenv(HERMES_PYTHONPATH_VAR, "/hermes/checkout")
+    params = stdio_parameters(cfg(hermes_mcp={"mode": "stdio"}))
+    assert params.command == "/hermes/venv/bin/python"
+    assert params.args == ["-m", "agent.transports.hermes_tools_mcp_server"]
+    assert params.env is not None and params.env["PYTHONPATH"] == "/hermes/checkout"
+
+
+@pytest.mark.asyncio
+async def test_stdio_server_starts_through_the_plugin_handover(monkeypatch):
+    monkeypatch.setenv(HERMES_PYTHON_VAR, sys.executable)
+    c = cfg(hermes_mcp={"mode": "stdio", "args": ["tests/fakes/fake_mcp_subprocess.py"]})
+    async with HermesMCPClientShim(c) as shim:
+        assert (await shim.call_tool("echo", {"text": "ok"})).text == "ok"
+
+
+@pytest.mark.asyncio
+async def test_startup_failure_names_the_handed_over_command(monkeypatch):
+    monkeypatch.setenv(HERMES_PYTHON_VAR, "/nonexistent/hermes/bin/python")
+    monkeypatch.setenv(HERMES_PYTHONPATH_VAR, "/nonexistent/hermes/checkout")
+    c = cfg(hermes_mcp={"mode": "stdio"})
+    with pytest.raises(HermesBackendError) as exc:
+        async with HermesMCPClientShim(c):
+            pass
+    message = str(exc.value)
+    assert "command not found" in message
+    assert (
+        "run `/nonexistent/hermes/bin/python -m agent.transports.hermes_tools_mcp_server`"
+        " and Hermes' PYTHONPATH by hand" in message
+    )
+
+
+@pytest.mark.asyncio
+async def test_startup_failure_leaves_custom_args_out_of_the_message():
+    c = cfg(hermes_mcp={"mode": "stdio", "command": "/nonexistent/python", "args": ["--opt", "x"]})
+    with pytest.raises(HermesBackendError) as exc:
+        async with HermesMCPClientShim(c):
+            pass
+    message = str(exc.value)
+    assert "run `/nonexistent/python` with the configured args by hand" in message
+    assert "--opt" not in message

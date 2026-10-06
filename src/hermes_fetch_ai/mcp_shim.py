@@ -12,7 +12,7 @@ from mcp import ClientSession
 from mcp.client.stdio import StdioServerParameters, stdio_client
 
 from ._redaction import redact_text
-from .config import BridgeConfig
+from .config import HERMES_PYTHON_VAR, HERMES_PYTHONPATH_VAR, BridgeConfig
 from .fake_mcp import _build_fake_server
 from .result_normalizer import (
     NormalizedToolResult,
@@ -22,6 +22,7 @@ from .result_normalizer import (
 )
 
 HERMES_TOOLS_MODULE = "agent.transports.hermes_tools_mcp_server"
+HERMES_TOOLS_SERVER_ARGS = ("-m", HERMES_TOOLS_MODULE)
 
 
 class HermesBackendError(RuntimeError):
@@ -52,6 +53,30 @@ def filtered_env() -> dict[str, str]:
     return env
 
 
+def stdio_parameters(cfg: BridgeConfig) -> StdioServerParameters:
+    """How to launch the Hermes tools MCP server.
+
+    An explicit ``hermes_mcp.command`` wins. Otherwise use the interpreter and
+    import path of the Hermes that launched the bridge (passed by the
+    fetchai-bridge plugin), which is how Hermes starts this server itself.
+    """
+    env = filtered_env()
+    # Hermes sets these when it launches its tools server, to keep the MCP wire clean.
+    env.setdefault("HERMES_QUIET", "1")
+    env.setdefault("HERMES_REDACT_SECRETS", "true")
+    command = cfg.hermes_mcp.command or ""
+    args = list(cfg.hermes_mcp.args)
+    if not command:
+        command = os.environ.get(HERMES_PYTHON_VAR, "")
+        args = args or list(HERMES_TOOLS_SERVER_ARGS)
+        pythonpath = os.environ.get(HERMES_PYTHONPATH_VAR)
+        if pythonpath:
+            env["PYTHONPATH"] = pythonpath
+    if not command:
+        raise ValueError("stdio command required")
+    return StdioServerParameters(command=command, args=args, env=env)
+
+
 def _tool_to_dict(tool: Any) -> dict[str, Any]:
     if isinstance(tool, dict):
         d = dict(tool)
@@ -69,7 +94,9 @@ def _tool_to_dict(tool: Any) -> dict[str, Any]:
     return d
 
 
-def _describe_startup_failure(exc: Exception, timeout_seconds: float) -> str:
+def _describe_startup_failure(
+    exc: Exception, timeout_seconds: float, params: StdioServerParameters
+) -> str:
     if isinstance(exc, TimeoutError):
         reason = f"timed out after {timeout_seconds:g}s waiting for the MCP server to initialize"
     elif isinstance(exc, FileNotFoundError):
@@ -77,9 +104,17 @@ def _describe_startup_failure(exc: Exception, timeout_seconds: float) -> str:
     else:
         detail = redact_text(str(exc))[:300] or "no detail"
         reason = f"{exc.__class__.__name__}: {detail}"
+    # Name the command, which may come from the Hermes plugin rather than the
+    # config; custom args are left out of the message.
+    if tuple(params.args) == HERMES_TOOLS_SERVER_ARGS:
+        how = f"`{' '.join([params.command, *HERMES_TOOLS_SERVER_ARGS])}`"
+    else:
+        how = f"`{params.command}` with the configured args"
+    if params.env and "PYTHONPATH" in params.env:
+        how += " and Hermes' PYTHONPATH"
     return (
-        f"Hermes MCP server failed to start ({reason}). Its stderr is discarded; run the "
-        "configured hermes_mcp.command and args by hand to see the error output."
+        f"Hermes MCP server failed to start ({reason}). Its stderr is discarded; "
+        f"run {redact_text(how)} by hand to see the error output."
     )
 
 
@@ -109,8 +144,6 @@ class HermesMCPClientShim:
                 ) from exc
             self.server = module._build_server()
         elif mode == "stdio":
-            if not self.cfg.hermes_mcp.command:
-                raise ValueError("stdio command required")
             await self._start_stdio()
         else:
             raise NotImplementedError(f"{mode} transport is not enabled for local tests")
@@ -118,15 +151,11 @@ class HermesMCPClientShim:
 
     async def _start_stdio(self) -> None:
         timeout_seconds = self.cfg.hermes_mcp.timeout_seconds
+        params = stdio_parameters(self.cfg)
         self._exit_stack = stack = AsyncExitStack()
         # The child's stderr is outside the bridge's redaction boundary, so it is
         # discarded rather than logged. Opening os.devnull does not block.
         errlog = stack.enter_context(open(os.devnull, "w", encoding="utf-8"))  # noqa: ASYNC230, SIM115
-        params = StdioServerParameters(
-            command=self.cfg.hermes_mcp.command or "",
-            args=list(self.cfg.hermes_mcp.args),
-            env=filtered_env(),
-        )
         try:
             read_stream, write_stream = await stack.enter_async_context(
                 stdio_client(params, errlog=errlog)
@@ -142,7 +171,9 @@ class HermesMCPClientShim:
         except Exception as exc:
             with contextlib.suppress(Exception):
                 await self.aclose()
-            raise HermesBackendError(_describe_startup_failure(exc, timeout_seconds)) from exc
+            raise HermesBackendError(
+                _describe_startup_failure(exc, timeout_seconds, params)
+            ) from exc
         self.session = session
 
     async def aclose(self) -> None:
