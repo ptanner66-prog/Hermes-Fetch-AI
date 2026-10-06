@@ -109,5 +109,5 @@ async def test_real_hermes_roundtrip_policy_and_skills_list(tmp_path, monkeypatc
             dispatcher.unregister(bridge.address, bridge)
             dispatcher.unregister(client.address, client)
 
-    audit_lines = (tmp_path / "field-audit.jsonl").read_text().strip().splitlines()
+    audit_lines = (tmp_path / "field-audit.jsonl").read_text(encoding="utf-8").strip().splitlines()
     assert len(audit_lines) >= 6

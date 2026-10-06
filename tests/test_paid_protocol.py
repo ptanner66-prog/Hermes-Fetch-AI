@@ -96,7 +96,9 @@ class Bridge:
         )
 
     def audit_events(self):
-        return [json.loads(line) for line in self.audit_path.read_text().splitlines()]
+        return [
+            json.loads(line) for line in self.audit_path.read_text(encoding="utf-8").splitlines()
+        ]
 
     def close(self):
         self.desk.seller.store.close()
@@ -159,7 +161,7 @@ async def test_audit_records_payments_in_short_form_only(bridge):
     assert (required["decision"], required["payment"]) == ("payment", "required")
     assert (verified["decision"], verified["payment"]) == ("allowed", "verified")
     assert verified["amount_base"] == "50000000000000000"
-    log = bridge.audit_path.read_text()
+    log = bridge.audit_path.read_text(encoding="utf-8")
     assert tx_hash not in log and terms["reference"] not in log and "fetch1buyerwallet" not in log
     assert verified["tx_short"] == f"{tx_hash[:8]}…{tx_hash[-4:]}"
 

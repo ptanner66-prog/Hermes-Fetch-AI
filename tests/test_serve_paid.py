@@ -243,7 +243,7 @@ async def test_paid_call_through_serve(seller, ledger, tmp_path):
     output = proc.stdout.read() if proc.stdout else ""
     assert rc == 0, f"serve did not shut down cleanly (rc={rc}):\n{output[-2000:]}"
     assert SEED not in output and TX_HASH not in output.upper()
-    audit = (tmp_path / "audit.jsonl").read_text()
+    audit = (tmp_path / "audit.jsonl").read_text(encoding="utf-8")
     assert TX_HASH not in audit.upper() and terms["reference"] not in audit
     assert '"payment": "verified"' in audit
 

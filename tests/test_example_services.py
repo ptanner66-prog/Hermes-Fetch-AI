@@ -151,7 +151,7 @@ def test_paid_services_example_loads_and_flags_its_placeholders(monkeypatch):
 
 def test_example_with_real_paths_passes_doctor_and_try(tmp_path, monkeypatch, capsys):
     monkeypatch.setenv("UAGENT_SEED", SEED)
-    text = (EXAMPLES / "paid-services.yaml").read_text()
+    text = (EXAMPLES / "paid-services.yaml").read_text(encoding="utf-8")
     text = text.replace("/usr/bin/python3", json.dumps(sys.executable))
     text = text.replace(
         "/path/to/Hermes-Fetch-AI/examples/services/code_review.py", json.dumps(str(CODE_REVIEW))
@@ -160,7 +160,7 @@ def test_example_with_real_paths_passes_doctor_and_try(tmp_path, monkeypatch, ca
         "/path/to/Hermes-Fetch-AI/examples/services/word_count.py", json.dumps(str(WORD_COUNT))
     )
     path = tmp_path / "paid-services.yaml"
-    path.write_text(text)
+    path.write_text(text, encoding="utf-8")
     assert cli.main(["doctor", "--config", str(path)]) == 0
     assert "services: security-review 0.1 FET, word-count 0.01 FET" in capsys.readouterr().out
     args = ["seller", "try", "word-count", "--request", "hello there", "--config", str(path)]
