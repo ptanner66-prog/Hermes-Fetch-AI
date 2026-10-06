@@ -13,6 +13,7 @@ import os
 import re
 import sys
 import tomllib
+import types
 from pathlib import Path
 from typing import Any
 
@@ -491,6 +492,47 @@ def test_a_payment_that_did_not_finish_is_never_reported_as_unpaid(monkeypatch):
     assert "may or may not have been made" in refused["error"]
     assert "buyer check pay-1a2b3c4d" in refused["error"]
     assert "nothing was paid" not in refused["error"]
+
+
+def test_buyer_tools_refuse_inside_hermes_plugin_host(monkeypatch):
+    # With plugins.isolation: host, Hermes runs tools in `python -m hermes_cli.plugin_host_child`,
+    # which cannot see a session's /yolo or show the payment prompt.
+    hermes = FakeHermes(monkeypatch, answer="accept")
+    bridge = FakeBridge(monkeypatch)
+    ctx = buyer_ctx()
+    host = types.ModuleType("__main__")
+    host.__spec__ = types.SimpleNamespace(name="hermes_cli.plugin_host_child")
+    monkeypatch.setitem(sys.modules, "__main__", host)
+    assert plugin.in_plugin_host() and plugin.yolo_active() is None
+    refused = call(ctx, "fetchai_pay", payment_request="pay-1a2b3c4d")
+    assert "plugins.isolation: in_process" in refused["error"]
+    assert (
+        "plugins.isolation"
+        in call(ctx, "fetchai_message_agent", agent=AGENT, message="hi")["error"]
+    )
+    assert hermes.prompts == [] and bridge.calls == []
+
+
+@pytest.mark.parametrize("answer", [["not", "a", "dict"], None, KeyError("status")])
+def test_a_payment_whose_answer_cannot_be_read_is_never_reported_as_unpaid(monkeypatch, answer):
+    # Hermes tools return errors and never raise; after the user approved, the payment
+    # may already have been sent, so the answer says to check it.
+    FakeHermes(monkeypatch, answer="accept")
+    FakeBridge(monkeypatch, answers={"pay": answer})
+    refused = call(buyer_ctx(), "fetchai_pay", payment_request="pay-1a2b3c4d")
+    assert "may or may not have been made" in refused["error"]
+    assert "buyer check pay-1a2b3c4d" in refused["error"]
+
+
+@pytest.mark.parametrize("tool", ["message", "show"])
+def test_tools_answer_with_an_error_when_the_bridges_answer_is_unexpected(monkeypatch, tool):
+    FakeHermes(monkeypatch, answer="accept")
+    FakeBridge(monkeypatch, answers={tool: ["unexpected"]})
+    if tool == "message":
+        answer = call(buyer_ctx(), "fetchai_message_agent", agent=AGENT, message="hi")
+    else:  # the request shown before asking the user
+        answer = call(buyer_ctx(), "fetchai_pay", payment_request="pay-1a2b3c4d")
+    assert "could not be read" in answer["error"] or "bad arguments" in answer["error"]
 
 
 def test_message_waits_as_long_as_the_bridge_does_unless_told(monkeypatch):
