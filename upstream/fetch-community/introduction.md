@@ -3,8 +3,10 @@
 A short post for Fetch.ai's developer community, from the repository owner's account. Fetch.ai's
 docs point developers to its Discord, <https://discord.gg/fetchai>; post it in the developer
 channel there. The Innovation Lab is also on X as [@fetch_ai_IL](https://x.com/fetch_ai_IL). It
-asks four things only Fetch.ai can answer. The answers decide details the trial would otherwise
-have to guess ([`docs/validation.md`](../../docs/validation.md#open-for-the-real-world-trial)).
+also asks four things about ASI:One's payment card that Fetch.ai's docs leave open. None of them
+blocks anything: the bridge handles every possible answer, and one test purchase in ASI:One shows
+the real ones ([`docs/validation.md`](../../docs/validation.md#open-for-the-real-world-trial)).
+Asking puts the answers on record and starts a conversation.
 Post it once the fet-example pull request is open, and link that too.
 
 ---
