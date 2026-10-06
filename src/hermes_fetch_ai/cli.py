@@ -400,10 +400,10 @@ def agentverse(args: argparse.Namespace) -> int:
     cfg = _load_or_report(args.config)
     if cfg is None:
         return 1
-    if not cfg.chat.enable_chat:
+    if not (cfg.chat.enable_chat or cfg.buying.enabled):
         print(
-            "agentverse: FAIL: ASI:One talks to agents through chat; "
-            "set chat.enable_chat: true (it sells the services in this config)",
+            "agentverse: FAIL: the agent neither sells through chat nor buys; set "
+            "chat.enable_chat: true (to sell to ASI:One users) or buying.enabled: true",
             file=sys.stderr,
         )
         return 1
@@ -478,6 +478,42 @@ def serve(args: argparse.Namespace) -> int:
 CONFIG_HELP = "the bridge's config file (default: the one `setup` wrote)"
 
 
+def setup(args: argparse.Namespace) -> int:
+    """The setup wizard: plain-language questions that write the bridge's config."""
+    import json
+
+    from .agentverse import register
+    from .audit import managed_config_path
+    from .setup_wizard import Asker, ConsoleAsker, ScriptedAsker, run_setup
+
+    asker: Asker
+    if args.answers:
+        try:
+            source = sys.stdin.read() if args.answers == "-" else Path(args.answers).read_text()
+            answers = json.loads(source)
+        except (OSError, ValueError) as exc:
+            print(f"setup: FAIL: cannot read the answers ({exc})", file=sys.stderr)
+            return 1
+        if not isinstance(answers, dict):
+            print("setup: FAIL: the answers must be a JSON object", file=sys.stderr)
+            return 1
+        asker = ScriptedAsker(answers, echo=sys.stdout)
+    elif not sys.stdin.isatty():
+        print(
+            "setup: FAIL: setup asks questions; run it in a terminal (or give --answers <file>)",
+            file=sys.stderr,
+        )
+        return 2
+    else:
+        asker = ConsoleAsker()
+
+    def list_on_agentverse(cfg: BridgeConfig, seed: str, api_key: str) -> None:
+        register(cfg, seed, api_key)
+
+    path = Path(args.config) if args.config else managed_config_path()
+    return run_setup(asker, path, fund=_fund_from_faucet, list_on_agentverse=list_on_agentverse)
+
+
 def build_parser() -> argparse.ArgumentParser:
     from . import __version__
 
@@ -489,6 +525,18 @@ def build_parser() -> argparse.ArgumentParser:
         "--config", default=None, help="config to check (default: yours from setup, else the demo)"
     )
     d.set_defaults(func=doctor)
+    st = sub.add_parser(
+        "setup", help="set up your agent by answering a few questions (again to change it)"
+    )
+    st.add_argument(
+        "--config", default=None, help="where to write the config (default: the managed one)"
+    )
+    st.add_argument(
+        "--answers",
+        default=None,
+        help="a JSON file of answers by question key, instead of asking (- reads stdin)",
+    )
+    st.set_defaults(func=setup)
     ph = sub.add_parser("probe-hermes", help="check that Hermes' tools MCP server can be imported")
     ph.set_defaults(func=probe_hermes)
     s = sub.add_parser("serve", help="run the bridge uAgent until interrupted")

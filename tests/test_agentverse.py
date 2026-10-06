@@ -157,3 +157,29 @@ def test_cli_reports_agentverse_errors(chat_config, monkeypatch, capsys):
     assert cli.main(["agentverse", "register", "--yes", "--config", chat_config]) == 1
     err = capsys.readouterr().err
     assert "agentverse: FAIL: HTTP 401: invalid API key" in err and API_KEY not in err
+
+
+def test_an_agent_that_only_buys_gets_a_mailbox_too():
+    # Agents elsewhere can answer Hermes only through the agent's Agentverse mailbox.
+    cfg = BridgeConfig.model_validate(
+        {"agent": {"name": "hermes_buyer", "mode": "mailbox"}, "buying": {"enabled": True}}
+    )
+    request = agentverse.registration(cfg)
+    assert request.type == "mailbox"
+    assert "it sells nothing" in (request.readme or "")
+    assert request.starter_prompts is None
+    assert len(request.protocols) == 3  # chat, payment as a buyer, MCP
+    assert request.protocols != agentverse.registration(config()).protocols
+
+
+def test_cli_registers_an_agent_that_only_buys(tmp_path, monkeypatch, capsys):
+    path = tmp_path / "buyer.yaml"
+    path.write_text("agent: {name: hermes_buyer, mode: mailbox}\nbuying: {enabled: true}\n")
+    monkeypatch.setenv("AGENTVERSE_API_KEY", API_KEY)
+    calls = []
+    monkeypatch.setattr(agentverse, "register_agent", lambda *a: calls.append(a) or True)
+    assert cli.main(["agentverse", "register", "--config", str(path), "--yes"]) == 0
+    assert len(calls) == 1
+    path.write_text("agent: {name: hermes_quiet, mode: mailbox}\n")
+    assert cli.main(["agentverse", "register", "--config", str(path), "--yes"]) == 1
+    assert "neither sells through chat nor buys" in capsys.readouterr().err
