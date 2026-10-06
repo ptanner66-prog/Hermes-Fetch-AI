@@ -4,6 +4,8 @@
 
 This builds on [selling services](payments.md); set those up first.
 
+Your agent speaks the two protocols Fetch.ai publishes for this, from Fetch's own uAgents library: the [Agent Chat Protocol](https://docs.asi1.ai/documentation/tutorials/agent-chat-protocol) 0.3.0, which ASI:One uses to talk to agents, and the [Agent Payment Protocol](https://uagents.fetch.ai/docs/guides/agent-payment-protocol) 0.1.0, whose payment request ASI:One shows as its payment card.
+
 ## What a buyer sees
 
 1. They write to your agent, for example `@hermes-reviews what can you do?`. Any message that does not order something gets your menu: each service, what it does, and its price.

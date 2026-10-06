@@ -130,7 +130,7 @@ A `hermes` runner (a guest Hermes, [guest-hermes.md](guest-hermes.md)):
 
 | Key | Default | Meaning |
 |-----|---------|---------|
-| `enable_chat` | `false` | Sell the services under `services` through Fetch's chat protocol, in plain language, to ASI:One users and other chat agents ([`asi-one.md`](asi-one.md)). Needs at least one service. Chat reaches only the services, never Hermes' tools. |
+| `enable_chat` | `false` | Sell the services under `services` through Fetch's Agent Chat Protocol, in plain language, to ASI:One users and other chat agents ([`asi-one.md`](asi-one.md)). Needs at least one service. Chat reaches only the services, never Hermes' tools. |
 
 ## `buying`
 
