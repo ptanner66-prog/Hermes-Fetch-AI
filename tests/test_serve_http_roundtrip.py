@@ -157,3 +157,19 @@ async def test_serve_http_roundtrip_and_graceful_shutdown(bridge_proc):
     # publish_manifest: false, so the bridge never reports itself to the Almanac API.
     assert "registration status" not in output
     assert "Shutting down agent...complete." in output
+
+
+def test_example_client_calls_the_bridge(bridge_proc):
+    _, endpoint = bridge_proc
+    address = Identity.from_seed(LOCAL_IDENTITY_TEXT, 0).address
+    example = Path(__file__).parents[1] / "examples" / "call_bridge.py"
+    res = subprocess.run(
+        [sys.executable, str(example), address, endpoint, "--text", "from-example"],
+        capture_output=True,
+        text=True,
+        timeout=60,
+        check=False,
+    )
+    assert res.returncode == 0, res.stderr[-2000:]
+    assert "tools: ['echo']" in res.stdout
+    assert "result: from-example" in res.stdout
