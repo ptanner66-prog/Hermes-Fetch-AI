@@ -110,10 +110,11 @@ async def local_dispatch_request(
 
 
 async def run_local_roundtrip(cfg: BridgeConfig) -> tuple[str, int, str, int]:
-    """Run the local demo: a client uAgent lists tools and calls echo on the bridge."""
-    audit_path = cfg.audit_path
-    audit_path.unlink(missing_ok=True)
+    """Run the local demo: a client uAgent lists tools and calls echo on the bridge.
 
+    Returns the bridge address, the number of tools the client sees, the echo
+    result, and the number of records in the audit log at ``cfg.audit_path``.
+    """
     async with HermesMCPClientShim(cfg) as shim:
         bridge = build_agent(cfg, shim)
         client_cfg = cfg.model_copy(deep=True)
@@ -135,7 +136,7 @@ async def run_local_roundtrip(cfg: BridgeConfig) -> tuple[str, int, str, int]:
         bridge.address,
         len(list_resp.tools or []),
         str(call_resp.result),
-        AuditWriter(audit_path).count(),
+        AuditWriter(cfg.audit_path).count(),
     )
 
 
@@ -163,76 +164,85 @@ def _install_stop_handlers(loop: asyncio.AbstractEventLoop, stop: asyncio.Event)
                 signal.signal(sig, request_stop)
 
 
+class ServeError(RuntimeError):
+    """The bridge's uAgents server stopped on its own."""
+
+
+async def _supervised(coro: Coroutine[Any, Any, Any], what: str) -> None:
+    try:
+        await coro
+    except SystemExit as exc:
+        # uvicorn calls sys.exit() when it cannot start, for example when the
+        # port is taken. Inside a task that would tear through the event loop.
+        raise ServeError(
+            f"{what} stopped during startup (exit status {exc.code}); "
+            "is agent.port already in use? See the error logged above."
+        ) from None
+
+
 def _agent_runtime_coroutines(agent: Agent) -> list[Coroutine[Any, Any, Any]]:
     """Return the uAgents runtime coroutines normally created by Agent.run_async()."""
     server_coro = agent.start_server()
-    coros: list[Coroutine[Any, Any, Any]] = [server_coro]
     if agent._use_mailbox and not agent._rest_handlers:
         server_coro.close()
         coros = []
+    else:
+        coros = [_supervised(server_coro, "the bridge's HTTP server")]
     if agent._use_mailbox and agent._mailbox_client is not None:
-        coros.append(agent._mailbox_client.run())
+        coros.append(_supervised(agent._mailbox_client.run(), "the Agentverse mailbox client"))
     return coros
 
 
 async def _run_agent_until_stop(agent: Agent, stop: asyncio.Event) -> None:
-    """Run an Agent until stop is set, then perform uAgents graceful shutdown.
+    """Run an Agent until stop is set or its server fails, then shut it down.
 
     Agent.run_async() owns process lifetime and cancels every task on the loop
-    during teardown. The bridge has one extra lifetime task (the signal stop
-    waiter), so using run_async() directly can cancel the bridge supervisor and
-    close the loop while uAgents shutdown coroutines are still alive. This small
-    supervisor mirrors uAgents' startup path but keeps shutdown ownership in the
-    bridge, producing deterministic rc=0 exits on Windows and Unix.
+    during teardown, which would also cancel the bridge's own tasks, such as
+    the Hermes backend's. This supervisor mirrors uAgents' startup path but
+    cancels only the agent's tasks, producing deterministic rc=0 exits on
+    Windows and Unix. A server failure is raised after the shutdown.
     """
     agent.setup()
     runtime_tasks = [asyncio.create_task(coro) for coro in _agent_runtime_coroutines(agent)]
     stop_task = asyncio.create_task(stop.wait())
+    done: set[asyncio.Task[Any]] = set()
     try:
         done, _ = await asyncio.wait(
             {stop_task, *runtime_tasks}, return_when=asyncio.FIRST_COMPLETED
         )
-        if stop_task not in done:
-            for task in done:
-                task.result()
-    except (asyncio.CancelledError, KeyboardInterrupt):
-        stop.set()
     finally:
         stop_task.cancel()
-        with contextlib.suppress(BaseException):
+        with contextlib.suppress(asyncio.CancelledError):
             await stop_task
-
-        logger = getattr(agent, "_logger", None)
-        if logger is not None:
-            logger.info("Shutting down agent...")
+        agent._logger.info("Shutting down agent...")
         try:
             await asyncio.wait_for(agent._shutdown(runtime_tasks), timeout=agent._shutdown_timeout)
         except TimeoutError:
-            if logger is not None:
-                logger.warning(
-                    f"Shutdown did not complete within {agent._shutdown_timeout}s timeout"
-                )
+            agent._logger.warning(
+                f"Shutdown did not complete within {agent._shutdown_timeout}s timeout"
+            )
         except Exception:
-            if logger is not None:
-                logger.exception("Error during shutdown")
-            else:
-                raise
+            agent._logger.exception("Error during shutdown")
+        agent._logger.info("Shutting down agent...complete.")
+    for task in done - {stop_task}:
+        task.result()
 
-        remaining = [
-            task
-            for task in asyncio.all_tasks()
-            if task is not asyncio.current_task() and not task.done()
-        ]
-        for task in remaining:
-            task.cancel()
-        if remaining:
-            await asyncio.gather(*remaining, return_exceptions=True)
-        if logger is not None:
-            logger.info("Shutting down agent...complete.")
+
+def _cancel_leftover_tasks(loop: asyncio.AbstractEventLoop) -> None:
+    """Cancel tasks uAgents left running, as asyncio.run() does on exit."""
+    leftover = [task for task in asyncio.all_tasks(loop) if not task.done()]
+    for task in leftover:
+        task.cancel()
+    if leftover:
+        loop.run_until_complete(asyncio.gather(*leftover, return_exceptions=True))
 
 
 def run_bridge(cfg: BridgeConfig) -> None:
-    """Run the bridge agent until it exits or SIGINT/SIGTERM/SIGBREAK arrives."""
+    """Run the bridge agent until SIGINT/SIGTERM/SIGBREAK arrives.
+
+    Raises HermesBackendError if the Hermes backend cannot start and
+    ServeError if the agent's server stops on its own.
+    """
     loop = asyncio.new_event_loop()
     asyncio.set_event_loop(loop)
     stop = asyncio.Event()
@@ -248,7 +258,6 @@ def run_bridge(cfg: BridgeConfig) -> None:
             loop.run_until_complete(_main())
     finally:
         with contextlib.suppress(Exception):
+            _cancel_leftover_tasks(loop)
             loop.run_until_complete(loop.shutdown_asyncgens())
-        with contextlib.suppress(Exception):
-            loop.stop()
-            loop.close()
+        loop.close()

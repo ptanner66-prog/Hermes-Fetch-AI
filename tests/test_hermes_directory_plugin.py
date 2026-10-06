@@ -166,11 +166,16 @@ def test_run_bridge_returns_exit_code_and_hands_over_a_clean_environment(monkeyp
     monkeypatch.setenv("PYTHONPATH", os.pathsep.join(["/hermes/checkout", "/hermes/site"]))
     monkeypatch.setenv("VIRTUAL_ENV", "/hermes/venv")
     monkeypatch.setenv("UAGENT_SEED", "seed-for-tests-" + "0123456789abcdef0123456789")
+    monkeypatch.setenv("HERMES_HOME", str(tmp_path / "hermes-home"))
+    # Hermes loads provider keys from its .env; the bridge must not get them.
+    monkeypatch.setenv("OPENROUTER_API_" + "KEY", "provider-key-for-tests")
     seen_file = tmp_path / "seen.json"
     names = [
         "PYTHONPATH",
         "VIRTUAL_ENV",
         "UAGENT_SEED",
+        "HERMES_HOME",
+        "OPENROUTER_API_" + "KEY",
         plugin.HERMES_PYTHON_VAR,
         plugin.HERMES_PYTHONPATH_VAR,
     ]
@@ -186,7 +191,9 @@ def test_run_bridge_returns_exit_code_and_hands_over_a_clean_environment(monkeyp
     assert seen["argv"] == ["doctor", "--flag"]
     env = seen["env"]
     assert env["PYTHONPATH"] is None and env["VIRTUAL_ENV"] is None
+    assert env["OPENROUTER_API_" + "KEY"] is None
     assert env["UAGENT_SEED"] == "seed-for-tests-" + "0123456789abcdef0123456789"
+    assert env["HERMES_HOME"] == str(tmp_path / "hermes-home")
     assert env[plugin.HERMES_PYTHON_VAR] == sys.executable
     assert env[plugin.HERMES_PYTHONPATH_VAR].startswith("/hermes/checkout")
 

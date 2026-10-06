@@ -36,5 +36,5 @@ class FakeFastMCP:
         raise ValueError(f"unknown tool: {name}")
 
 
-def _build_fake_server() -> FakeFastMCP:
+def build_fake_server() -> FakeFastMCP:
     return FakeFastMCP()

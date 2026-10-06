@@ -5,8 +5,11 @@ import re
 from typing import Any
 
 REDACTED = "[REDACTED]"
+# Words that mark a secret, shared by log redaction and the config secret scanner.
+SECRET_WORDS = r"seed|secret|token|api[_-]?key|password|mailbox[_-]?key"
+_SENSITIVE_KEY = re.compile(rf"(?i)({SECRET_WORDS})")
 _SENSITIVE_KV = re.compile(
-    r"(?i)\b(seed|secret|token|api[_-]?key|password)(\s*[:=]\s*)"
+    rf"(?i)\b({SECRET_WORDS})(\s*[:=]\s*)"
     r"(\"[^\"]*\"|'[^']*'|[^,'\";}\]\r\n]+)"
 )
 _PATTERNS = [
@@ -31,7 +34,7 @@ def redact_dict(d: Any) -> Any:
     if isinstance(d, dict):
         result = {}
         for k, v in d.items():
-            if re.search(r"(?i)(seed|secret|token|api[_-]?key|password)", str(k)):
+            if _SENSITIVE_KEY.search(str(k)):
                 result[k] = REDACTED
             else:
                 result[k] = redact_dict(v)

@@ -9,6 +9,7 @@ is the path production deployments actually run.
 
 from __future__ import annotations
 
+import json
 import os
 import signal
 import socket
@@ -64,8 +65,21 @@ def _request_graceful_stop(proc: subprocess.Popen[str], timeout: float = 30.0) -
     return proc.returncode
 
 
-@pytest.fixture
-def bridge_proc(tmp_path: Path, unused_tcp_port: int):
+FAKE_MCP_SERVER = Path(__file__).parent / "fakes" / "fake_mcp_subprocess.py"
+BACKENDS = {
+    "fake": "hermes_mcp:\n  mode: fake\n",
+    # stdio, like production: the bridge runs an MCP server as a child process.
+    "stdio": (
+        "hermes_mcp:\n"
+        "  mode: stdio\n"
+        f"  command: {json.dumps(sys.executable)}\n"
+        f"  args: [{json.dumps(str(FAKE_MCP_SERVER))}]\n"
+    ),
+}
+
+
+@pytest.fixture(params=sorted(BACKENDS))
+def bridge_proc(request: pytest.FixtureRequest, tmp_path: Path, unused_tcp_port: int):
     port = unused_tcp_port
     endpoint = f"http://127.0.0.1:{port}/submit"
     cfg = tmp_path / "serve.yaml"
@@ -78,13 +92,9 @@ def bridge_proc(tmp_path: Path, unused_tcp_port: int):
         "  mode: endpoint\n"
         "  publish_manifest: false\n"
         "  enable_agent_inspector: false\n"
-        "  dev_random_seed: false\n"
-        "hermes_mcp:\n"
-        "  mode: fake\n"
-        "policy:\n"
+        "  dev_random_seed: false\n" + BACKENDS[request.param] + "policy:\n"
         "  public_tools: [echo]\n"
         "logging:\n"
-        "  redaction: true\n"
         f"  audit_path: {tmp_path / 'audit.jsonl'}\n",
         encoding="utf-8",
     )
@@ -146,3 +156,4 @@ async def test_serve_http_roundtrip_and_graceful_shutdown(bridge_proc):
     assert LOCAL_IDENTITY_TEXT not in output
     # publish_manifest: false, so the bridge never reports itself to the Almanac API.
     assert "registration status" not in output
+    assert "Shutting down agent...complete." in output

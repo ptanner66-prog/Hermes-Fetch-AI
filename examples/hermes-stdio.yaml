@@ -62,7 +62,5 @@ policy:
     - terminal
     - patch
     - write_file
-logging:
-  redaction: true
 chat:
   enable_chat: false

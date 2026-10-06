@@ -3,6 +3,7 @@ from __future__ import annotations
 import argparse
 import asyncio
 import sys
+import tempfile
 from importlib import resources
 from pathlib import Path
 
@@ -37,35 +38,6 @@ def default_config_path() -> Path:
     return example_config_path("local-direct.yaml")
 
 
-def _is_source_checkout() -> bool:
-    return (ROOT / "pyproject.toml").is_file() and (ROOT / "src" / "hermes_fetch_ai").is_dir()
-
-
-def _contamination_scan() -> tuple[bool, str]:
-    forbidden = ["Open" + "Claw", "market" + "place", "bill" + "ing", "pay" + "ment"]
-    paths = [
-        ROOT / "src",
-        ROOT / "docs",
-        ROOT / "examples",
-        ROOT / "hermes-plugin",
-        ROOT / "upstream",
-        ROOT / "README.md",
-        ROOT / ".env.example",
-        ROOT / "pyproject.toml",
-    ]
-    hits: list[str] = []
-    for p in paths:
-        files = [p] if p.is_file() else list(p.rglob("*")) if p.exists() else []
-        for f in files:
-            if not f.is_file() or f.suffix.lower() in {".pyc", ".png", ".jpg"}:
-                continue
-            text = f.read_text(encoding="utf-8", errors="ignore")
-            for term in forbidden:
-                if term.lower() in text.lower():
-                    hits.append(f"{f}: {term}")
-    return (not hits, "ok" if not hits else "\n".join(hits))
-
-
 def _load_or_report(path: str | Path) -> BridgeConfig | None:
     try:
         return load_config(path)
@@ -77,39 +49,38 @@ def _load_or_report(path: str | Path) -> BridgeConfig | None:
 
 
 def doctor(args: argparse.Namespace) -> int:
-    config_path = args.config or default_config_path()
-    ok, msg = validate_config_file(config_path)
-    if not ok:
-        print(f"config: FAIL: {msg}")
+    from . import __version__
+
+    print(f"hermes-fetch-ai {__version__}")
+    config_path = Path(args.config) if args.config else default_config_path()
+    cfg = _load_or_report(config_path)
+    if cfg is None:
         return 1
+    note = "" if args.config else " (the demo config; pass --config to check yours)"
+    print(f"config: ok: {config_path}{note}")
     pin_problems = check_pins()
     if pin_problems:
         print("pins: WARN: " + "; ".join(pin_problems))
-    seed_warning = load_config(config_path).ignored_seed_warning()
+    seed_warning = cfg.ignored_seed_warning()
     if seed_warning:
         print(f"seed: WARN: {seed_warning}")
-    if args.contamination_scan:
-        if not _is_source_checkout():
-            print("contamination: SKIP (only meaningful in a source checkout)")
-        else:
-            clean, detail = _contamination_scan()
-            print(f"contamination: {'ok' if clean else 'FAIL'}")
-            if not clean:
-                print(detail)
-                return 1
     print("doctor: ok")
     return 0
 
 
 def probe_hermes(args: argparse.Namespace) -> int:
-    for k, v in probe().items():
+    info = probe()
+    for k, v in info.items():
         print(f"{k}: {v}")
-    return 0
+    return 0 if info["hermes_tools_server"] == "importable" else 1
 
 
 async def _demo_local() -> int:
     cfg = load_config(default_config_path())
-    bridge_address, visible_count, echo_result, audit_count = await run_local_roundtrip(cfg)
+    # The demo audits to a throwaway file, never to a real bridge's audit log.
+    with tempfile.TemporaryDirectory(prefix="hermes-fetch-ai-demo-") as tmp:
+        cfg.logging.audit_path = str(Path(tmp) / "audit.jsonl")
+        bridge_address, visible_count, echo_result, audit_count = await run_local_roundtrip(cfg)
     print(f"bridge address: {bridge_address}")
     print(f"visible tool count: {visible_count}")
     print(f"echo result: {echo_result}")
@@ -131,7 +102,7 @@ def demo(args: argparse.Namespace) -> int:
 
 def serve(args: argparse.Namespace) -> int:
     from .mcp_shim import HermesBackendError
-    from .uagent_app import run_bridge
+    from .uagent_app import ServeError, run_bridge
 
     cfg = _load_or_report(args.config)
     if cfg is None:
@@ -144,6 +115,9 @@ def serve(args: argparse.Namespace) -> int:
     except HermesBackendError as exc:
         print(f"hermes backend: FAIL: {exc}", file=sys.stderr)
         return 1
+    except ServeError as exc:
+        print(f"serve: FAIL: {exc}", file=sys.stderr)
+        return 1
     return 0
 
 
@@ -153,16 +127,15 @@ def build_parser() -> argparse.ArgumentParser:
     p = argparse.ArgumentParser(prog="hermes-fetch-ai")
     p.add_argument("--version", action="version", version=f"%(prog)s {__version__}")
     sub = p.add_subparsers(dest="cmd", required=True)
-    d = sub.add_parser("doctor")
-    d.add_argument("--config", default=None)
-    d.add_argument("--contamination-scan", action="store_true")
+    d = sub.add_parser("doctor", help="check a config file and the installed dependency pins")
+    d.add_argument("--config", default=None, help="config to check (default: the demo config)")
     d.set_defaults(func=doctor)
-    ph = sub.add_parser("probe-hermes")
+    ph = sub.add_parser("probe-hermes", help="check that Hermes' tools MCP server can be imported")
     ph.set_defaults(func=probe_hermes)
-    s = sub.add_parser("serve")
+    s = sub.add_parser("serve", help="run the bridge uAgent until interrupted")
     s.add_argument("--config", required=True)
     s.set_defaults(func=serve)
-    dm = sub.add_parser("demo")
+    dm = sub.add_parser("demo", help="run the local demo, or check the mailbox demo setup")
     dm.add_argument("kind", choices=["local", "mailbox"])
     dm.set_defaults(func=demo)
     return p

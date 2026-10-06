@@ -194,13 +194,11 @@ async def test_call_timeout_returns_structured_error(monkeypatch):
 
 
 @pytest.mark.asyncio
-async def test_tool_error_text_is_size_capped():
-    c = cfg(hermes_mcp={"mode": "fake"}, policy={"public_tools": [], "max_output_bytes": 16})
-    async with HermesMCPClientShim(c) as shim:
-        out = await shim.call_tool("x" * 500, {})
-    assert out.is_error and out.truncated
-    assert len(out.text.encode("utf-8")) <= 16
-    assert out.output_bytes > 16
+async def test_backend_exceptions_reach_callers_as_a_fixed_message():
+    async with HermesMCPClientShim(cfg(hermes_mcp={"mode": "fake"})) as shim:
+        # The fake server raises ValueError("unknown tool: <name>").
+        out = await shim.call_tool("/internal/path", {})
+    assert out.is_error and out.text == "tool call failed"
 
 
 @pytest.mark.asyncio

@@ -15,10 +15,6 @@ def cfg():
     return BridgeConfig(agent={"dev_random_seed": True}, policy={"public_tools": ["echo"]})
 
 
-def test_noop_registration_policy_noops():
-    assert NoopRegistrationPolicy().should_register() is False
-
-
 @pytest.mark.asyncio
 async def test_noop_registration_policy_register_noops():
     assert await NoopRegistrationPolicy().register("id", None, [], [], None) is None

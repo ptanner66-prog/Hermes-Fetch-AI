@@ -9,7 +9,9 @@ from typing import Literal
 import yaml
 from pydantic import BaseModel, ConfigDict, Field, ValidationError, field_validator, model_validator
 
+from ._redaction import SECRET_WORDS
 from .audit import default_audit_path
+from .tool_names import validate_tool_name
 
 MIN_SEED_LENGTH = 32
 # Set by the fetchai-bridge Hermes plugin (hermes-plugin/fetchai-bridge): the
@@ -19,7 +21,7 @@ HERMES_PYTHON_VAR = "HERMES_FETCH_AI_HERMES_PYTHON"
 HERMES_PYTHONPATH_VAR = "HERMES_FETCH_AI_HERMES_PYTHONPATH"
 SEED_HINT = 'generate one with: python -c "import secrets; print(secrets.token_hex(32))"'
 
-_SECRET_WORDS = r"(?:seed|secret|token|api[_-]?key|password|mailbox[_-]?key)"
+_SECRET_WORDS = rf"(?:{SECRET_WORDS})"
 # Credential formats and key=value assignments. Plain words such as "token" in a
 # description are not flagged; values that look like actual secrets are.
 _SECRET_VALUE_PATTERNS = (
@@ -46,25 +48,36 @@ class ConfigError(ValueError):
 class AgentConfig(BaseModel):
     model_config = ConfigDict(extra="forbid")
     name: str = "hermes_fetch_bridge"
-    port: int = 8000
-    network: str = "testnet"
+    port: int = Field(default=8000, ge=1, le=65535)
+    network: Literal["testnet", "mainnet"] = "testnet"
     mode: Literal["endpoint", "mailbox", "proxy"] = "endpoint"
     publish_manifest: bool = False
     enable_agent_inspector: bool = False
     dev_random_seed: bool = False
+    # Accepted only so that a seed in YAML gets a clear error; see validate_cross_fields.
     seed: str | None = None
     endpoint: str | None = None
-    mailbox_key: str | None = None
     description: str = "Hermes Fetch AI bridge"
 
 
 class HermesMCPConfig(BaseModel):
     model_config = ConfigDict(extra="forbid")
-    mode: Literal["fake", "in_process_hermes_tools", "stdio", "sse", "http"] = "fake"
+    mode: Literal["fake", "in_process_hermes_tools", "stdio"] = "fake"
     command: str | None = None
     args: list[str] = Field(default_factory=list)
-    url: str | None = None
-    timeout_seconds: float = 10.0
+    timeout_seconds: float = Field(default=10.0, gt=0)
+
+
+def _check_tool_names(names: list[str]) -> list[str]:
+    for name in names:
+        try:
+            validate_tool_name(name)
+        except ValueError:
+            raise ValueError(
+                f"{name!r} is not a valid tool name (letters, digits, '_', '.', '-'; "
+                "at most 128 characters)"
+            ) from None
+    return names
 
 
 class PolicyConfig(BaseModel):
@@ -72,24 +85,36 @@ class PolicyConfig(BaseModel):
     public_tools: list[str] = Field(default_factory=list)
     allowed_senders: dict[str, list[str]] = Field(default_factory=dict)
     denied_tools: list[str] = Field(default_factory=list)
-    max_args_bytes: int = 65536
-    max_output_bytes: int = 65536
-    max_list_tools_response_bytes: int = 65536
-    max_calls_per_minute_per_sender: int = 30
-    max_list_tools_per_minute_per_sender: int = 30
-    max_global_calls_per_minute: int = 300
-    max_global_list_tools_per_minute: int = 300
-    max_tracked_senders: int = 4096
+    max_args_bytes: int = Field(default=65536, gt=0)
+    max_output_bytes: int = Field(default=65536, gt=0)
+    max_list_tools_response_bytes: int = Field(default=65536, gt=0)
+    # A rate limit of 0 blocks that request type entirely.
+    max_calls_per_minute_per_sender: int = Field(default=30, ge=0)
+    max_list_tools_per_minute_per_sender: int = Field(default=30, ge=0)
+    max_global_calls_per_minute: int = Field(default=300, ge=0)
+    max_global_list_tools_per_minute: int = Field(default=300, ge=0)
+    max_tracked_senders: int = Field(default=4096, gt=0)
     require_replay_metadata: bool = True
-    replay_ttl_seconds: float = 300.0
-    max_replay_entries: int = 8192
-    max_replay_clock_skew_seconds: float = 60.0
+    replay_ttl_seconds: float = Field(default=300.0, gt=0)
+    max_replay_entries: int = Field(default=8192, gt=0)
+    max_replay_clock_skew_seconds: float = Field(default=60.0, ge=0)
     trusted_shell_tools: list[str] = Field(default_factory=list)
+
+    @field_validator("public_tools", "denied_tools", "trusted_shell_tools")
+    @classmethod
+    def _tool_names(cls, names: list[str]) -> list[str]:
+        return _check_tool_names(names)
+
+    @field_validator("allowed_senders")
+    @classmethod
+    def _sender_tool_names(cls, senders: dict[str, list[str]]) -> dict[str, list[str]]:
+        for names in senders.values():
+            _check_tool_names(names)
+        return senders
 
 
 class LoggingConfig(BaseModel):
     model_config = ConfigDict(extra="forbid")
-    redaction: bool = True
     audit_path: str | None = None
 
 
@@ -167,14 +192,24 @@ def _looks_like_secret(value: str) -> bool:
     return any(pattern.search(value) for pattern in _SECRET_VALUE_PATTERNS)
 
 
-def _scan_secret_values(obj: object, *, under_secret_key: bool = False) -> None:
+def _scan_secret_values(
+    obj: object, *, under_secret_key: bool = False, keys_are_addresses: bool = False
+) -> None:
     if isinstance(obj, dict):
         for k, v in obj.items():
             key = str(k)
             if _looks_like_secret(key):
                 raise ValueError(_SECRET_MESSAGE)
-            secret_key = key not in _NON_SECRET_KEYS and bool(SECRET_KEY_RE.search(key))
-            _scan_secret_values(v, under_secret_key=secret_key)
+            # Agent addresses (keys of policy.allowed_senders) are random strings
+            # that can contain a word such as "seed", so the key-name check skips them.
+            secret_key = (
+                not keys_are_addresses
+                and key not in _NON_SECRET_KEYS
+                and bool(SECRET_KEY_RE.search(key))
+            )
+            _scan_secret_values(
+                v, under_secret_key=secret_key, keys_are_addresses=key == "allowed_senders"
+            )
     elif isinstance(obj, list):
         for v in obj:
             if isinstance(v, str) and _SECRET_FLAG_RE.match(v.strip()):

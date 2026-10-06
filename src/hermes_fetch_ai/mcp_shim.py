@@ -6,14 +6,15 @@ import importlib
 import os
 from contextlib import AsyncExitStack
 from datetime import timedelta
-from typing import Any, Self
+from typing import Any, Protocol, Self
 
 from mcp import ClientSession
 from mcp.client.stdio import StdioServerParameters, stdio_client
 
 from ._redaction import redact_text
 from .config import HERMES_PYTHON_VAR, HERMES_PYTHONPATH_VAR, BridgeConfig
-from .fake_mcp import _build_fake_server
+from .fake_mcp import build_fake_server
+from .logging import get_logger
 from .result_normalizer import (
     NormalizedToolResult,
     error_result,
@@ -24,9 +25,21 @@ from .result_normalizer import (
 HERMES_TOOLS_MODULE = "agent.transports.hermes_tools_mcp_server"
 HERMES_TOOLS_SERVER_ARGS = ("-m", HERMES_TOOLS_MODULE)
 
+logger = get_logger("hermes_fetch_ai")
+
 
 class HermesBackendError(RuntimeError):
     """The configured Hermes MCP backend could not be started."""
+
+
+class ToolBackend(Protocol):
+    """What the bridge protocol needs from a tool backend."""
+
+    async def list_tools(self) -> list[dict[str, Any]]:
+        """Tool descriptors with ``name``, ``description`` and ``inputSchema`` keys."""
+        ...
+
+    async def call_tool(self, name: str, args: dict[str, Any]) -> NormalizedToolResult: ...
 
 
 def filtered_env() -> dict[str, str]:
@@ -133,7 +146,7 @@ class HermesMCPClientShim:
         """
         mode = self.cfg.hermes_mcp.mode
         if mode == "fake":
-            self.server = _build_fake_server()
+            self.server = build_fake_server()
         elif mode == "in_process_hermes_tools":
             try:
                 module = importlib.import_module(HERMES_TOOLS_MODULE)
@@ -146,7 +159,7 @@ class HermesMCPClientShim:
         elif mode == "stdio":
             await self._start_stdio()
         else:
-            raise NotImplementedError(f"{mode} transport is not enabled for local tests")
+            raise HermesBackendError(f"unsupported hermes_mcp.mode: {mode}")
         return self
 
     async def _start_stdio(self) -> None:
@@ -213,6 +226,13 @@ class HermesMCPClientShim:
             raise RuntimeError("shim not started")
         except TimeoutError:
             return error_result("timeout", max_bytes)
-        # Tool and transport failures become a bounded error result for the caller.
-        except Exception as e:  # noqa: BLE001
-            return error_result(str(e), max_bytes)
+        except Exception as exc:  # noqa: BLE001
+            # Transport and protocol errors can carry internal details such as file
+            # paths, so the caller gets a fixed message and the details are logged.
+            logger.warning(
+                "Hermes tool call %s failed (%s: %s)",
+                name,
+                exc.__class__.__name__,
+                redact_text(str(exc))[:300],
+            )
+            return error_result("tool call failed", max_bytes)

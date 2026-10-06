@@ -28,19 +28,55 @@ INSTALL_HINT = (
 )
 # How long a Ctrl-C'd bridge gets to finish its own graceful shutdown.
 SHUTDOWN_GRACE_SECONDS = 30.0
-# Hermes runs inside its own Python environment and exports variables that point
-# any Python child at Hermes' packages (PYTHONPATH includes its checkout and
-# site-packages). The bridge has its own interpreter, so these must not leak in.
-HERMES_PYTHON_ENV = (
-    "PYTHONPATH",
-    "PYTHONHOME",
-    "PYTHONEXECUTABLE",
-    "__PYVENV_LAUNCHER__",
-    "VIRTUAL_ENV",
+# Hermes loads every key in $HERMES_HOME/.env (model-provider API keys, for
+# example) into its own environment. The bridge needs none of them, so it gets
+# only these variables, plus any LC_* locale settings.
+BRIDGE_ENV = frozenset(
+    {
+        "UAGENT_SEED",
+        "HERMES_HOME",
+        "PATH",
+        "HOME",
+        "USER",
+        "LOGNAME",
+        "LANG",
+        "LANGUAGE",
+        "TERM",
+        "TZ",
+        "TMPDIR",
+        "XDG_CONFIG_HOME",
+        "XDG_STATE_HOME",
+        "XDG_CACHE_HOME",
+        "XDG_DATA_HOME",
+        # Proxy and certificate settings, for networks that require them.
+        "HTTP_PROXY",
+        "HTTPS_PROXY",
+        "NO_PROXY",
+        "ALL_PROXY",
+        "SSL_CERT_FILE",
+        "SSL_CERT_DIR",
+        "REQUESTS_CA_BUNDLE",
+        # Windows essentials.
+        "SYSTEMROOT",
+        "WINDIR",
+        "COMSPEC",
+        "PATHEXT",
+        "TEMP",
+        "TMP",
+        "USERPROFILE",
+        "APPDATA",
+        "LOCALAPPDATA",
+        "PROGRAMDATA",
+        "SYSTEMDRIVE",
+        "HOMEDRIVE",
+        "HOMEPATH",
+    }
 )
-# Instead, tell the bridge how this Hermes runs Python, so `serve` can start
-# Hermes' tools MCP server the way Hermes itself does: with its own interpreter
-# and import path. Names shared with hermes_fetch_ai.config.
+# The bridge has its own interpreter, so Hermes' Python settings (PYTHONPATH
+# points at Hermes' checkout and site-packages) are not passed as such. Instead
+# the bridge is told how this Hermes runs Python, so `serve` can start Hermes'
+# tools MCP server the way Hermes itself does: with its own interpreter and
+# import path. Names shared with hermes_fetch_ai.config.
 HERMES_PYTHON_VAR = "HERMES_FETCH_AI_HERMES_PYTHON"
 HERMES_PYTHONPATH_VAR = "HERMES_FETCH_AI_HERMES_PYTHONPATH"
 
@@ -64,17 +100,17 @@ def resolve_bridge_command(configured: str = "") -> str | None:
 def bridge_environment(
     environ: Mapping[str, str] | None = None, hermes_python: str | None = None
 ) -> dict[str, str]:
-    """The caller's environment for the bridge: Hermes' Python settings are moved
-    out of the way and handed over under the bridge's own variable names."""
-    env = dict(os.environ if environ is None else environ)
-    hermes_pythonpath = env.get("PYTHONPATH", "")
-    for name in HERMES_PYTHON_ENV:
-        env.pop(name, None)
+    """The bridge's environment: the allowlisted variables, plus how Hermes runs Python."""
+    source = os.environ if environ is None else environ
+    env = {
+        name: value
+        for name, value in source.items()
+        if name.upper() in BRIDGE_ENV or name.upper().startswith("LC_")
+    }
     env[HERMES_PYTHON_VAR] = hermes_python or sys.executable
+    hermes_pythonpath = source.get("PYTHONPATH", "")
     if hermes_pythonpath:
         env[HERMES_PYTHONPATH_VAR] = hermes_pythonpath
-    else:
-        env.pop(HERMES_PYTHONPATH_VAR, None)
     return env
 
 
@@ -90,8 +126,8 @@ def run_bridge(argv: list[str], configured: str = "") -> int:
             file=sys.stderr,
         )
         return 1
-    # The user ran this command explicitly. Like any command started from a shell,
-    # the bridge inherits the environment, including UAGENT_SEED from Hermes' .env.
+    # The user ran this command explicitly. The bridge gets UAGENT_SEED (from
+    # Hermes' .env or the plugin setting) and the other allowlisted variables.
     process = subprocess.Popen([command, *argv], env=bridge_environment())
     try:
         return process.wait()
@@ -105,6 +141,7 @@ def run_bridge(argv: list[str], configured: str = "") -> int:
 
 
 def _setup_parser(parser: argparse.ArgumentParser) -> None:
+    # Hermes handles a leading --version itself; `doctor` prints the bridge's version.
     parser.add_argument(
         "bridge_args",
         nargs=argparse.REMAINDER,

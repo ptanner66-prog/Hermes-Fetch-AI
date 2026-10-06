@@ -53,10 +53,10 @@ jobs:
       - name: Verify before release
         run: |
           python -m hermes_fetch_ai.cli doctor
-          python -m hermes_fetch_ai.cli doctor --contamination-scan
           python -m ruff check .
+          python -m ruff format --check .
           python -m mypy src tests
-          python -m pytest -q
+          python -m pytest -q --cov --cov-fail-under=90
           python -m hermes_fetch_ai.cli demo local
 
       - name: Dependency audit

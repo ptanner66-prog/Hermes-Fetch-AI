@@ -50,9 +50,3 @@ def test_mailbox_demo_works_without_a_source_checkout(monkeypatch, tmp_path, cap
     assert cli.main(["demo", "mailbox"]) == 1
     out = capsys.readouterr().out
     assert "UAGENT_SEED" in out and cli.MAILBOX_GUIDE in out
-
-
-def test_contamination_scan_skips_outside_a_source_checkout(monkeypatch, tmp_path, capsys):
-    monkeypatch.setattr(cli, "ROOT", tmp_path / "not-a-repo")
-    assert cli.main(["doctor", "--contamination-scan"]) == 0
-    assert "contamination: SKIP" in capsys.readouterr().out
