@@ -252,12 +252,14 @@ hermes-fetch-ai demo paid       # a sale with a simulated ledger: price, payment
 | [`docs/agentverse-mailbox.md`](docs/agentverse-mailbox.md) | Manual Agentverse mailbox setup |
 | [`docs/upstream-hermes-pr.md`](docs/upstream-hermes-pr.md) | Plan and text for the Hermes plugin catalog |
 | [`docs/validation.md`](docs/validation.md) | What was checked against Hermes' and Fetch.ai's documentation, and what is left for the real-world trial |
+| [`upstream/`](upstream/README.md) | Ready-to-post contributions to Hermes Agent and Fetch.ai: the catalog entry, a feature request, a fix for Fetch's payment example, a note for Fetch's developers |
 
 ### Roadmap
 
 - [ ] Release `v1.0.0` and publish to PyPI.
 - [x] Catalog-ready Hermes plugin ([`hermes-plugin/fetchai-bridge`](hermes-plugin/fetchai-bridge)), checked against real Hermes in CI.
 - [ ] Submit the `plugin-catalog` entry to hermes-agent. Draft and steps: [`docs/upstream-hermes-pr.md`](docs/upstream-hermes-pr.md).
+- [ ] Offer Hermes Agent and Fetch.ai the other contributions in [`upstream/`](upstream/README.md).
 - [x] Sell services you define to other agents for FET, with each payment verified on the ledger (testnet; unreleased).
 - [ ] Reach Hermes from ASI:One in plain language, with ASI:One's testnet payment card (built and tested offline; live test pending).
 - [x] Sell work done by Hermes itself, such as research, through a guest Hermes that never sees yours (unreleased).

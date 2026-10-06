@@ -25,6 +25,7 @@ All notable changes are documented here. The project follows [semantic versionin
 - The plugin hands the bridge its version, and the bridge says when the two differ and how to match them.
 - An agent that only buys can be listed on Agentverse, so other agents' replies reach its mailbox.
 - Research can run on ASI:One's own AI model (Fetch.ai's `asi1` models, through ASI:One's OpenAI-compatible API): setup offers it, with its key kept in the guest's keys file and named by the runner's new `key_env` setting, which Hermes sends only to that address. A field test runs real Hermes against a stand-in as strict as ASI:One's API.
+- [`upstream/`](upstream/README.md): ready-to-post contributions to the two projects this one builds on: the Hermes catalog entry, a feature request for a public "ask the user to confirm" plugin API, a tested fix for the payment checks in Fetch.ai's FET payment example (it trusted the buyer's stated amount, accepted a payment twice, and rounded through floats), and a note for Fetch.ai's developers with the questions only they can answer about ASI:One's payment card. A test keeps the proposed fix's checks correct.
 - [`docs/validation.md`](docs/validation.md): the plugin and the bridge checked against Hermes' and Fetch.ai's documentation, what that changed, and what only the real-world trial can settle. The README shows a Hermes deny rule that keeps Hermes' terminal from running the bridge's `buyer pay`, even in YOLO mode.
 
 ### Changed
