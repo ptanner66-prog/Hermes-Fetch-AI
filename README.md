@@ -161,9 +161,42 @@ Everything else, error by error: [docs/troubleshooting.md](docs/troubleshooting.
 
 ## For developers and operators
 
-Under the hood, the bridge is a [uAgents](https://github.com/fetchai/uAgents) agent. It speaks Fetch's chat protocol and payment protocol, and Fetch's MCP message models for structured calls. The Hermes plugin is a small, standard-library-only wrapper that runs the bridge in its own Python environment (`python_runtime: external`), so nothing is installed into Hermes. The bridge can also let other agents call an allowlisted set of Hermes' tools, default-deny, with replay protection and a redacted audit log ([docs/hermes-tools.md](docs/hermes-tools.md)).
+### How it fits together
 
-To try it from a clone (Python 3.11 or 3.12):
+Each half is built the way its own platform documents it: the Hermes side as a standard Hermes plugin, the Fetch.ai side as a standard uAgents agent speaking Fetch's published protocols.
+
+```mermaid
+flowchart LR
+    subgraph computer["Your computer"]
+        H["Hermes Agent"] -->|"plugin: commands, tools, skills"| B["Bridge<br/>(a uAgents agent)"]
+        B -->|"one per paid research request"| G["Guest Hermes"]
+    end
+    subgraph fetch["Fetch.ai network"]
+        AV["Agentverse<br/>mailbox, listing, search"]
+        L[("Testnet ledger")]
+        A1["ASI:One users"]
+        OA["Other agents"]
+    end
+    B <-->|"Agent Chat Protocol<br/>Agent Payment Protocol"| AV
+    AV <--> A1
+    AV <--> OA
+    B -->|"checks and sends payments"| L
+```
+
+| From Hermes Agent | From Fetch.ai |
+|-------------------|---------------|
+| A directory plugin (manifest v2, `python_runtime: external`, standard library only), so nothing is installed into Hermes | A [uAgents](https://github.com/fetchai/uAgents) agent, the bridge, with its own address on Fetch's network |
+| `hermes fetchai-bridge` commands, two skills, and four tools in a `fetchai` toolset | The [Agent Chat Protocol](https://docs.asi1.ai/documentation/tutorials/agent-chat-protocol) 0.3.0, which ASI:One speaks |
+| Settings and secrets through `config_schema`, kept in Hermes' `.env` | The [Agent Payment Protocol](https://uagents.fetch.ai/docs/guides/agent-payment-protocol) 0.1.0, as seller and as buyer |
+| Hermes' own confirmation prompt for every payment, and its YOLO state | Fetch's MCP messages ([uagents-adapter](https://pypi.org/project/uagents-adapter/)), for structured calls |
+| Hermes' tools MCP server, for the few tools other agents may call | [Agentverse](https://agentverse.ai): the mailbox, the listing, and agent search; the Almanac |
+| A throwaway guest Hermes for each paid research request | Fetch's testnet ledger and faucet, through [cosmpy](https://github.com/fetchai/cosmpy) |
+
+The bridge can also let other agents call an allowlisted set of Hermes' tools, default-deny, with replay protection and a redacted audit log ([docs/hermes-tools.md](docs/hermes-tools.md)).
+
+### Try it from a clone
+
+With Python 3.11 or 3.12:
 
 ```bash
 git clone https://github.com/ptanner66-prog/Hermes-Fetch-AI
