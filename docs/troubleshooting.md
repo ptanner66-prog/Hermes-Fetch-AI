@@ -9,10 +9,22 @@
 `serve` could not start the Hermes tools MCP server and exited with status 1. The message says why:
 
 - `command not found`: `hermes_mcp.command` does not exist. Use the absolute path to the Python interpreter of the environment where `hermes-agent` is installed.
-- `McpError: Connection closed`: the server process exited during startup, usually because `agent.transports.hermes_tools_mcp_server` is not importable in that environment.
+- `McpError: Connection closed`: the server process exited during startup, usually because `agent.transports.hermes_tools_mcp_server` is not importable in that environment, or Hermes was installed without its `mcp` extra (`pip install -e "<hermes-agent checkout>[mcp]"`).
 - `timed out`: the server did not finish initializing within `hermes_mcp.timeout_seconds`.
 
-The child's stderr is discarded on purpose (it is outside the bridge's redaction boundary). To see it, run the configured command and args by hand, for example `/path/to/hermes-venv/bin/python -m agent.transports.hermes_tools_mcp_server`.
+The child's stderr is discarded on purpose (it is outside the bridge's redaction boundary). The message names the command to run by hand to see it, for example `/path/to/hermes-venv/bin/python -m agent.transports.hermes_tools_mcp_server`.
+
+## hermes_mcp.command is required for stdio mode
+
+The config uses `mode: stdio` without `command`, and the bridge was not started by the Hermes plugin. Either run it as `hermes fetchai-bridge serve --config ...` (the plugin supplies Hermes' interpreter), or set `hermes_mcp.command` to the Python interpreter of the Hermes environment.
+
+## fetchai-bridge: 'hermes-fetch-ai' not found
+
+The Hermes plugin could not find the bridge. Install it in its own environment with `uv tool install --python 3.12 "hermes-fetch-ai @ git+https://github.com/ptanner66-prog/Hermes-Fetch-AI"`, or set `plugins.entries.fetchai-bridge.settings.command` to the full path of `hermes-fetch-ai`.
+
+## hermes: 'fetchai-bridge' is not a `hermes` command
+
+Hermes did not load the plugin's command. Check that it is enabled (`hermes plugins list`; enable it with `hermes plugins enable fetchai-bridge`) and that `plugins.isolation` is not `host`, which skips plugin CLI commands. Under host isolation, run `hermes-fetch-ai` directly.
 
 ## backend unavailable
 

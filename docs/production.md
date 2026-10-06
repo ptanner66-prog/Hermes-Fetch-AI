@@ -4,7 +4,7 @@
 
 One bridge per process. `serve` owns a dedicated event loop, starts the MCP backend (stdio subprocess preferred), runs the uAgent server, and shuts down gracefully on SIGINT/SIGTERM/SIGBREAK (exit code 0; the MCP child receives a clean EOF). The two-process HTTP round trip, signed message exchange, and graceful shutdown path are covered by `tests/test_serve_http_roundtrip.py`.
 
-If the Hermes backend cannot start, `serve` prints `hermes backend: FAIL: ...` and exits with status 1 (covered by `tests/test_cli.py`), so `Restart=on-failure` below retries it. The child's stderr is discarded because it is outside the bridge's redaction boundary; run the configured `hermes_mcp.command` and `args` by hand to see the underlying error. If the backend dies after startup, callers get `backend unavailable` and the audit log records `decision: error`; restart the service to recover.
+If the Hermes backend cannot start, `serve` prints `hermes backend: FAIL: ...` and exits with status 1 (covered by `tests/test_cli.py`), so `Restart=on-failure` below retries it. The child's stderr is discarded because it is outside the bridge's redaction boundary; the message names the command to run by hand to see the underlying error. If the backend dies after startup, callers get `backend unavailable` and the audit log records `decision: error`; restart the service to recover.
 
 ## Secrets
 
@@ -80,7 +80,7 @@ Point `logging.audit_path` at `/var/lib/hermes-fetch-ai/audit.jsonl`. The writer
 2. Set `agent.network` explicitly; never reuse a testnet seed casually.
 3. Fund the derived `fetch1...` address only for Almanac registration needs.
 4. Keep `policy.public_tools` empty or minimal (`skills_list` at most for Hermes-backed demos); denylist wins.
-5. Confirm `hermes_mcp.command` points at the Hermes environment's Python and that `HERMES_HOME` is set for the service user.
+5. Confirm `hermes_mcp.command` points at the Hermes environment's Python (a supervised `hermes-fetch-ai serve` does not get the Hermes plugin's interpreter hand-over) and that `HERMES_HOME` is set for the service user.
 6. Confirm callers attach replay metadata and treat replay denials as final, not retriable with the same request ID.
 7. Run the full local gate and the gated field test before promoting a new config.
 
@@ -94,7 +94,7 @@ The audit JSONL is the operational signal: decisions, reasons, durations, sizes,
 - `send_status: failure`;
 - repeated `args exceed max_args_bytes` or URL/shell validation failures.
 
-`hermes-fetch-ai --version` and `hermes-fetch-ai doctor` are safe health probes. Use `hermes fetchai doctor` only after the active Hermes installation has enabled and wired the plugin CLI.
+`hermes-fetch-ai --version` and `hermes-fetch-ai doctor` are safe health probes. With the Hermes plugin enabled, `hermes fetchai-bridge doctor` runs the same check.
 
 ## GitHub/release governance for this repo
 

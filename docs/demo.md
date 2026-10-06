@@ -11,17 +11,26 @@ This uses fake MCP tools and an in-process direct call path. It must not require
 
 ## Hermes-backed local demo
 
-Preferred path (isolated stdio subprocess of the Hermes tools MCP server). This config is production-shaped, so it needs a stable identity in `UAGENT_SEED` (at least 32 characters):
+Preferred path: an isolated stdio subprocess of the Hermes tools MCP server. `examples/hermes-stdio.yaml` is production-shaped, so it needs a stable identity in `UAGENT_SEED` (at least 32 characters). Generate one with `python -c 'import secrets; print(secrets.token_hex(32))'`.
+
+Through the Hermes plugin ([`native-hermes-plugin.md`](native-hermes-plugin.md)), put `UAGENT_SEED` in `~/.hermes/.env` and leave `hermes_mcp.command` unset; the plugin hands the bridge Hermes' own interpreter:
+
+```bash
+hermes fetchai-bridge doctor --config /absolute/path/to/examples/hermes-stdio.yaml
+hermes fetchai-bridge serve --config /absolute/path/to/examples/hermes-stdio.yaml
+```
+
+Without the plugin, copy the example, set `hermes_mcp.command` to the Python interpreter of the environment where `hermes-agent` is installed (so that `python -m agent.transports.hermes_tools_mcp_server` resolves), and run the bridge directly:
 
 ```bash
 export UAGENT_SEED="$(python -c 'import secrets; print(secrets.token_hex(32))')"
-python -m hermes_fetch_ai.cli doctor --config examples/hermes-stdio.yaml
-python -m hermes_fetch_ai.cli serve --config examples/hermes-stdio.yaml
+python -m hermes_fetch_ai.cli doctor --config bridge.yaml
+python -m hermes_fetch_ai.cli serve --config bridge.yaml
 ```
 
-The `command` in `examples/hermes-stdio.yaml` must be the Python interpreter of the environment where `hermes-agent` is installed, so that `python -m agent.transports.hermes_tools_mcp_server` resolves. If it does not, `serve` exits with `hermes backend: FAIL` and tells you to run that command by hand to see its error output.
+If the tools server cannot start, `serve` exits with `hermes backend: FAIL` and tells you to run that command by hand to see its error output.
 
-Fallback path (in-process private server builder):
+Fallback path (in-process private server builder). It needs Hermes and the bridge in one environment, which works with hermes-agent v0.16.x but not with current releases, which pin mcp 2.0:
 
 ```bash
 python -m hermes_fetch_ai.cli doctor --config examples/hermes-local.yaml
@@ -53,16 +62,18 @@ The bridge removes `_hermes_fetch_ai` before validating and invoking the tool. R
 
 ## Field test against a real hermes-agent install
 
-One-time setup:
+CI runs this test in its `hermes-plugin` job against Hermes 0.21.5 and a pinned `main`. To run it yourself, one-time setup:
 
 ```bash
-uv venv -p 3.14 /tmp/hermes-venv   # current hermes-agent needs Python 3.14
+# Use the Python version in the checkout's .python-version:
+# 3.11 for the 0.21.5 release (tag v2026.9.24), 3.14 for main.
+uv venv -p 3.11 /tmp/hermes-venv
 uv pip install --python /tmp/hermes-venv/bin/python -e "<hermes-agent checkout>[mcp]"
 export HERMES_HOME=/tmp/hermes-home
 mkdir -p "$HERMES_HOME/skills"   # copy at least one bundled skill in
 ```
 
-On Python 3.13 or older the install appears to succeed but skips Hermes' dependencies, and `serve` then fails with `hermes backend: FAIL` (the server exits with `No module named 'ruamel'`).
+hermes-agent only supports installs from a checkout. On a Python older than its checkout asks for, the install appears to succeed but skips Hermes' dependencies, and `serve` then fails with `hermes backend: FAIL` (the server exits with `No module named 'ruamel'`).
 
 Run the gated integration test:
 
@@ -74,13 +85,13 @@ python -m pytest tests/test_field_hermes_stdio.py -q
 
 Observed behavior: the keyless server lists only tools whose prerequisites are met; the bridge shows an unknown sender `skills_list` only; `web_search` is denied by policy before any server call; `skills_list` returns real skill metadata.
 
-Last run on 2026-10-05 against hermes-agent `main` (`bb236287`, Python 3.14.8, mcp 2.0.0): `1 passed`. The bridge's mcp 1.28.1 client negotiates MCP protocol `2025-11-25`, which the mcp 2.0 server still accepts. Without credentials the server exposed `web_search`, `web_extract`, `skill_view`, `skills_list`, and `text_to_speech`.
+Last run on 2026-10-06 against Hermes 0.21.5 (Python 3.11, mcp 2.0.0) and hermes-agent `main` (`bb236287`, Python 3.14.8, mcp 2.0.0): `1 passed` on both. The bridge's mcp 1.28.1 client negotiates MCP protocol `2025-11-25`, which the mcp 2.0 server still accepts. Without credentials the server exposed `web_search`, `web_extract`, `skill_view`, `skills_list`, and `text_to_speech`.
 
 Pitfalls:
 
 - Follow the served inputSchema. hermes-agent v0.16.x wrapped every tool's arguments in one required `kwargs` object (send `{"kwargs": {}}` for `skills_list`); newer releases build flat schemas from each tool's JSON schema (send `{}` for `skills_list`, `{"query": "..."}` for `web_search`). Schema-following uAgent clients get this right automatically, and the field test handles both shapes.
 - Replay metadata is in addition to the served schema and is stripped by the bridge before the schema check.
-- `hermes_mcp.command` must be the Python interpreter of the environment where `hermes-agent` is installed. `HERMES_HOME` is forwarded to the subprocess by the bridge's environment allowlist.
+- The test leaves `hermes_mcp.command` unset and passes `HERMES_FETCH_HERMES_PYTHON` the way the Hermes plugin does (`HERMES_FETCH_AI_HERMES_PYTHON`), so it also covers the plugin's interpreter hand-over. When you run `hermes-fetch-ai serve` yourself, set `hermes_mcp.command` to the Python interpreter of the environment where `hermes-agent` is installed. `HERMES_HOME` is forwarded to the subprocess by the bridge's environment allowlist.
 
 ## Agentverse mailbox manual demo
 

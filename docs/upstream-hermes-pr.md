@@ -1,126 +1,164 @@
-# Upstream Contribution Plan: NousResearch/hermes-agent
+# Listing in Hermes: the plugin catalog
 
-Hermes Fetch AI should remain a standalone plugin package unless Hermes maintainers explicitly request a larger footprint. This document is a maintainer-facing plan, not a claim that Hermes core already enables every plugin command out of the box.
+Hermes Fetch AI stays a standalone project. Its way into Hermes is one file in NousResearch/hermes-agent, `plugin-catalog/fetchai-bridge.yaml`, pinned to a commit of this repository. No Hermes code changes. Step-by-step instructions are in [`upstream/hermes-pr/SUBMIT.md`](../upstream/hermes-pr/SUBMIT.md).
 
-## Where hermes-agent stands (checked 2026-10-05, `main` at `bb236287`)
+## Where hermes-agent stands (checked 2026-10-06)
 
-- **Placement rules.** `CONTRIBUTING.md` says third-party product integrations "do not land in this repo" and ship as standalone plugins, listed through `plugin-catalog/`. Niche or community skills belong on the Skills Hub; `optional-skills/` is for official skills that are useful but not universally needed.
-- **Runtime.** Hermes now develops on Python 3.14 (`.python-version`; `[tool.uv] environments = ["python_version >= '3.14'"]`) and its `[mcp]` extra pins `mcp==2.0.0`. This package requires Python `<3.13` and pins `mcp==1.28.1` through uAgents, so it cannot be installed into a current Hermes environment. Run it from its own environment and point `hermes_mcp.command` at Hermes' Python (stdio mode).
-- **Tools server.** `agent/transports/hermes_tools_mcp_server.py` still exists with `_build_server()` and a `__main__` entry, but now builds flat tool signatures from each tool's JSON schema. The `kwargs` wrapper that v0.16.x needed is gone, and the in-process mode cannot import the mcp 2.0 server under mcp 1.x.
-- **stdio works.** The bridge's field test passed against this commit (Python 3.14.8, mcp 2.0.0); the bridge's mcp 1.28.1 client negotiates MCP protocol `2025-11-25`.
-- **Plugins.** The `hermes_agent.plugins` entry-point group and `ctx.register_cli_command(name, help, setup_fn, handler_fn, description)` are unchanged. Third-party plugins are opt-in (`hermes plugins enable <name>`, config key `plugins.enabled`). `ctx.register_skill(name, path)` lets a plugin ship its own skill, so a plugin can carry `fetchai-bridge` without any hermes-agent skill PR.
-- **Catalog admission** (`plugin-catalog/README.md`, `website/docs/developer-guide/plugins/catalog-submission.md`): one YAML entry pinned to a full 40-character commit SHA; the pinned tree must contain a `plugin.yaml` manifest and an `__init__.py` entrypoint; `hermes plugins validate --install-deps` must pass; `requires_hermes` is a truthful SemVer floor; network calls, stored credentials, and background processes are disclosed in the PR and the plugin README.
+- **Releases.** The latest release is 0.21.5 (tag `v2026.9.24`, Python 3.11 to 3.13). `main` (`bb236287`) has since moved to Python 3.14. Both pin `mcp==2.0.0` in the `[mcp]` extra, and both only install from a checkout.
+- **Placement.** `CONTRIBUTING.md` says third-party integrations ship as standalone plugins, listed through `plugin-catalog/`. `optional-skills/` is for official skills, and community skills belong on the Skills Hub.
+- **Directory plugins.** `plugin.yaml` plus `__init__.py` with `register(ctx)`. Manifest v2 adds `python_runtime: external` (a sidecar: Hermes installs nothing) and `config_schema`, whose `secret` type is stored in Hermes' `.env`. `ctx.register_cli_command` and `ctx.register_skill` are public surfaces.
+- **Catalog admission** (`plugin-catalog/README.md`, `website/docs/developer-guide/plugins/catalog-submission.md`): one YAML entry pinned to a full 40-character SHA. Catalog CI runs `scripts/validate_plugin_catalog.py`, clones the repo at the pin, runs `hermes plugins validate --install-deps` on the `subdir` (manifest, loading, declared versus registered capabilities, config schema, dependencies, security scan, no core overrides), and checks for self-updaters. Then a maintainer reviews the pinned tree against the 16 admission rules and usually writes a `Disclosure —` sentence into the entry's `description`.
+- **Tools server.** `agent.transports.hermes_tools_mcp_server` serves flat arguments under mcp 2.0. The bridge's stdio field test passes against 0.21.5 and `main`.
 
-## Recommended path
+## How the plugin meets the rules that matter here
 
-1. **Open a GitHub Discussion** (Hermes routes design proposals there) using the draft below. Ask whether maintainers want a catalog entry for a Fetch.ai uAgents bridge.
-2. **Meanwhile, publish the skill on the Skills Hub** (a skills registry plus a post in the Nous Research Discord). No hermes-agent PR is needed for that.
-3. **Make the repo catalog-ready**, then open a `plugin-catalog/<name>.yaml` PR:
-   - Add a thin directory plugin (`plugin.yaml` + `__init__.py`) whose `register(ctx)` adds `hermes fetchai ...` by shelling out to the separately installed `hermes-fetch-ai` executable, and calls `ctx.register_skill("fetchai-bridge", ...)`. That keeps the bridge's uAgents/mcp 1.x dependencies out of Hermes' environment.
-   - Re-run the stdio field test against the Hermes version you name in `requires_hermes` (it passed against `main` `bb236287`; see `docs/demo.md`).
-   - Write the README disclosures: the bridge listens on a port and talks to the Fetch network/Agentverse when configured to; it reads `UAGENT_SEED`; `serve` is a long-running process.
-4. **Only if a maintainer asks for it in-tree**, use the `optional-skills/` route in `upstream/hermes-pr/SUBMIT.md`.
+| Rule | How |
+|------|-----|
+| 3, no self-updating code | None. Updates arrive only through a new pin. |
+| 5, owner submits | Submit from the `ptanner66-prog` account. |
+| 6, capabilities match | No tools, hooks, middleware, or required env vars; the entry's `capabilities` lists are empty. `hermes plugins validate` checks this. |
+| 9, no core overrides | Only `register_cli_command`, `register_skill`, and `get_config`. |
+| 10, dependencies | None installed into Hermes (`python_runtime: external`, stdlib-only). |
+| 11, credentials | Only `UAGENT_SEED`, the plugin's own `config_schema` secret. |
+| 12, approvals and unattended runs | No tools, so the agent reaches the bridge only through the terminal tool under normal approvals. The tools server gets an allowlisted environment, so `HERMES_YOLO_MODE` and `HERMES_NONINTERACTIVE` never reach it. Nothing prompts or waits for input. |
+| 13, disclosure | Plugin README "What this plugin does", the PR body below, and a `Disclosure —` sentence already in the draft entry. |
+| 14, truthful metadata | `requires_hermes: ">=0.21.5"`, the latest release, which CI tests; `version` matches `plugin.yaml`; `validate --install-deps` passes. |
+| 16, lineage | Original plugin, not a fork. |
 
-Do **not** propose vendoring bridge code into Hermes core.
+## Readiness
 
-## Current verified surface in this repo
+- [x] Directory plugin in [`hermes-plugin/fetchai-bridge`](../hermes-plugin/fetchai-bridge) ([`native-hermes-plugin.md`](native-hermes-plugin.md)).
+- [x] CI, against Hermes 0.21.5 and a pinned `main`: `hermes plugins validate --install-deps` (`Validation passed`, security scan `safe`), `hermes plugins doctor --ci`, `hermes fetchai-bridge doctor` and `demo local`, and the stdio field test.
+- [x] Entry draft [`upstream/hermes-pr/plugin-catalog/fetchai-bridge.yaml`](../upstream/hermes-pr/plugin-catalog/fetchai-bridge.yaml). With a real SHA filled in it passes Hermes' `scripts/validate_plugin_catalog.py` and loads with Hermes' catalog loader; `tests/test_hermes_directory_plugin.py` keeps it consistent with `plugin.yaml`.
+- [ ] Merge the plugin to `main` here, with CI green on the merge commit.
+- [ ] Optionally tag `v1.0.0` (the pin is still the commit SHA).
+- [ ] Open the catalog PR ([`upstream/hermes-pr/SUBMIT.md`](../upstream/hermes-pr/SUBMIT.md)).
 
-- Package CLI: `hermes-fetch-ai doctor|probe-hermes|serve|demo`.
-- Plugin entry point: `fetchai = "hermes_fetch_ai.hermes_plugin"`; once installed in Hermes' environment and enabled with `hermes plugins enable fetchai`, it exposes `hermes fetchai doctor|probe|serve|demo`.
-- Skill payload: `upstream/hermes-pr/optional-skills/autonomous-ai-agents/fetchai-bridge/SKILL.md` (frontmatter matches the current authoring rules, including `platforms`).
+## Optional: Discussion first
 
-## Draft Discussion post
-
-Title:
+Rule 5 lets the owner submit directly, so a Discussion is not required. A short one can still surface naming or scope concerns before review. Title:
 
 ```text
-Fetch.ai uAgents bridge: catalog plugin for exposing allowlisted Hermes tools to uAgents
+Fetch.ai uAgents bridge as a catalog plugin (fetchai-bridge)
 ```
 
 Body:
 
 ```text
-hermes-fetch-ai (https://github.com/ptanner66-prog/Hermes-Fetch-AI, MIT) is a
-standalone package that lets Fetch.ai uAgents call a default-deny, allowlisted subset
-of Hermes tools. Hermes stays the local execution layer; uAgents supplies identity,
-signed envelopes, and addressing.
+hermes-fetch-ai (https://github.com/ptanner66-prog/Hermes-Fetch-AI, MIT) lets Fetch.ai
+uAgents call a default-deny, allowlisted subset of Hermes tools. Hermes stays the local
+execution layer; uAgents supplies identity, signed envelopes, and addressing.
 
-How it uses Hermes:
-- runs `python -m agent.transports.hermes_tools_mcp_server` from the Hermes
-  environment as a stdio subprocess (shell=False, env allowlist, timeouts);
-- never touches `hermes mcp serve` (conversations/messaging/approvals);
-- only `skills_list` is public by default; everything else is denylisted;
-- replay protection, rate limits, argument validation (URL/SSRF and shell guards),
-  bounded output, and a redacted audit log on every call.
+I'd like to list its plugin, fetchai-bridge, in plugin-catalog/. It is a stdlib-only
+sidecar (python_runtime: external): it adds `hermes fetchai-bridge`, which runs the
+separately installed bridge, and ships an operate skill. No tools, hooks, or middleware.
+
+The bridge runs `python -m agent.transports.hermes_tools_mcp_server` with Hermes' own
+interpreter as a stdio child (shell=False, env allowlist, timeouts), never touches
+`hermes mcp serve`, and exposes only skills_list by default.
 
 Questions:
-1. Would a plugin-catalog entry be welcome? The plan is a thin plugin that adds
-   `hermes fetchai ...` and ships a skill via register_skill, while the bridge runs
-   in its own environment.
-2. Is agent.transports.hermes_tools_mcp_server a seam you are happy for external
-   tools to depend on, or is there a more stable entry point?
-3. Anything you would want disclosed or restricted beyond the catalog rules?
+1. Is agent.transports.hermes_tools_mcp_server a seam you are happy for external tools
+   to depend on, or is there a more stable entry point?
+2. Is the name fetchai-bridge fine for a community plugin not affiliated with Fetch.ai?
 ```
 
-## Ready-to-paste PR body
+## Ready-to-paste catalog PR
 
-For the `optional-skills/` route; it mirrors the hermes-agent PR template.
+Title: `feat(plugin-catalog): add fetchai-bridge`
+
+Body (mirrors the hermes-agent PR template; replace `<sha>` and `<platform>`):
 
 ```markdown
 ## What does this PR do?
 
-Adds an optional `fetchai-bridge` skill that teaches Hermes to operate
-[hermes-fetch-ai](https://github.com/ptanner66-prog/Hermes-Fetch-AI), a standalone
-MIT package that exposes a default-deny, allowlisted subset of Hermes tools to
-Fetch.ai uAgents. No Hermes core files change.
+Adds a catalog entry for `fetchai-bridge`, the Hermes plugin for
+[Hermes Fetch AI](https://github.com/ptanner66-prog/Hermes-Fetch-AI) (MIT), a small bridge
+that lets Fetch.ai uAgents call a default-deny, allowlisted subset of Hermes tools. The
+plugin adds `hermes fetchai-bridge`, which runs the separately installed bridge, and ships
+an `operate` skill. One file, no Hermes code changes.
+
+Hermes surfaces used: `ctx.register_cli_command`, `ctx.register_skill`, `ctx.get_config`,
+and a manifest v2 `config_schema` (`command`, plus `uagent_seed` as a `secret` stored as
+`UAGENT_SEED`). No tools, hooks, or middleware, so `capabilities` is empty.
+`python_runtime: external`: the plugin is stdlib-only and installs nothing into Hermes'
+environment; the bridge pins its own dependencies (uAgents, mcp 1.28.1) in a separate one.
+
+Disclosures (rule 13):
+- Runs one subprocess, without a shell: the `hermes-fetch-ai` executable, only when the
+  user runs `hermes fetchai-bridge ...`. It inherits the user's environment, including
+  `UAGENT_SEED` from `$HERMES_HOME/.env`, minus Hermes' Python variables; Hermes'
+  interpreter path and `PYTHONPATH` are passed as `HERMES_FETCH_AI_HERMES_PYTHON` and
+  `HERMES_FETCH_AI_HERMES_PYTHONPATH`.
+- `hermes fetchai-bridge serve` is long-running: it listens on the configured port, starts
+  `python -m agent.transports.hermes_tools_mcp_server` with Hermes' interpreter as a child
+  process with an allowlisted environment (`PATH`, `HOME`, `TMPDIR`, `HERMES_HOME`,
+  locale), and contacts the Fetch.ai network or Agentverse only when its config enables
+  that.
+- Remote uAgents see only `skills_list` by default; every other tool is denylisted. Calls
+  need replay metadata and pass argument checks (URL/SSRF and shell guards), size limits,
+  and a redacted JSONL audit log.
+- Credentials: only `UAGENT_SEED`, the plugin's own config secret.
+- Approvals (rule 12): no tools, so the agent reaches the bridge only through the terminal
+  tool under normal approvals; `HERMES_YOLO_MODE` and `HERMES_NONINTERACTIVE` never reach
+  the tools server; nothing prompts or waits for input.
+- No telemetry, no self-updates, and the plugin itself makes no network calls.
+- Community project, not affiliated with Fetch.ai.
 
 ## Related Issue
 
-Discussion: #<number>
+None; catalog entry.
 
 ## Type of Change
 
-- [x] 🎯 New skill (bundled or hub)
+- [x] ✨ New feature (non-breaking change that adds functionality)
 
 ## Changes Made
 
-- `optional-skills/autonomous-ai-agents/fetchai-bridge/SKILL.md`
-- Generated docs from `website/scripts/generate-skill-docs.py` (catalog row, skill page, sidebar entry)
+- `plugin-catalog/fetchai-bridge.yaml`: pinned to `<sha>` (`version: "1.0.0"`,
+  `subdir: hermes-plugin/fetchai-bridge`, `requires_hermes: ">=0.21.5"`,
+  `category: tools`, empty `capabilities`).
 
 ## How to Test
 
-1. `scripts/run_tests.sh tests/skills/`
-2. `hermes --toolsets skills -q "Use the fetchai-bridge skill to run the local demo"`;
-   expect `echo result: hello` from `hermes-fetch-ai demo local`.
+1. `python3 scripts/validate_plugin_catalog.py plugin-catalog/fetchai-bridge.yaml`
+2. At the pinned commit, `hermes plugins validate <clone>/hermes-plugin/fetchai-bridge --install-deps`;
+   expect `Validation passed.` with security scan `safe`.
+3. `uv tool install --python 3.12 "hermes-fetch-ai @ git+https://github.com/ptanner66-prog/Hermes-Fetch-AI@<sha>"`,
+   then `hermes plugins install fetchai-bridge`, `hermes plugins enable fetchai-bridge`,
+   and `hermes fetchai-bridge demo local`; expect `echo result: hello`.
+
+The plugin's own CI runs `hermes plugins validate --install-deps`, `hermes plugins doctor --ci`,
+`hermes fetchai-bridge doctor` and `demo local`, and a stdio field test against real Hermes
+tools, on Hermes 0.21.5 and a pinned `main`.
 
 ## Checklist
 
-- [x] I've read the Contributing Guide
-- [x] Commit messages follow Conventional Commits
-- [x] I searched existing PRs; there is no Fetch.ai/uAgents integration in the repo
-- [x] The PR contains only this skill and its generated docs
-- [x] `pytest tests/ -q` and `python scripts/check` pass
-- [x] Tested on: <platform>
+### Code
 
-## For New Skills
+- [x] I've read the Contributing Guide and the catalog submission guide
+- [x] My commit messages follow Conventional Commits
+- [x] I searched for existing PRs; there is no Fetch.ai/uAgents entry
+- [x] My PR contains only this catalog entry
+- [ ] I've run `pytest tests/ -q`: N/A, YAML-only change; catalog CI validates the entry
+- [ ] `python scripts/check` passes: N/A, YAML-only change
+- [ ] I've added tests: N/A, the plugin is tested in its own repository
+- [x] I've tested on my platform: <platform>
 
-- [ ] Broadly useful to most users: no, which is why it is optional, not bundled
-- [x] SKILL.md follows the standard format
-- [ ] No external dependencies: it requires the separately installed
-      `hermes-fetch-ai` command (installed with `uv tool install`, not into Hermes' environment)
-- [x] Tested end to end with `hermes --toolsets skills -q`
+### Documentation & Housekeeping
 
-Security model: default-deny tool policy, replay protection, rate limits, URL/shell
-argument guards, bounded output, redacted audit; the seed comes only from the
-`UAGENT_SEED` environment variable; the Hermes conversations/messaging surface is
-never bridged.
+- [x] Documentation: N/A in hermes-agent; the plugin README renders on its catalog page
+- [x] `cli-config.yaml.example`: N/A
+- [x] `CONTRIBUTING.md` / `AGENTS.md`: N/A
+- [x] Cross-platform: the plugin uses `shutil.which` and `subprocess` without a shell; the
+      bridge's CI covers Linux, macOS, and Windows
+- [x] Tool descriptions/schemas: N/A, no tools
 ```
 
 ## What not to propose
 
-- in-tree bridge adapter directory;
-- changes to core agent runtime;
-- new default model tools/toolsets;
-- new `HERMES_*` env vars;
-- bridging `hermes mcp serve` conversations/messaging;
-- public claims that pip install alone guarantees `hermes fetchai ...` on all Hermes versions.
+- an in-tree bridge adapter or changes to Hermes core;
+- new default model tools or toolsets;
+- new Hermes-side environment variables;
+- bridging `hermes mcp serve` (conversations/messaging);
+- claims that the plugin works on Hermes releases CI does not test.

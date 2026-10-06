@@ -54,6 +54,8 @@ The Hermes conversations/messaging MCP surface (`hermes mcp serve`: conversation
 
 `skill_view` is not demo-public because it can reveal private skill content. The Hermes-backed demo exposes `skills_list` only.
 
+The `fetchai-bridge` Hermes plugin adds no tools, hooks, or middleware, so it changes nothing the Hermes agent can do on its own. It runs the bridge only when a user runs `hermes fetchai-bridge`, without a shell, and strips Hermes' Python variables from the bridge's environment. When it hands the bridge Hermes' interpreter, the tools server still starts with the bridge's environment allowlist, so Hermes settings such as `HERMES_YOLO_MODE` never reach it. Disclosures are in [`native-hermes-plugin.md`](native-hermes-plugin.md).
+
 ## Residual dependency risk
 
 The dependency audit gate currently ignores two transitive vulnerabilities until upstream Fetch/uAgents constraints allow a compatible fix:

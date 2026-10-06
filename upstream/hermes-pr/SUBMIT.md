@@ -1,73 +1,75 @@
-# Submitting fetchai-bridge to NousResearch/hermes-agent
+# Submitting fetchai-bridge to the Hermes plugin catalog
 
-Checked against hermes-agent `main` at `bb236287` (2026-10-05). Re-check before you
-submit; Hermes moves quickly. The full plan, including which route to take and
-ready-to-paste text, is in [`docs/upstream-hermes-pr.md`](../../docs/upstream-hermes-pr.md).
+Checked against Hermes 0.21.5 (tag `v2026.9.24`) and hermes-agent `main` at `bb236287`
+(2026-10-06). Re-check before you submit; Hermes moves quickly. The plan, how the plugin
+meets the admission rules, and the ready-to-paste PR text are in
+[`docs/upstream-hermes-pr.md`](../../docs/upstream-hermes-pr.md).
 
-## Pick the route first
+The submission is one file, [`plugin-catalog/fetchai-bridge.yaml`](plugin-catalog/fetchai-bridge.yaml),
+added to NousResearch/hermes-agent with its `sha` filled in. Submit it from the repository
+owner's account (catalog rule 5).
 
-Hermes' `CONTRIBUTING.md` says third-party product integrations ship as standalone
-plugins, and niche or community skills belong on the Skills Hub. An
-`optional-skills/` PR for this bridge is therefore likely to be redirected even if CI
-passes. In order of fit:
+## 1. Pick the commit to pin
 
-1. **Plugin catalog entry** (`plugin-catalog/<name>.yaml`, pinned to a full commit
-   SHA). Needs the repo work listed in `docs/upstream-hermes-pr.md` first.
-2. **Skills Hub**: publish this `SKILL.md` to a skills registry and share it in the
-   Nous Research Discord. No hermes-agent PR needed.
-3. **`optional-skills/` PR** (steps below), after a GitHub Discussion where a
-   maintainer says they want it in-tree.
+1. Merge the plugin to `main` here and wait for CI to pass on the merge commit, including
+   both `hermes plugin + field test` jobs.
+2. Get the full SHA: `git fetch origin main && git rev-parse origin/main`.
+3. Optionally tag `v1.0.0` on that commit. The catalog still pins the SHA.
 
-## Before you touch anything: seed safety
+## 2. Re-run the catalog checks at that commit
 
-- `UAGENT_SEED` lives ONLY in the environment or a `0600` env file. Never in YAML,
-  SKILL.md, commits, PR text, screenshots, or terminal output you paste.
+```bash
+git clone https://github.com/ptanner66-prog/Hermes-Fetch-AI /tmp/fetchai-pin
+git -C /tmp/fetchai-pin checkout <sha>
+hermes plugins validate /tmp/fetchai-pin/hermes-plugin/fetchai-bridge --install-deps
+```
+
+Expect `Validation passed.` with `security scan — safe`. Then check that `version` in the
+entry matches `plugin.yaml` at that commit, and that `requires_hermes` is not newer than
+the latest Hermes release (rule 14).
+
+## 3. Seed safety
+
+- `UAGENT_SEED` lives only in the environment or Hermes' `.env`. Never in YAML, the entry,
+  commits, PR text, screenshots, or terminal output you paste.
 - Use a dedicated agent seed (at least 32 random characters), not a wallet recovery
-  phrase that guards real holdings. Fund the derived `fetch1...` address with only
-  what Almanac registration needs.
-- Final check before pushing:
-  `git diff origin/main... | grep -iE "seed|secret|mnemonic"` should show nothing real.
+  phrase that guards real holdings.
+- Before pushing: `git diff origin/main... | grep -iE "seed|secret|mnemonic"` should show
+  nothing real.
 
-## Route 3: optional-skills PR steps
+## 4. Open the PR
 
 ```bash
 cd <your fork of hermes-agent>
-git checkout -b feat/skills-fetchai-bridge
-
-mkdir -p optional-skills/autonomous-ai-agents/fetchai-bridge
-cp <this-repo>/upstream/hermes-pr/optional-skills/autonomous-ai-agents/fetchai-bridge/SKILL.md \
-   optional-skills/autonomous-ai-agents/fetchai-bridge/SKILL.md
-# Replace <full-commit-sha> in SKILL.md with the 40-character commit you want users on.
-
-# The docs site is generated from skills; commit what this changes
-# (optional-skills catalog row, a new skill page, one sidebars.ts line).
-python3 website/scripts/generate-skill-docs.py
-
-git add optional-skills/autonomous-ai-agents/fetchai-bridge website/
-python scripts/check-windows-footguns.py        # scans staged files only
-python scripts/check                            # the blocking lint CI runs
-scripts/run_tests.sh tests/skills/              # repo-wide skill rules
+git checkout -b feat/plugin-catalog-fetchai-bridge
+cp <this-repo>/upstream/hermes-pr/plugin-catalog/fetchai-bridge.yaml plugin-catalog/
+# Replace REPLACE_WITH_THE_40_CHARACTER_COMMIT_SHA with the SHA from step 1.
+python3 scripts/validate_plugin_catalog.py plugin-catalog/fetchai-bridge.yaml   # needs ruamel.yaml
+git add plugin-catalog/fetchai-bridge.yaml
+git commit -m "feat(plugin-catalog): add fetchai-bridge"
 ```
 
-- **Author email:** Hermes' contributor check fails on unmapped commit emails. Commit
-  as `236672476+ptanner66-prog@users.noreply.github.com`, or add your email with
+- **Author email:** Hermes' contributor check fails on unmapped commit emails. Commit as
+  `236672476+ptanner66-prog@users.noreply.github.com`, or add your email with
   `python3 scripts/add_contributor.py <email> ptanner66-prog` in the same PR.
-- **Commit message:** `feat(skills): add fetchai-bridge optional skill`
-  (Conventional Commits).
-- **End-to-end check** the PR template asks for:
-  `hermes --toolsets skills -q "Use the fetchai-bridge skill to run the local demo"`.
-- **PR body:** use "Ready-to-paste PR body" in `docs/upstream-hermes-pr.md`.
+- **PR title and body:** "Ready-to-paste catalog PR" in `docs/upstream-hermes-pr.md`.
+- **CI:** wait for the `plugin-catalog-ci` checks. They clone this repository at the pin
+  and run `hermes plugins validate --install-deps` on `hermes-plugin/fetchai-bridge`.
+- **Review:** a maintainer may rewrite the entry's `Disclosure —` sentence or ask for
+  changes. Fix them here, re-pin, and update the PR.
 
-This payload no longer ships its own test: Hermes' repo-wide skill tests already
-enforce frontmatter and description rules, and `tests/AGENTS.md` asks reviewers to
-reject change-detector tests (the old one broke on a wording change).
+## Later updates
 
-## What this PR deliberately is not
+A new pin is a new PR (rule 4) that bumps `sha` and `version` together. Reviewers read the
+commit range being adopted, so keep plugin changes small and described in `CHANGELOG.md`.
 
-- No Hermes core-file changes (their plugin policy forbids them; none needed).
-- No funds-moving code. FET spending works through standard uAgents rails: the
-  bridge agent's wallet derives from `UAGENT_SEED` and uAgents' default registration
-  policy pays the Almanac fee from that wallet in hosted mode. Verified in
-  `tests/test_uagent_direct_protocol.py::test_build_agent_keeps_ledger_registration_policy_when_publishing`.
-- No conversations/messaging surface; the bridge only reaches the Hermes tools MCP
+## What this submission is not
+
+- No Hermes core changes and no self-updating code.
+- No funds-moving code. The bridge's wallet derives from `UAGENT_SEED`; when Almanac
+  registration is enabled, uAgents' default registration policy may pay its fee from that
+  wallet.
+- No conversations/messaging surface; the bridge reaches only the Hermes tools MCP
   server, allowlisted and in a separate process.
+- If a maintainer ever asks for an in-tree optional skill instead, start from the plugin's
+  [`skills/operate/SKILL.md`](../../hermes-plugin/fetchai-bridge/skills/operate/SKILL.md).

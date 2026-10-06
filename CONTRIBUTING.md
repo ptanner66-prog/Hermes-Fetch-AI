@@ -1,6 +1,6 @@
 # Contributing
 
-Thank you for improving Hermes Fetch AI. This project is intentionally small: a standalone Hermes plugin that exposes an allowlisted subset of Hermes tools to Fetch.ai uAgents with conservative security defaults.
+Thank you for improving Hermes Fetch AI. This project is intentionally small: a standalone bridge, with a thin Hermes plugin, that exposes an allowlisted subset of Hermes tools to Fetch.ai uAgents with conservative security defaults.
 
 ## Ground rules
 
@@ -36,6 +36,8 @@ uv run python -m twine check dist/*
 uv run python -m pip_audit --skip-editable --ignore-vuln CVE-2025-69277 --ignore-vuln PYSEC-2026-1325
 ```
 
+Changes to `hermes-plugin/fetchai-bridge` must keep it stdlib-only. If you have a Hermes install, also run `hermes plugins validate hermes-plugin/fetchai-bridge --install-deps`; CI runs it, `hermes plugins doctor --ci`, and the stdio field test against Hermes 0.21.5 and a pinned `main`.
+
 The `PyNaCl` and `ecdsa` ignores are tracked upstream dependency exceptions. Do not add new ignores without documenting the reason in `docs/security.md`.
 
 `ruff` and `mypy` are pinned to a minor series so a new release cannot change the lint or type-check rules underneath CI. Dependabot proposes the bumps; fix any new findings in that PR.
@@ -43,8 +45,8 @@ The `PyNaCl` and `ecdsa` ignores are tracked upstream dependency exceptions. Do 
 ## Testing expectations
 
 - Use TDD for security and policy behavior: failing regression first, implementation second, targeted tests third.
-- Tests must be hermetic by default. No live Agentverse, Almanac, ASI, or real Hermes install in default CI.
-- Use gated tests for live Hermes checks (`HERMES_FETCH_FIELD_TEST=1`).
+- Tests must be hermetic by default. No live Agentverse, Almanac, ASI, or real Hermes install in the default test run.
+- Use gated tests for live Hermes checks (`HERMES_FETCH_FIELD_TEST=1`); CI's `hermes-plugin` job sets them up against pinned Hermes commits.
 - Prefer behavior assertions over implementation snapshots.
 
 ## Replay metadata
@@ -66,6 +68,6 @@ Use Conventional Commits where practical, for example:
 
 ```text
 fix(policy): reject replayed tool calls
-feat(plugin): expose fetchai command group
+feat(plugin): pass Hermes' interpreter to the bridge
 chore(ci): add CodeQL workflow
 ```
