@@ -17,11 +17,15 @@ def clear_seed(monkeypatch):
 
 
 @pytest.fixture(autouse=True)
-def no_owner_config(monkeypatch, tmp_path_factory):
-    """Commands without --config read the config `setup` wrote; never the developer's own."""
+def no_owner_files(monkeypatch, tmp_path_factory):
+    """Commands use the config `setup` wrote and the default records folder: never the
+    developer's own."""
     config_home = tmp_path_factory.mktemp("config-home")
     monkeypatch.setenv("XDG_CONFIG_HOME", str(config_home))
     monkeypatch.setenv("APPDATA", str(config_home))  # where it lives on Windows
+    state_home = tmp_path_factory.mktemp("state-home")
+    monkeypatch.setenv("XDG_STATE_HOME", str(state_home))
+    monkeypatch.setenv("LOCALAPPDATA", str(state_home))
 
 
 def _is_loopback(address) -> bool:

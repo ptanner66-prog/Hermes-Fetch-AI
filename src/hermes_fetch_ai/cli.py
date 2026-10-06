@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import argparse
 import asyncio
+import contextlib
 import sys
 import tempfile
 from importlib import resources
@@ -452,26 +453,102 @@ def _now_ms() -> int:
     return int(time.time() * 1000)
 
 
-def serve(args: argparse.Namespace) -> int:
-    from .mcp_shim import HermesBackendError
-    from .uagent_app import ServeError, run_bridge
+def _config_target(args: argparse.Namespace) -> tuple[BridgeConfig, Path] | None:
+    """The config to use and where it is: --config, else the one `setup` wrote."""
+    from .audit import managed_config_path
 
     cfg = _load_or_report(args.config)
     if cfg is None:
+        return None
+    return cfg, Path(args.config or managed_config_path()).resolve()
+
+
+def serve(args: argparse.Namespace) -> int:
+    from .background import STOP_FILE, AlreadyRunning, claim, mark_ready, release
+    from .mcp_shim import HermesBackendError
+    from .uagent_app import ServeError, run_bridge
+
+    target = _config_target(args)
+    if target is None:
         return 1
+    cfg, path = target
     seed_warning = cfg.ignored_seed_warning()
     if seed_warning:
         print(f"seed: WARN: {seed_warning}", file=sys.stderr)
     if not _programs_ok(cfg):
         return 1
+    state = cfg.payments.state_path
     try:
-        run_bridge(cfg)
+        claim(state, path)
+    except AlreadyRunning as exc:
+        print(f"serve: FAIL: {exc}", file=sys.stderr)
+        return 1
+    try:
+        run_bridge(cfg, stop_file=state / STOP_FILE, on_ready=lambda: mark_ready(state))
     except HermesBackendError as exc:
         print(f"hermes backend: FAIL: {exc}", file=sys.stderr)
         return 1
     except ServeError as exc:
         print(f"serve: FAIL: {exc}", file=sys.stderr)
         return 1
+    finally:
+        release(state)
+    return 0
+
+
+def start(args: argparse.Namespace) -> int:
+    """Start the bridge in the background."""
+    from .background import start as start_in_background
+
+    target = _config_target(args)
+    if target is None:
+        return 1
+    cfg, path = target
+    if not _programs_ok(cfg):
+        return 1
+    return start_in_background(path, cfg.payments.state_path)
+
+
+def stop(args: argparse.Namespace) -> int:
+    from .background import stop as stop_background
+
+    target = _config_target(args)
+    if target is None:
+        return 1
+    return stop_background(target[0].payments.state_path)
+
+
+def restart(args: argparse.Namespace) -> int:
+    code = stop(args)
+    return code if code != 0 else start(args)
+
+
+def status(args: argparse.Namespace) -> int:
+    from .status import report
+
+    target = _config_target(args)
+    if target is None:
+        return 1
+    return report(target[0], offline=args.offline)
+
+
+def logs(args: argparse.Namespace) -> int:
+    from .background import LOG_FILE, follow, read_running, tail
+
+    target = _config_target(args)
+    if target is None:
+        return 1
+    state = target[0].payments.state_path
+    running = read_running(state)
+    log = Path(running.log) if running is not None and running.log else state / LOG_FILE
+    if not log.exists():
+        print("No log yet: it starts when you run `hermes fetchai-bridge start`.")
+        return 1
+    for line in tail(log, args.lines):
+        print(line)
+    if args.follow:
+        with contextlib.suppress(KeyboardInterrupt):
+            follow(log)
     return 0
 
 
@@ -537,6 +614,23 @@ def build_parser() -> argparse.ArgumentParser:
         help="a JSON file of answers by question key, instead of asking (- reads stdin)",
     )
     st.set_defaults(func=setup)
+    for name, func, text in (
+        ("start", start, "start your agent in the background"),
+        ("stop", stop, "stop your agent, letting it finish what it is doing"),
+        ("restart", restart, "stop and start your agent (after changing its setup)"),
+    ):
+        command = sub.add_parser(name, help=text)
+        command.add_argument("--config", default=None, help=CONFIG_HELP)
+        command.set_defaults(func=func)
+    stt = sub.add_parser("status", help="what your agent is doing, in plain words")
+    stt.add_argument("--config", default=None, help=CONFIG_HELP)
+    stt.add_argument("--offline", action="store_true", help="do not ask the testnet for balances")
+    stt.set_defaults(func=status)
+    lgs = sub.add_parser("logs", help="what your agent has been printing")
+    lgs.add_argument("--config", default=None, help=CONFIG_HELP)
+    lgs.add_argument("--lines", type=int, default=40, help="how many lines (default 40)")
+    lgs.add_argument("--follow", action="store_true", help="keep printing new lines")
+    lgs.set_defaults(func=logs)
     ph = sub.add_parser("probe-hermes", help="check that Hermes' tools MCP server can be imported")
     ph.set_defaults(func=probe_hermes)
     s = sub.add_parser("serve", help="run the bridge uAgent until interrupted")
@@ -590,7 +684,14 @@ def build_parser() -> argparse.ArgumentParser:
 
 def main(argv: list[str] | None = None) -> int:
     args = build_parser().parse_args(argv)
-    return int(args.func(args))
+    try:
+        return int(args.func(args))
+    except BrokenPipeError:
+        # Whatever read the output stopped early (`| head`): stop quietly.
+        import os
+
+        os.dup2(os.open(os.devnull, os.O_WRONLY), sys.stdout.fileno())
+        return 1
 
 
 if __name__ == "__main__":

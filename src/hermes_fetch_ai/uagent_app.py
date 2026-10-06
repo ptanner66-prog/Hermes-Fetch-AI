@@ -347,8 +347,13 @@ def _cancel_leftover_tasks(loop: asyncio.AbstractEventLoop) -> None:
         loop.run_until_complete(asyncio.gather(*leftover, return_exceptions=True))
 
 
-def run_bridge(cfg: BridgeConfig) -> None:
-    """Run the bridge agent until SIGINT/SIGTERM/SIGBREAK arrives.
+def run_bridge(
+    cfg: BridgeConfig,
+    *,
+    stop_file: Path | None = None,
+    on_ready: Callable[[], None] | None = None,
+) -> None:
+    """Run the bridge agent until SIGINT/SIGTERM/SIGBREAK arrives, or ``stop_file`` appears.
 
     Raises HermesBackendError if the Hermes backend cannot start and
     ServeError if the agent's server stops on its own.
@@ -357,8 +362,17 @@ def run_bridge(cfg: BridgeConfig) -> None:
     asyncio.set_event_loop(loop)
     stop = asyncio.Event()
 
+    async def _watch(path: Path) -> None:
+        # How `stop` reaches a background bridge on Windows, which gets no signals.
+        while not stop.is_set():
+            if path.exists():
+                stop.set()
+                return
+            await asyncio.sleep(1.0)
+
     async def _main() -> None:
         _install_stop_handlers(asyncio.get_running_loop(), stop)
+        watcher = asyncio.create_task(_watch(stop_file)) if stop_file is not None else None
         seed = cfg.effective_seed()
         async with HermesMCPClientShim(cfg) as shim:
             store = (
@@ -366,6 +380,12 @@ def run_bridge(cfg: BridgeConfig) -> None:
                 if cfg.payments.enabled or cfg.buying.enabled
                 else None
             )
+            if store is not None and (interrupted := store.recover()):
+                logger.warning(
+                    "%d paid request(s) were running when the bridge last stopped; each runs "
+                    "again when its buyer asks again",
+                    interrupted,
+                )
             desk = buyer = control = None
             try:
                 if cfg.payments.enabled:
@@ -386,6 +406,8 @@ def run_bridge(cfg: BridgeConfig) -> None:
                             stuck.id,
                             stuck.id,
                         )
+                if on_ready is not None:
+                    on_ready()
                 await _run_agent_until_stop(agent, stop)
             finally:
                 if control is not None:
@@ -396,6 +418,8 @@ def run_bridge(cfg: BridgeConfig) -> None:
                     await desk.aclose()
                 if store is not None:
                     store.close()
+                if watcher is not None:
+                    watcher.cancel()
 
     try:
         with contextlib.suppress(KeyboardInterrupt, asyncio.CancelledError):
