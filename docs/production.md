@@ -79,6 +79,7 @@ Watch `seller credits` for `failed` payments and extra payments, which need refu
 - With `publish_manifest: false`, the bridge makes no outbound calls of its own: no Almanac registration, contract lookup, or status reports (`tests/test_uagent_direct_protocol.py` checks this). Replying to a remote agent can need egress to Agentverse's Almanac API or the Fetch ledger, to look up that agent's endpoint.
 - Mailbox mode and `publish_manifest: true` need egress to Agentverse and the configured Fetch network (Almanac REST and gRPC, mailbox HTTPS).
 - Selling services needs egress to `payments.ledger_url` (`https://rest-dorado.fetch.ai` by default), only when a paid call arrives.
+- Selling through ASI:One in mailbox mode needs egress to Agentverse (`agentverse.ai`): the mailbox, the Almanac API, and manifests. `agentverse register` also calls Agentverse's API with your API key.
 
 ## Who can reach the bridge
 

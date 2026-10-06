@@ -57,6 +57,7 @@ The plugin hands the bridge Hermes' interpreter, which `probe-hermes` and
 | `hermes fetchai-bridge probe-hermes` | Can the bridge start Hermes' tools server? |
 | `hermes fetchai-bridge demo local` | Two-uAgent round trip with fake tools |
 | `hermes fetchai-bridge demo paid` | An offline sale with a simulated ledger |
+| `hermes fetchai-bridge demo chat` | An offline chat sale, the way an ASI:One user buys |
 | `hermes fetchai-bridge seller credits --config <yaml>` | Payments received, and which need refunds |
 | `hermes fetchai-bridge seller try <service> --request "..." --config <yaml>` | Run one service once, unpaid |
 | `hermes fetchai-bridge serve --config <yaml>` | Run the bridge (long-running; only when the user asks) |
@@ -95,6 +96,10 @@ The plugin hands the bridge Hermes' interpreter, which `probe-hermes` and
   and runs on Fetch's testnet only. Run `seller pause`, `resume`, `ban`, or
   `unban` only when the user asks. The repository's `docs/payments.md` is the
   guide.
+- `agentverse register` lists the agent publicly on Agentverse, and the
+  listing stays. Run it only when the user asks, and only with `--yes` after
+  they confirm; it needs the user's Agentverse API key in the plugin setting.
+  The repository's `docs/asi-one.md` is the guide.
 
 ## Verification
 
