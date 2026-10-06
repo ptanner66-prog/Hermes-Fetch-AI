@@ -6,7 +6,13 @@ import pytest
 
 from hermes_fetch_ai.ledger import Transfer, TxRecord
 from hermes_fetch_ai.quotes import issue_quote, quote_key
-from hermes_fetch_ai.seller import EARLY_GRACE_MS, LATE_GRACE_MS, check_transfer
+from hermes_fetch_ai.seller import (
+    AMOUNT_TOLERANCE,
+    EARLY_GRACE_MS,
+    LATE_GRACE_MS,
+    ORDER_CODE_UNIT,
+    check_transfer,
+)
 
 NOW = 1_780_000_000_000
 PRICE = 50_000_000_000_000_000
@@ -105,8 +111,14 @@ def test_grace_periods_are_inclusive():
 def test_without_a_memo_only_the_exact_amount_binds_the_payment():
     exact = tx(memo="")
     assert check_transfer(QUOTE, REFERENCE, exact, require_memo=False) is None
-    over = tx(memo="", transfers=(Transfer("fetch1buyer", SELLER, "atestfet", PRICE + 1),))
-    assert "exactly" in check_transfer(QUOTE, REFERENCE, over, require_memo=False)
+    # A wallet that rounds through floating point is a few units off; that still binds.
+    for paid in (PRICE + AMOUNT_TOLERANCE, PRICE - AMOUNT_TOLERANCE):
+        rounded = tx(memo="", transfers=(Transfer("fetch1buyer", SELLER, "atestfet", paid),))
+        assert check_transfer(QUOTE, REFERENCE, rounded, require_memo=False) is None
+    # One order-code step away is another order's amount, so it never binds.
+    for paid in (PRICE + ORDER_CODE_UNIT, PRICE - ORDER_CODE_UNIT, PRICE + AMOUNT_TOLERANCE + 1):
+        other = tx(memo="", transfers=(Transfer("fetch1buyer", SELLER, "atestfet", paid),))
+        assert "exactly" in check_transfer(QUOTE, REFERENCE, other, require_memo=False)
     # Even where memos are optional, another quote's reference is never accepted.
     foreign = tx(memo="hfq1.someoneelsesquote")
     assert "different quote" in check_transfer(QUOTE, REFERENCE, foreign, require_memo=False)

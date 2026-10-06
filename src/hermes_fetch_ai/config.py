@@ -57,6 +57,9 @@ class AgentConfig(BaseModel):
     network: Literal["testnet", "mainnet"] = "testnet"
     mode: Literal["endpoint", "mailbox", "proxy"] = "endpoint"
     publish_manifest: bool = False
+    # With publish_manifest, also register on the Almanac contract, which can
+    # spend from the agent's wallet. Off: register through the Almanac API only.
+    ledger_registration: bool = False
     enable_agent_inspector: bool = False
     dev_random_seed: bool = False
     # Accepted only so that a seed in YAML gets a clear error; see validate_cross_fields.
@@ -279,15 +282,10 @@ class ServiceConfig(BaseModel):
 
 
 class ChatConfig(BaseModel):
+    """Fetch's chat protocol, for selling services to ASI:One users in plain language."""
+
     model_config = ConfigDict(extra="forbid")
     enable_chat: bool = False
-
-    @field_validator("enable_chat")
-    @classmethod
-    def no_chat(cls, v: bool) -> bool:
-        if v:
-            raise ValueError("chat is out of v1 scope")
-        return v
 
 
 class BridgeConfig(BaseModel):
@@ -324,6 +322,11 @@ class BridgeConfig(BaseModel):
                 )
         if self.services and not self.payments.enabled:
             raise ValueError("services need payments.enabled: true")
+        if self.chat.enable_chat and not self.services:
+            raise ValueError(
+                "chat sells the services under `services`; define at least one "
+                "(and set payments.enabled: true)"
+            )
         if self.payments.enabled and self.agent.network != "testnet":
             raise ValueError("payments run on Fetch's testnet only; set agent.network: testnet")
         if (

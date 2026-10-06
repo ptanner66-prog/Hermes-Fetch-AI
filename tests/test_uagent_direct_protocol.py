@@ -1,6 +1,7 @@
 import pytest
 from uagents import Agent, Protocol
 from uagents.dispatch import dispatcher
+from uagents.registration import AlmanacApiRegistrationPolicy
 from uagents_adapter.mcp.protocol import CallTool, mcp_protocol_spec
 
 from hermes_fetch_ai.audit import AuditWriter
@@ -44,7 +45,13 @@ def test_build_agent_wires_noop_registration_policy_when_not_publishing(monkeypa
     assert captured["include_publish_manifest"] is False
 
 
-def test_build_agent_keeps_ledger_registration_policy_when_publishing(monkeypatch):
+@pytest.mark.parametrize(
+    ("ledger_registration", "agent_class", "policy"),
+    [(False, "ApiRegisteredAgent", AlmanacApiRegistrationPolicy), (True, "Agent", None)],
+)
+def test_build_agent_registration_policy_when_publishing(
+    monkeypatch, ledger_registration, agent_class, policy
+):
     captured = {}
 
     class FakeAgent:
@@ -56,13 +63,17 @@ def test_build_agent_keeps_ledger_registration_policy_when_publishing(monkeypatc
         def include(self, protocol, publish_manifest=False):
             captured["include_publish_manifest"] = publish_manifest
 
-    monkeypatch.setattr("hermes_fetch_ai.uagent_app.Agent", FakeAgent)
+    monkeypatch.setattr(f"hermes_fetch_ai.uagent_app.{agent_class}", FakeAgent)
     c = cfg()
     c.agent.publish_manifest = True
+    c.agent.ledger_registration = ledger_registration
     build_agent(c, object())
-    # Hosted mode must leave registration to uAgents' default ledger-backed
-    # policy so a funded wallet can pay Almanac registration.
-    assert "registration_policy" not in captured
+    if policy is None:
+        # Opted in: uAgents' default policy, which a funded wallet pays the contract with.
+        assert "registration_policy" not in captured
+    else:
+        # The default: the Almanac API only, so the wallet is never spent on its own.
+        assert isinstance(captured["registration_policy"], policy)
     assert captured["include_publish_manifest"] is True
 
 
@@ -81,11 +92,17 @@ async def test_private_bridge_never_contacts_the_almanac(almanac_calls):
 
 
 @pytest.mark.asyncio
-async def test_published_bridge_uses_the_almanac(almanac_calls):
+@pytest.mark.parametrize(
+    ("ledger_registration", "calls"),
+    [(False, ["active", "inactive"]), (True, ["contract lookup", "active", "inactive"])],
+)
+async def test_published_bridge_uses_the_almanac(almanac_calls, ledger_registration, calls):
     c = cfg()
     c.agent.publish_manifest = True
+    c.agent.ledger_registration = ledger_registration
     await _start_and_stop(build_agent(c, object()))
-    assert almanac_calls == ["contract lookup", "active", "inactive"]
+    # The Almanac contract (on the ledger) is looked up only when the owner opts in.
+    assert almanac_calls == calls
 
 
 def test_protocol_signed_handlers_and_no_adapter_or_chat():

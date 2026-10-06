@@ -9,6 +9,8 @@ from hermes_fetch_ai.fake_ledger import FakeLedger
 from hermes_fetch_ai.ledger import LedgerUnavailable
 from hermes_fetch_ai.quotes import quote_key
 from hermes_fetch_ai.seller import (
+    ORDER_CODE_UNIT,
+    ORDER_CODES,
     PaymentProof,
     PaymentRefused,
     Seller,
@@ -265,3 +267,17 @@ async def test_racing_redeems_of_one_payment_make_one_credit(
     refused = [r for r in results if isinstance(r, PaymentRefused)]
     assert len(refused) == 1 and reason in refused[0].reason
     assert len(seller.store.credits()) == 1
+
+
+def test_chat_quotes_carry_an_order_code(seller):
+    amounts = set()
+    for _ in range(20):
+        q, _ = seller.quote(
+            kind="chat", sender=BUYER, subject="research", digest=DIGEST, amount_base=PRICE
+        )
+        assert 1 <= q.tag <= ORDER_CODES
+        assert q.amount_base == PRICE + q.tag * ORDER_CODE_UNIT
+        amounts.add(q.amount_base)
+    assert len(amounts) > 1  # random codes tell orders apart
+    call, _ = quote(seller)
+    assert (call.tag, call.amount_base) == (0, PRICE)  # MCP calls bind by memo instead

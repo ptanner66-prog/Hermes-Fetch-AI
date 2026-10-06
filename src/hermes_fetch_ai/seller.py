@@ -11,6 +11,7 @@ says about the payment is trusted.
 from __future__ import annotations
 
 import json
+import secrets
 import time
 from collections.abc import Callable
 from dataclasses import dataclass
@@ -34,6 +35,13 @@ PAYMENT_REQUIRED = "payment required: "
 # A payment may land slightly before the quote's clock or after its expiry.
 EARLY_GRACE_MS = 30_000
 LATE_GRACE_MS = 120_000
+# Chat prices carry an "order code": a surcharge of 1 to 65535 billionths of a
+# FET, so a payment without our memo is still tied to one order by its amount.
+ORDER_CODE_UNIT = 10**9
+ORDER_CODES = 2**16 - 1
+# Wallets that convert amounts with floating point can be off by a little; a
+# tenth of an order-code step still tells every order apart.
+AMOUNT_TOLERANCE = ORDER_CODE_UNIT // 10
 _MAX_TRACKED_SENDERS = 4096
 
 
@@ -98,8 +106,8 @@ def check_transfer(
     if paid == 0:
         return f"the transaction does not pay {quote.recipient} in {quote.denom}"
     if memo != reference:
-        # No memo binding: the exact, tagged amount identifies the quote.
-        if paid != quote.amount_base:
+        # No memo binding: the exact amount, order code included, identifies the quote.
+        if abs(paid - quote.amount_base) > AMOUNT_TOLERANCE:
             return f"the amount must be exactly {format_fet(quote.amount_base)} FET without a memo"
     elif paid < quote.amount_base:
         return f"underpaid: {format_fet(paid)} FET of {format_fet(quote.amount_base)} FET"
@@ -141,18 +149,21 @@ class Seller:
     def quote(
         self, *, kind: QuoteKind, sender: str, subject: str, digest: str, amount_base: int
     ) -> tuple[Quote, str]:
+        """A signed quote for ``amount_base``; a chat quote adds a random order code."""
+        tag = secrets.randbelow(ORDER_CODES) + 1 if kind == "chat" else 0
         return issue_quote(
             self._key,
             kind=kind,
             sender=sender,
             subject=subject,
             digest=digest,
-            amount_base=amount_base,
+            amount_base=amount_base + tag * ORDER_CODE_UNIT,
             recipient=self.payout,
             denom=self.payments.denom,
             chain_id=self.payments.chain_id,
             now_ms=self.now_ms(),
             ttl_seconds=self.payments.quote_ttl_seconds,
+            tag=tag,
         )
 
     def payment_required(self, quote: Quote, reference: str) -> str:

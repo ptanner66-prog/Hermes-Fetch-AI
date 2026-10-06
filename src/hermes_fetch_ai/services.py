@@ -40,6 +40,8 @@ SERVICE_PREFIX = "service."
 _DAY_MS = 86_400_000
 # How long a killed service program gets to finish going away.
 _STOP_SECONDS = 5.0
+BUSY = "this service is busy; try again in a few minutes"
+CALL_RETRY_HINT = "; your payment is kept, so you can repeat the call with the same reference"
 # A paid answer is kept in memory this long, so a buyer who missed it can ask again.
 _ANSWER_TTL_SECONDS = 3600.0
 _MAX_KEPT_ANSWERS = 64
@@ -259,6 +261,17 @@ def service_tool(name: str, svc: ServiceConfig, cfg: BridgeConfig) -> dict[str, 
     }
 
 
+def credit_audit(credit: Credit) -> dict[str, Any]:
+    """Audit fields for a verified payment, in short forms only."""
+    return {
+        "payment": "verified",
+        "credit": short_reference(credit.reference),
+        "amount_base": str(credit.amount_base),
+        "tx_short": short_tx(credit.tx_hash),
+        "payer_short": short_tx(credit.payer),
+    }
+
+
 class ServiceBusy(Exception):
     """Every running and waiting place for a service is taken."""
 
@@ -374,6 +387,40 @@ class ServiceDesk:
                 return kept
         return None
 
+    def name_of(self, tool_name: str) -> str:
+        return self._tool_names[tool_name]
+
+    def busy(self, name: str) -> bool:
+        return self._slots[name].busy()
+
+    async def admit(self, name: str, sender: str, args: dict[str, Any]) -> str | None:
+        """Why this request may not be served now, or None: owner controls, input, daily limit."""
+        svc = self.cfg.services[name]
+        store = self.seller.store
+        if store.paused():
+            return "this agent is not taking requests right now"
+        if store.is_banned(sender):
+            return "this agent does not accept your requests"
+        try:
+            await asyncio.wait_for(
+                asyncio.to_thread(
+                    validate_args,
+                    service_tool(name, svc, self.cfg),
+                    args,
+                    self.cfg,
+                    shell_checks=False,
+                    url_checks=svc.input.check_urls,
+                ),
+                timeout=self.cfg.hermes_mcp.timeout_seconds,
+            )
+        except TimeoutError:
+            return "argument checks timed out"
+        except (TypeError, ValueError) as exc:
+            return str(exc)
+        if store.runs_since(name, int(time.time() * 1000) - _DAY_MS) >= svc.max_runs_per_day:
+            return "this service has reached its limit for today; try again tomorrow"
+        return None
+
     async def call(
         self,
         *,
@@ -383,45 +430,21 @@ class ServiceDesk:
         proof: PaymentProof | None,
         remember_replay: Callable[[], tuple[bool, str]],
     ) -> ServiceOutcome:
-        name = self._tool_names[tool_name]
+        """Serve one MCP call to ``service.<name>``: quote, verify payment, run."""
+        name = self.name_of(tool_name)
         svc = self.cfg.services[name]
-        store = self.seller.store
-        if store.paused():
-            return self._refuse("this agent is not taking requests right now")
-        if store.is_banned(sender):
-            return self._refuse("this agent does not accept your requests")
-        descriptor = service_tool(name, svc, self.cfg)
-        try:
-            await asyncio.wait_for(
-                asyncio.to_thread(
-                    validate_args,
-                    descriptor,
-                    args,
-                    self.cfg,
-                    shell_checks=False,
-                    url_checks=svc.input.check_urls,
-                ),
-                timeout=self.cfg.hermes_mcp.timeout_seconds,
-            )
-        except TimeoutError:
-            return self._refuse("argument checks timed out")
-        except (TypeError, ValueError) as exc:
-            return self._refuse(str(exc))
-        now_ms = int(time.time() * 1000)
-        if store.runs_since(name, now_ms - _DAY_MS) >= svc.max_runs_per_day:
-            return self._refuse("this service has reached its limit for today; try again tomorrow")
-
+        problem = await self.admit(name, sender, args)
+        if problem is not None:
+            return self._refuse(problem)
         price = svc.price_base
-        slots = self._slots[name]
-        busy = "this service is busy; try again in a few minutes"
         credit = None
         audit: dict[str, Any] = {}
         if price:
             digest = request_digest(args)
             if proof is None:
                 # Never ask for money that cannot be worked off soon.
-                if slots.busy():
-                    return self._refuse(busy)
+                if self.busy(name):
+                    return self._refuse(BUSY)
                 quote, reference = self.seller.quote(
                     kind="call", sender=sender, subject=name, digest=digest, amount_base=price
                 )
@@ -457,44 +480,55 @@ class ServiceDesk:
                     truncated=kept.truncated,
                     audit={"payment": "repeat", "credit": short_reference(proof.reference)},
                 )
-            audit = {
-                "payment": "verified",
-                "credit": short_reference(credit.reference),
-                "amount_base": str(credit.amount_base),
-                "tx_short": short_tx(credit.tx_hash),
-                "payer_short": short_tx(credit.payer),
-            }
-        elif slots.busy():
-            return self._refuse(busy)
+            audit = credit_audit(credit)
+        elif self.busy(name):
+            return self._refuse(BUSY)
 
         ok, why = remember_replay()
         if not ok:
             return self._refuse(why, **audit)
+        return await self.serve(name, sender, str(args["request"]), credit, audit)
+
+    async def serve(
+        self,
+        name: str,
+        sender: str,
+        request: str,
+        credit: Credit | None,
+        audit: dict[str, Any],
+        *,
+        retry_hint: str = CALL_RETRY_HINT,
+    ) -> ServiceOutcome:
+        """Run a request that passed every check, in one of the service's run slots.
+
+        ``retry_hint`` tells a paying buyer how to retry after a failure on the
+        seller's side; it differs between MCP calls and chat.
+        """
         try:
-            async with slots.slot():
-                return await self._run(name, svc, sender, args, credit, audit, now_ms)
+            async with self._slots[name].slot():
+                return await self._run(name, sender, request, credit, audit, retry_hint)
         except ServiceBusy:
             kept_payment = "; your payment is kept, so you can repeat the call shortly"
-            return self._refuse(busy + (kept_payment if credit else ""), **audit)
+            return self._refuse(BUSY + (kept_payment if credit else ""), **audit)
 
     async def _run(
         self,
         name: str,
-        svc: ServiceConfig,
         sender: str,
-        args: dict[str, Any],
+        request: str,
         credit: Credit | None,
         audit: dict[str, Any],
-        now_ms: int,
+        retry_hint: str,
     ) -> ServiceOutcome:
+        svc = self.cfg.services[name]
         if credit is not None:
             try:
                 credit = self.seller.begin(credit)
             except PaymentRefused as exc:
                 return self._refuse(exc.reason, **audit)
-        self.seller.store.record_run(subject=name, sender=sender, now_ms=now_ms)
+        self.seller.store.record_run(subject=name, sender=sender, now_ms=int(time.time() * 1000))
         try:
-            result = await self.runners[name].run(str(args["request"]))
+            result = await self.runners[name].run(request)
         except Exception:  # a runner bug must not lose the payment
             logger.exception("service %s runner failed", name)
             result = ServiceResult("", ok=False, problem="the service failed")
@@ -503,7 +537,7 @@ class ServiceDesk:
         if not result.ok:
             retry = credit is not None and credit.status == "paid"
             hint = (
-                "; your payment is kept, so you can repeat the call with the same reference"
+                retry_hint
                 if retry
                 else ("; ask the seller for a refund" if credit is not None else "")
             )
