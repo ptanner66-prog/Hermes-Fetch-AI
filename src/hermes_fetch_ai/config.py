@@ -142,6 +142,15 @@ def is_fetch_address(value: str) -> bool:
     return decoded is not None and len(decoded) == 20
 
 
+def is_agent_address(value: str) -> bool:
+    """True for a well-formed ``agent1...`` agent address."""
+    hrp, data = bech32.bech32_decode(value)
+    if hrp != "agent" or data is None:
+        return False
+    decoded = bech32.convertbits(data, 5, 8, False)
+    return decoded is not None and len(decoded) == 33
+
+
 def _is_loopback_host(host: str) -> bool:
     if host == "localhost":
         return True
@@ -202,6 +211,69 @@ class PaymentsConfig(BaseModel):
     @property
     def state_path(self) -> Path:
         return Path(self.state_dir).expanduser() if self.state_dir else default_state_dir()
+
+
+class BuyingConfig(BaseModel):
+    """Buying from other agents, for testnet FET, always with the owner's approval.
+
+    The limits are enforced by the bridge, whatever Hermes asks for.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+    enabled: bool = False
+    # Most a single payment may be, in testnet FET.
+    max_payment: str = "1"
+    # Most spent in any 24 hours, across all sellers and for one seller.
+    max_per_day: str = "5"
+    max_per_seller_per_day: str = "2"
+    # Agent addresses (agent1...) Hermes may pay; empty means any agent.
+    allowed_sellers: list[str] = Field(default_factory=list)
+    # How long a message waits for the other agent's reply before returning.
+    reply_wait_seconds: float = Field(default=60.0, gt=0, le=600)
+    max_message_chars: int = Field(default=4000, ge=1, le=50_000)
+
+    @field_validator("max_payment", "max_per_day", "max_per_seller_per_day")
+    @classmethod
+    def _amount(cls, value: str) -> str:
+        amount = parse_fet(value)
+        if amount <= 0:
+            raise ValueError("must be more than 0")
+        if amount > MAX_PRICE_BASE:
+            raise ValueError(f"must be at most {format_fet(MAX_PRICE_BASE)} FET")
+        return value
+
+    @field_validator("allowed_sellers")
+    @classmethod
+    def _sellers(cls, sellers: list[str]) -> list[str]:
+        for seller in sellers:
+            if not is_agent_address(seller):
+                raise ValueError(f"{seller!r} is not an agent address (agent1...)")
+        return sellers
+
+    @model_validator(mode="after")
+    def _limits_agree(self) -> BuyingConfig:
+        payment, day, seller = (
+            parse_fet(self.max_payment),
+            parse_fet(self.max_per_day),
+            parse_fet(self.max_per_seller_per_day),
+        )
+        if payment > day or seller > day:
+            raise ValueError(
+                "max_payment and max_per_seller_per_day must not be more than max_per_day"
+            )
+        return self
+
+    @property
+    def max_payment_base(self) -> int:
+        return parse_fet(self.max_payment)
+
+    @property
+    def max_per_day_base(self) -> int:
+        return parse_fet(self.max_per_day)
+
+    @property
+    def max_per_seller_per_day_base(self) -> int:
+        return parse_fet(self.max_per_seller_per_day)
 
 
 class ServiceInputConfig(BaseModel):
@@ -406,6 +478,7 @@ class BridgeConfig(BaseModel):
     chat: ChatConfig = Field(default_factory=ChatConfig)
     payments: PaymentsConfig = Field(default_factory=PaymentsConfig)
     services: dict[str, ServiceConfig] = Field(default_factory=dict)
+    buying: BuyingConfig = Field(default_factory=BuyingConfig)
 
     @model_validator(mode="after")
     def validate_cross_fields(self) -> BridgeConfig:
@@ -437,6 +510,13 @@ class BridgeConfig(BaseModel):
             )
         if self.payments.enabled and self.agent.network != "testnet":
             raise ValueError("payments run on Fetch's testnet only; set agent.network: testnet")
+        if self.buying.enabled and self.agent.network != "testnet":
+            raise ValueError("buying runs on Fetch's testnet only; set agent.network: testnet")
+        if self.buying.enabled and self.agent.dev_random_seed:
+            raise ValueError(
+                "buying pays from a wallet that comes from UAGENT_SEED; set "
+                "agent.dev_random_seed: false and a stable UAGENT_SEED"
+            )
         if (
             self.payments.enabled
             and self.agent.dev_random_seed
