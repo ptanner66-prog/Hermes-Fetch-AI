@@ -273,3 +273,9 @@ hermes-fetch-ai demo paid       # a sale with a simulated ledger: price, payment
 - The local gate is in [`CONTRIBUTING.md`](CONTRIBUTING.md): ruff (lint and format), mypy (strict), and pytest with a 90% branch-coverage floor, among others. The test suite runs offline.
 - CI also runs the tests on Linux, macOS, and Windows, installs the built wheel, runs the Hermes plugin checks and field tests against real Hermes, audits dependencies, and runs CodeQL.
 - To report a vulnerability, see [`SECURITY.md`](SECURITY.md).
+
+## Acknowledgments
+
+This project stands on two open platforms and the documentation their teams publish: [Hermes Agent](https://hermes-agent.nousresearch.com/) by Nous Research, with its [plugin guide](https://github.com/NousResearch/hermes-agent/blob/main/website/docs/developer-guide/plugins/index.md) and plugin catalog rules, and Fetch.ai's [uAgents](https://github.com/fetchai/uAgents), [Agentverse](https://agentverse.ai), and [ASI:One](https://asi1.ai), with the [Innovation Lab examples](https://github.com/fetchai/innovation-lab-examples) the payment flow follows. Thank you to both teams for building in the open.
+
+Hermes Agent is a project of Nous Research. Fetch.ai, uAgents, Agentverse, and ASI:One belong to Fetch.ai. Their names appear here only to say what this project works with; it is not affiliated with or endorsed by either.

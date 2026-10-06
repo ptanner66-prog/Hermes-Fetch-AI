@@ -25,6 +25,7 @@ Sources: Hermes' plugin guide (`website/docs/developer-guide/plugins/index.md`),
 - **Tools.** Schemas in the documented shape; handlers return JSON strings with `{"error": ...}`; a `check_fn` that returns a bool; free-form toolset name; no clash with built-in tools.
 - **YOLO detection.** `is_approval_bypass_active` covers every way the docs list to turn YOLO on (`--yolo`, `/yolo`, `HERMES_YOLO_MODE`, `approvals.mode: off`); the field test checks each on both versions.
 - **Skills.** Frontmatter fields, platforms, and a "When to Use" section, as the skill guide and linter expect.
+- **Not applicable.** Application declarations (`plugins/application-declarations.md`), which are for plugins whose MCP server fronts a desktop application, and rule 8 (Desktop plugins).
 
 ### Open
 
