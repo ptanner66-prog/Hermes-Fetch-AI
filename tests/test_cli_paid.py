@@ -24,7 +24,7 @@ def paid_config(tmp_path, monkeypatch):
             f"""
             agent: {{name: cli_seller}}
             hermes_mcp: {{mode: fake}}
-            payments: {{enabled: true, state_dir: "{tmp_path / "state"}"}}
+            payments: {{enabled: true, state_dir: {json.dumps(str(tmp_path / "state"))}}}
             services:
               research:
                 title: Research a topic
@@ -186,7 +186,7 @@ def command_service_config(tmp_path, argv):
         textwrap.dedent(
             f"""
             agent: {{name: cli_seller}}
-            payments: {{enabled: true, state_dir: "{tmp_path / "state"}"}}
+            payments: {{enabled: true, state_dir: {json.dumps(str(tmp_path / "state"))}}}
             services:
               svc:
                 title: A service

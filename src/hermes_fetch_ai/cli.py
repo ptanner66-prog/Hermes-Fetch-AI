@@ -126,7 +126,9 @@ def demo(args: argparse.Namespace) -> int:
 def _demo_paid() -> int:
     from .paid_demo import run_paid_demo
 
-    with tempfile.TemporaryDirectory(prefix="hermes-fetch-ai-paid-demo-") as tmp:
+    with tempfile.TemporaryDirectory(
+        prefix="hermes-fetch-ai-paid-demo-", ignore_cleanup_errors=True
+    ) as tmp:
         lines = asyncio.run(run_paid_demo(Path(tmp)))
     for line in lines:
         print(line)

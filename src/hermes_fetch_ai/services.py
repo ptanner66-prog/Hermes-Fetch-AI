@@ -15,6 +15,7 @@ import contextlib
 import json
 import os
 import signal
+import sys
 import tempfile
 import time
 from collections.abc import Callable, Mapping
@@ -82,7 +83,10 @@ class CommandRunner:
         self.show_errors = show_errors
 
     async def run(self, request: str) -> ServiceResult:
-        with tempfile.TemporaryDirectory(prefix="hermes-fetch-ai-service-") as workdir:
+        # Windows cannot delete a folder a leftover process still uses; never fail on that.
+        with tempfile.TemporaryDirectory(
+            prefix="hermes-fetch-ai-service-", ignore_cleanup_errors=True
+        ) as workdir:
             try:
                 process = await asyncio.create_subprocess_exec(
                     *self.cfg.argv,
@@ -168,10 +172,10 @@ class CommandRunner:
     @staticmethod
     def _kill(process: asyncio.subprocess.Process) -> None:
         with contextlib.suppress(ProcessLookupError, PermissionError, OSError):
-            if os.name != "nt":
-                os.killpg(process.pid, signal.SIGKILL)
-            else:
+            if sys.platform == "win32":
                 process.kill()
+            else:
+                os.killpg(process.pid, signal.SIGKILL)
 
 
 def program_problems(cfg: BridgeConfig) -> list[str]:
