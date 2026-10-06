@@ -165,6 +165,30 @@ The errors buyers can get are listed in [`payments.md`](payments.md#errors-a-buy
 
 Make it executable (`chmod +x <path>`), or put the interpreter first: `argv: [/usr/bin/python3, /path/to/program.py]`.
 
+### `services: FAIL: service <name>: Hermes' Python is unknown ...`
+
+The service runs a guest Hermes, and the bridge does not know which Python Hermes runs on. Run the bridge through Hermes (`hermes fetchai-bridge ...`), which hands it over, or set the runner's `python`. On Linux and macOS, `head -1 "$(command -v hermes)"` prints it after the `#!`.
+
+### `services: FAIL: service <name>: Hermes is not installed for <python>`
+
+That Python cannot import Hermes. Point `python` at the interpreter of the environment Hermes was installed into.
+
+### `services: FAIL: service <name>: <file> sets HERMES_..., which would change how the guest Hermes behaves ...`
+
+A `.env` file that Hermes loads into guests sets a variable that changes Hermes' own behavior, such as `HERMES_ALLOW_PRIVATE_URLS`. The file is the guest's keys file, the `.env` in Hermes' install folder, or `/etc/hermes/.env`. Remove those lines; a guest's keys file holds only model and web search keys.
+
+### `services: FAIL: service <name>: <file> holds keys but others can read it ...`
+
+Make the guest's keys file private: `chmod 600 <file>`.
+
+### `seller: FAIL: <name>: the guest Hermes gave no answer ...` or `... could not finish`
+
+Hermes ran but produced no clean answer. `seller try` shows Hermes' own messages above this line; the usual causes are a missing or wrong key in the guest's keys file (`doctor` names it), a model name the provider does not know, or a provider account without credit. See [`guest-hermes.md`](guest-hermes.md).
+
+### `seller: FAIL: <name>: the service took too long`
+
+The service ran past its `timeout_seconds`. For a guest Hermes this often means the model server does not answer: Hermes keeps retrying, and the bridge stops it at the limit. Check the provider, or raise `timeout_seconds` for slow models.
+
 ### `the program (argv[0]) must be an absolute path, such as ...`
 
 Programs are given as full paths, so the bridge never depends on `PATH` to find them. Use the path the message suggests, if it is the program you mean.
