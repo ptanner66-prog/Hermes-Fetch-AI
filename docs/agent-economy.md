@@ -1,6 +1,6 @@
 # Agent economy (design and status)
 
-This is the design for letting Hermes take part in Fetch.ai's agent economy. Selling over MCP calls and through chat has landed (unreleased; how to use it: [`payments.md`](payments.md), [`asi-one.md`](asi-one.md)). The rest is the plan the code is being built against; the [status table](#status) says what has landed.
+This is the design for letting Hermes take part in Fetch.ai's agent economy. Selling over MCP calls and through chat, and services run by a guest Hermes, have landed (unreleased; how to use them: [`payments.md`](payments.md), [`asi-one.md`](asi-one.md), [`guest-hermes.md`](guest-hermes.md)). The rest is the plan the code is being built against; the [status table](#status) says what has landed.
 
 ## What it will do
 
@@ -26,7 +26,11 @@ Services run through a `command` runner: the owner's program gets the request on
 
 The bridge speaks Fetch's chat protocol and answers with a menu of services and prices. A chosen service gets a `RequestPayment` in the shape of Fetch's own ASI:One payment example. ASI:One may not put the reference in the memo, so chat quotes also carry an order code, a unique amount surcharge that binds the payment to the quote. Long work runs in a small bounded queue, and the bridge only asks for money when it has room to do the work. A live test with a real ASI:One user is still to come ([`asi-one.md`](asi-one.md#what-is-tested)).
 
-Chat requests never reach the owner's Hermes. Each service has its own runner: a program the owner configures, or a separate guest Hermes with its own home, its own model key, and only the tools that service needs. Before every run the bridge checks that the guest's configuration still has those limits and refuses otherwise.
+Chat requests never reach the owner's Hermes. Each service has its own runner: a program the owner configures, or a guest Hermes (below).
+
+## Services run by a guest Hermes (landed)
+
+A research service needs Hermes itself: a model and web search. For each request the bridge starts a separate Hermes in a new, throwaway home folder, writes its settings there (the model, only the service's toolsets, every other toolset switched off by name, no memory or self-review, no private network addresses, no installs), gives it only the guest's own keys file and a short environment, and deletes the folder when the run ends. The settings are written fresh for every run, so they cannot drift; at startup the bridge also refuses any `.env` that Hermes would load into guests if it sets `HERMES_...` variables. Details and tests: [`guest-hermes.md`](guest-hermes.md).
 
 ## Buying
 
@@ -54,7 +58,7 @@ All of these must hold before mainnet can be unlocked:
 | Scope, threat model, and test-network guard | Landed |
 | Paid services over MCP calls | Landed; tested on the real testnet |
 | Chat and ASI:One | Landed; offline tests; live ASI:One test pending |
-| Guest Hermes runners | Planned |
+| Guest Hermes runners | Landed; field-tested against real Hermes in CI |
 | Buying, plugin tools, approvals | Planned |
 | Guided setup and plain-language docs | Planned |
 | Live testnet tests and real-world trial | Planned |

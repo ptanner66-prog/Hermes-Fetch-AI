@@ -33,9 +33,10 @@ from hermes_fetch_ai.chat_protocol import (
 from hermes_fetch_ai.config import BridgeConfig
 from hermes_fetch_ai.fake_ledger import FakeLedger
 from hermes_fetch_ai.money import parse_fet
+from hermes_fetch_ai.programs import ServiceResult
 from hermes_fetch_ai.quotes import quote_key
 from hermes_fetch_ai.seller import ORDER_CODE_UNIT, Seller
-from hermes_fetch_ai.services import ServiceDesk, ServiceResult
+from hermes_fetch_ai.services import ServiceDesk
 from hermes_fetch_ai.store import Store
 
 PAYOUT = "fetch1hh09pm44murgmu7rpaxluwad3way3nxq0fl6fx"

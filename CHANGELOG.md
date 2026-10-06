@@ -15,6 +15,7 @@ All notable changes are documented here. The project follows [semantic versionin
 - Tested on Fetch's real testnet: a paid call, replays, a copied transaction, an underpayment of one `atestfet`, a wrong memo, and a restart ([results](docs/payments.md#tested-on-the-real-testnet)).
 - Sell services to ASI:One users through Fetch's chat protocol ([`docs/asi-one.md`](docs/asi-one.md)), with `chat.enable_chat`: a plain-language menu, a payment request in the shape ASI:One's payment card reads, payments verified on the ledger, and the answer. Chat prices carry an order code (a surcharge of up to 0.000066 FET) that ties a payment without a memo to its order.
 - `agentverse register` lists a selling bridge on Agentverse (README from its services, chat and payment protocols, optional `agent.handle`) with an API key from `AGENTVERSE_API_KEY`, which the Hermes plugin offers as a secret setting. `demo chat` shows a chat sale offline.
+- `hermes` service runner, a guest Hermes ([`docs/guest-hermes.md`](docs/guest-hermes.md)): each request runs a separate Hermes in a throwaway home folder, with only the `web` toolset (or none), settings the bridge writes (every other toolset off by name, no memory or self-review, no private network addresses, no installs), and its own keys file. The folder is deleted after the run. `doctor`, `seller try`, and `serve` refuse to run a guest when a `.env` Hermes would load into it sets `HERMES_...` variables. The example config gains a `research` service built on it.
 
 ### Changed
 
@@ -26,6 +27,7 @@ All notable changes are documented here. The project follows [semantic versionin
 
 - The default test run fails any test that connects outside this machine, even when the code under test hides the error. Live tests opt out with the `network` marker.
 - `serve` sells a service in its own process against a ledger on 127.0.0.1, which shows the bridge makes no ledger request before a paid call arrives.
+- A field test runs the guest Hermes runner against real Hermes (0.21.5 and a pinned `main`) with a stand-in model server on 127.0.0.1: only the web tools are offered, a terminal call is refused, a page on 127.0.0.1 is not fetched, and nothing is left behind.
 
 ## 1.0.0 - Unreleased
 

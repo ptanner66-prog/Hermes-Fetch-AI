@@ -18,6 +18,7 @@ If the backend dies after startup, callers get `backend unavailable` and the aud
 - Production configs set `agent.dev_random_seed: false` (as `examples/hermes-stdio.yaml` does). With `true`, `UAGENT_SEED` is ignored and the bridge gets a new address on every start; `doctor` and `serve` print `seed: WARN` in that case.
 - Use a dedicated agent seed, not a wallet that holds real funds. The seed also derives the agent's `fetch1...` wallet, which Almanac registration (`publish_manifest: true`) can spend from.
 - Keep seeds, mailbox keys, API tokens, private endpoints, and connection strings out of configs, audit logs, issues, pull requests, and screenshots.
+- A guest Hermes ([`guest-hermes.md`](guest-hermes.md)) reads its model key from its own keys file (`doctor` names it), mode 0600. Give each guest a key of its own with a spending limit at the provider, so a busy service cannot spend beyond it and the key can be cancelled alone.
 
 ## Replay-protection contract
 
@@ -80,6 +81,7 @@ Watch `seller credits` for `failed` payments and extra payments, which need refu
 - Mailbox mode and `publish_manifest: true` need egress to Agentverse and the configured Fetch network (Almanac REST and gRPC, mailbox HTTPS).
 - Selling services needs egress to `payments.ledger_url` (`https://rest-dorado.fetch.ai` by default), only when a paid call arrives.
 - Selling through ASI:One in mailbox mode needs egress to Agentverse (`agentverse.ai`): the mailbox, the Almanac API, and manifests. `agentverse register` also calls Agentverse's API with your API key.
+- A guest Hermes needs egress to its model provider and, with the `web` toolset, to the web search services Hermes uses and the public pages it reads. Behind a proxy, list `HTTPS_PROXY` (and `HTTP_PROXY`, `NO_PROXY`) in the runner's `pass_env`; note that with a proxy, Hermes no longer resolves host names itself before refusing private addresses.
 
 ## Who can reach the bridge
 

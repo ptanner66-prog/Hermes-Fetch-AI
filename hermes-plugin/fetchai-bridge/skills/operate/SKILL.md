@@ -96,6 +96,11 @@ The plugin hands the bridge Hermes' interpreter, which `probe-hermes` and
   and runs on Fetch's testnet only. Run `seller pause`, `resume`, `ban`, or
   `unban` only when the user asks. The repository's `docs/payments.md` is the
   guide.
+- A service with `runner: {type: hermes}` runs a separate guest Hermes per
+  request, with only web search or no tools. Never put a key in the bridge
+  config for it, and never copy the user's own Hermes `.env` to it: the guest
+  reads its own keys file, which `doctor` names; the user adds the key. The
+  repository's `docs/guest-hermes.md` is the guide.
 - `agentverse register` lists the agent publicly on Agentverse, and the
   listing stays. Run it only when the user asks, and only with `--yes` after
   they confirm; it needs the user's Agentverse API key in the plugin setting.

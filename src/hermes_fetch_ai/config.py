@@ -250,7 +250,113 @@ class CommandRunnerConfig(BaseModel):
         return names
 
 
-RunnerConfig = Annotated[EchoRunnerConfig | CommandRunnerConfig, Field(discriminator="type")]
+# Toolsets a guest Hermes may have. Each reaches only the public internet,
+# never this machine's files, terminal, memory, or the owner's accounts.
+GUEST_TOOLSETS = ("web",)
+
+
+class HermesRunnerConfig(BaseModel):
+    """Answers with a guest Hermes: a separate Hermes run with its own home folder.
+
+    The guest gets the buyer's request, the owner's instructions, and only the
+    toolsets listed here; with none, it can only think and write.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+    type: Literal["hermes"]
+    # A .env file with the keys the guest needs: its model key, and a web search
+    # key if you have one. Unset: guests/<service>.env in the bridge's state folder.
+    env_file: str | None = Field(default=None, min_length=1)
+    toolsets: list[str] = Field(default_factory=list)
+    # The model, as Hermes names it with `hermes chat -m`.
+    model: str = Field(min_length=1, max_length=200)
+    # Hermes' inference provider, such as "openrouter", or "custom" with base_url
+    # for a model server like Ollama; unset: Hermes picks one from the keys it has.
+    provider: str | None = Field(default=None, min_length=1, max_length=64)
+    # The model server's address, for provider "custom", e.g. http://127.0.0.1:11434/v1.
+    base_url: str | None = None
+    # What the guest is told about the job; the buyer's request follows it.
+    instructions: str = Field(default="", max_length=8000)
+    max_turns: int = Field(default=8, ge=1, le=50)
+    timeout_seconds: float = Field(default=300.0, gt=0, le=3600)
+    max_output_chars: int = Field(default=20_000, ge=1, le=1_000_000)
+    # Hermes' Python. Unset: the one the fetchai-bridge plugin hands over.
+    python: str | None = None
+    # Names of environment variables the guest may see, such as HTTPS_PROXY on
+    # a network that needs a proxy. Keys belong in env_file instead.
+    pass_env: list[str] = Field(default_factory=list)
+
+    @field_validator("env_file")
+    @classmethod
+    def _absolute_env_file(cls, env_file: str | None) -> str | None:
+        if env_file is not None and not Path(env_file).expanduser().is_absolute():
+            raise ValueError("env_file must be an absolute path (or start with ~)")
+        return env_file
+
+    @field_validator("pass_env")
+    @classmethod
+    def _guest_env_names(cls, names: list[str]) -> list[str]:
+        for name in names:
+            if not _ENV_NAME_RE.fullmatch(name):
+                raise ValueError(f"{name!r} is not an environment variable name")
+            if name.upper().startswith("HERMES_"):
+                raise ValueError(f"{name} would change how the guest Hermes behaves")
+        return names
+
+    @field_validator("python")
+    @classmethod
+    def _absolute_python(cls, python: str | None) -> str | None:
+        if python is not None and not Path(python).is_absolute():
+            found = shutil.which(python)
+            hint = f", such as {found}" if found else ""
+            raise ValueError(f"python must be an absolute path{hint}")
+        return python
+
+    @field_validator("base_url")
+    @classmethod
+    def _model_url(cls, url: str | None) -> str | None:
+        if url is None:
+            return None
+        parts = urlsplit(url)
+        if parts.scheme not in {"http", "https"} or not parts.hostname:
+            raise ValueError("base_url must be an http:// or https:// address")
+        if parts.username or parts.password:
+            raise ValueError("base_url must not contain a user name or password")
+        return url
+
+    @field_validator("toolsets")
+    @classmethod
+    def _guest_toolsets(cls, toolsets: list[str]) -> list[str]:
+        for toolset in toolsets:
+            if toolset not in GUEST_TOOLSETS:
+                raise ValueError(
+                    f"a guest Hermes may use only these toolsets: {', '.join(GUEST_TOOLSETS)} "
+                    f"(not {toolset!r}); buyers must never reach this machine's terminal, "
+                    "files, browser, or memory"
+                )
+        return list(dict.fromkeys(toolsets))
+
+    @field_validator("model", "provider")
+    @classmethod
+    def _plain_name(cls, value: str | None) -> str | None:
+        # Model and provider names have no spaces; a leading '-' is an option typed by mistake.
+        if value is not None and (value.startswith("-") or any(c.isspace() for c in value)):
+            raise ValueError("must not start with '-' or contain spaces")
+        return value
+
+    @model_validator(mode="after")
+    def _custom_needs_url(self) -> HermesRunnerConfig:
+        if self.provider == "custom" and not self.base_url:
+            raise ValueError(
+                "provider custom needs base_url, the model server's address, "
+                "such as http://127.0.0.1:11434/v1"
+            )
+        return self
+
+
+RunnerConfig = Annotated[
+    EchoRunnerConfig | CommandRunnerConfig | HermesRunnerConfig, Field(discriminator="type")
+]
 
 
 class ServiceConfig(BaseModel):

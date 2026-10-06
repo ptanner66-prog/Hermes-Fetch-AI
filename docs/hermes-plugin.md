@@ -52,6 +52,8 @@ The bridge gets an allowlisted environment, not Hermes' whole one: `UAGENT_SEED`
 
 With `mode: stdio` and no `hermes_mcp.command`, the bridge starts the tools server with that interpreter and `PYTHONPATH`, plus `HERMES_QUIET=1` and `HERMES_REDACT_SECRETS=true`, which is how Hermes launches this server for its own integrations. An explicit `hermes_mcp.command` always wins. Without either, config validation fails with `hermes_mcp.command is required for stdio mode unless the bridge runs through hermes fetchai-bridge`. `probe-hermes` checks the handed-over interpreter the same way.
 
+A service run by a guest Hermes ([`guest-hermes.md`](guest-hermes.md)) uses the same hand-over: unless its runner sets `python`, each request runs `python -m hermes_cli.main chat` with Hermes' interpreter and `PYTHONPATH`, in a throwaway Hermes home of its own, never yours.
+
 The tools server itself gets an even shorter allowlist (`PATH`, `HOME`, `TMPDIR`, `HERMES_HOME`, locale, and the hand-over), so Hermes settings such as `HERMES_YOLO_MODE` never reach it.
 
 ## Running without the plugin

@@ -23,7 +23,7 @@ Each payment pays for one request. A payment that was already used is refused, a
 
 You need the bridge installed ([README](../README.md)) and a seed in `UAGENT_SEED`. Then:
 
-1. **Write the config.** Copy [`examples/paid-services.yaml`](../examples/paid-services.yaml) and change every `/path/to/...` to the real path on your computer (programs must be given as full paths; `which python3` prints Python's).
+1. **Write the config.** Copy [`examples/paid-services.yaml`](../examples/paid-services.yaml) and change every `/path/to/...` to the real path on your computer (programs must be given as full paths; `which python3` prints Python's). Its `research` service also needs a model key; see [guest-hermes.md](guest-hermes.md).
 2. **Check it.** `hermes-fetch-ai doctor --config paid-services.yaml` checks the file and that every service program exists. It ends with `doctor: ok`.
 3. **Try a service without payment.** `hermes-fetch-ai seller try word-count --request "hello there" --config paid-services.yaml` runs it once on your computer and prints the answer. Errors from the program are shown here, never to buyers.
 4. **See where the money goes.** `hermes-fetch-ai wallet --config paid-services.yaml` shows your agent's address and the wallet that receives payments; add `--balance` to ask the ledger how much it holds.
@@ -57,9 +57,9 @@ Through Hermes (`hermes fetchai-bridge serve`), the bridge itself gets only a sh
 
 [`examples/services/word_count.py`](../examples/services/word_count.py) is a small template to start from. A program you keep private never needs to be in this repository: point `argv` at it on your computer.
 
-### Research and services run by a separate Hermes
+### Research, run by a guest Hermes
 
-A research service needs web search and a model, which a separate, locked-down Hermes will provide in the next version ([design](agent-economy.md)).
+A research service needs an AI model and web search, which a **guest Hermes** provides: a separate Hermes, started for each request in a throwaway folder of its own, with only the web search tools. It never sees your own Hermes, its settings, keys, or memory, and it cannot use a terminal, files, or your network. The example config's `research` service is one; [guest-hermes.md](guest-hermes.md) shows how to set it up and what exactly a guest can do.
 
 ## Prices
 

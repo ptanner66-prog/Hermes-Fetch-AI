@@ -113,7 +113,7 @@ Callers must follow each tool's input schema and attach replay-protection metada
 
 ## Sell services for FET (testnet)
 
-The bridge can sell services you define to other agents on Fetch.ai's network, for FET. A service is a program on your computer, such as the included defensive code security review, which sends a buyer's code only to an AI model on your own machine and never scans or attacks anything. Buyers pay on Fetch's test network, where FET is free test money. The bridge checks every payment on the ledger itself and never takes the buyer's word for it: a payment pays for one request, and a reused or copied payment is refused, also after a restart. In a shell where `UAGENT_SEED` is set (or with `hermes fetchai-bridge` in place of `hermes-fetch-ai`, which takes it from Hermes' `.env`; see step 3 above):
+The bridge can sell services you define to other agents on Fetch.ai's network, for FET. A service is a program on your computer, such as the included defensive code security review, which sends a buyer's code only to an AI model on your own machine and never scans or attacks anything, or a guest Hermes, such as the included research service: a separate Hermes started for each request in a throwaway folder, with only web search, that never sees your own Hermes ([`docs/guest-hermes.md`](docs/guest-hermes.md)). Buyers pay on Fetch's test network, where FET is free test money. The bridge checks every payment on the ledger itself and never takes the buyer's word for it: a payment pays for one request, and a reused or copied payment is refused, also after a restart. In a shell where `UAGENT_SEED` is set (or with `hermes fetchai-bridge` in place of `hermes-fetch-ai`, which takes it from Hermes' `.env`; see step 3 above):
 
 ```bash
 hermes-fetch-ai demo paid                     # see a whole sale, offline
@@ -138,6 +138,7 @@ The same services can be sold in plain language to [ASI:One](https://asi1.ai) us
 | Agentverse mailbox | A remote uAgent reaches the bridge through Agentverse | Manual and not yet verified end to end; [`docs/agentverse-mailbox.md`](docs/agentverse-mailbox.md) |
 | Paid services | A bridge process sells a service: price, a payment verified on the ledger, one run, replays refused | CI against a ledger on 127.0.0.1 (`tests/test_serve_paid.py`); by hand on Fetch's testnet, including replayed, copied, underpaid, and wrong-memo payments ([results](docs/payments.md#tested-on-the-real-testnet)) |
 | Chat and ASI:One | A chat buyer orders in plain text, pays without a memo, and gets the answer | CI between two real uAgents in one process (`tests/test_chat_flow.py`, `demo chat`); a live test with a real ASI:One user is pending ([`docs/asi-one.md`](docs/asi-one.md#what-is-tested)) |
+| Guest Hermes | A paid request runs in a separate, throwaway Hermes with only the service's tools | CI against Hermes 0.21.5 and a pinned `main` with a stand-in model server: only the web tools offered, a terminal call refused, a page on 127.0.0.1 not fetched (`tests/test_field_guest_hermes.py`) |
 
 ## Hermes compatibility
 
@@ -193,6 +194,7 @@ Deployment notes, including a systemd unit, are in [`docs/production.md`](docs/p
 - [ ] Drop the PyNaCl and ecdsa dependency-audit exceptions once upstream allows (see [`docs/security.md`](docs/security.md)).
 - [x] Sell services you define to other agents for FET, with each payment verified on the ledger (testnet; unreleased, [`docs/payments.md`](docs/payments.md)).
 - [ ] Reach Hermes from ASI:One in plain language, with ASI:One's testnet payment card (built and tested offline; live test pending, [`docs/asi-one.md`](docs/asi-one.md)).
+- [x] Sell work done by Hermes itself, such as research, through a guest Hermes that never sees yours (unreleased, [`docs/guest-hermes.md`](docs/guest-hermes.md)).
 - [ ] Let Hermes find and pay other agents, asking you before every payment.
 - [ ] Guided setup (`hermes fetchai-bridge setup`) and plain-language docs.
 
@@ -211,6 +213,7 @@ Deployment notes, including a systemd unit, are in [`docs/production.md`](docs/p
 | [`docs/upstream-hermes-pr.md`](docs/upstream-hermes-pr.md) | Plan and ready-to-paste text for the Hermes plugin catalog |
 | [`docs/payments.md`](docs/payments.md) | Selling services for testnet FET: setup, prices, your controls, what buyers see |
 | [`docs/asi-one.md`](docs/asi-one.md) | Selling to ASI:One users through chat: listing on Agentverse, order codes, what is tested |
+| [`docs/guest-hermes.md`](docs/guest-hermes.md) | Services run by a guest Hermes, such as research: what a guest can and cannot do, setup, keys |
 | [`docs/agent-economy.md`](docs/agent-economy.md) | Design and status of the agent economy: selling, chat with ASI:One, buying |
 
 ## Development

@@ -90,7 +90,7 @@ The services this agent sells, by name: `services: {<name>: {...}}`. Each appear
 | `price` | `"0"` | Testnet FET per request, as a string (`"0.05"`): up to 18 decimal places, at most 1000. `"0"` is free. |
 | `input.max_chars` | `4000` | Longest request accepted. |
 | `input.check_urls` | `true` | Reject requests that contain URLs to local or private addresses. Turn it off only for a service that never fetches anything, such as a code review. |
-| `runner` | required | What does the work: `{type: command, ...}` (below), or `{type: echo}`, which answers with the request (demos and tests). |
+| `runner` | required | What does the work: `{type: command, ...}` or `{type: hermes, ...}` (below), or `{type: echo}`, which answers with the request (demos and tests). |
 | `disclaimer` | none | Added to the end of every answer, up to 500 characters. |
 | `max_runs_per_day` | `200` | Runs per 24 hours across all buyers. |
 | `max_running` | `1` | Requests the service works on at once. |
@@ -105,7 +105,23 @@ A `command` runner:
 | `max_output_chars` | `20000` | Longer answers are cut off with a note. |
 | `pass_env` | `[]` | Names of environment variables the program may see, besides a short fixed list. Values never go in the config. |
 
-`doctor` and `serve` fail if a program, or a file named by absolute path in `argv`, does not exist, so the bridge never takes payments for a service that cannot run. `seller try` runs a service once without payment.
+A `hermes` runner (a guest Hermes, [guest-hermes.md](guest-hermes.md)):
+
+| Key | Default | Meaning |
+|-----|---------|---------|
+| `model` | required | The model, as the provider names it. |
+| `provider` | Hermes picks | Hermes' provider name, such as `openrouter` or `custom`. |
+| `base_url` | none | The model server's `http(s)://` address, for `provider: custom`. |
+| `toolsets` | `[]` | `[web]` or nothing; no other toolset is accepted. |
+| `instructions` | a generic line | What the guest is told about the job, up to 8000 characters. |
+| `max_turns` | `8` | Most tool-using steps per request, 1 to 50. |
+| `timeout_seconds` | `300` | The guest is stopped after this long, and the run counts as a failure on the seller's side. |
+| `max_output_chars` | `20000` | Longer answers are cut off with a note. |
+| `env_file` | `guests/<name>.env` in the state folder | The guest's keys file (its model key, and a web search key if any). Must be private (`chmod 600`) and set no `HERMES_...` variable. |
+| `pass_env` | `[]` | Names of environment variables the guest may see, such as `HTTPS_PROXY`; no `HERMES_...` names. |
+| `python` | from `hermes fetchai-bridge` | The Python Hermes runs on, as an absolute path. |
+
+`doctor` and `serve` fail if a program, or a file named by absolute path in `argv`, does not exist, or if a guest Hermes could not run safely, so the bridge never takes payments for a service that cannot run. `doctor` also names each guest's keys file. `seller try` runs a service once without payment.
 
 ## `chat`
 
