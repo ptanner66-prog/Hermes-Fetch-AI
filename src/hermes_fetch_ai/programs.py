@@ -80,7 +80,9 @@ class ProgramRunner:
             prefix="hermes-fetch-ai-service-", ignore_cleanup_errors=True
         ) as workdir:
             argv, env = self.command(workdir)
+            creationflags = 0
             if sys.platform == "win32":
+                creationflags = subprocess.CREATE_NO_WINDOW
                 if not Path(argv[0]).is_file():
                     return ServiceResult("", ok=False, problem=f"the {self.label} could not start")
                 # The helper joins its job before launching the executable, so
@@ -99,7 +101,7 @@ class ProgramRunner:
                     cwd=workdir,
                     env=env,
                     start_new_session=os.name != "nt",
-                    creationflags=subprocess.CREATE_NO_WINDOW if sys.platform == "win32" else 0,
+                    creationflags=creationflags,
                 )
             except OSError as exc:
                 logger.warning("%s %s could not start (%s)", self.label, argv[0], exc)
