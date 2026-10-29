@@ -31,7 +31,7 @@ from .programs import ProgramRunner, ServiceResult, base_env
 from .quotes import request_digest
 from .result_normalizer import error_result, text_result
 from .seller import PaymentProof, PaymentRefused, Seller, short_reference, short_tx
-from .store import Credit
+from .store import Credit, RunLimitReached
 
 logger = get_logger("hermes_fetch_ai")
 
@@ -300,7 +300,14 @@ class ServiceDesk:
     def busy(self, name: str) -> bool:
         return self._slots[name].busy()
 
-    async def admit(self, name: str, sender: str, args: dict[str, Any]) -> str | None:
+    async def admit(
+        self,
+        name: str,
+        sender: str,
+        args: dict[str, Any],
+        *,
+        check_daily_limit: bool = True,
+    ) -> str | None:
         """Why this request may not be served now, or None: owner controls, input, daily limit."""
         svc = self.cfg.services[name]
         store = self.seller.store
@@ -324,7 +331,10 @@ class ServiceDesk:
             return "argument checks timed out"
         except (TypeError, ValueError) as exc:
             return str(exc)
-        if store.runs_since(name, int(time.time() * 1000) - _DAY_MS) >= svc.max_runs_per_day:
+        if (
+            check_daily_limit
+            and store.runs_since(name, int(time.time() * 1000) - _DAY_MS) >= svc.max_runs_per_day
+        ):
             return "this service has reached its limit for today; try again tomorrow"
         return None
 
@@ -340,7 +350,12 @@ class ServiceDesk:
         """Serve one MCP call to ``service.<name>``: quote, verify payment, run."""
         name = self.name_of(tool_name)
         svc = self.cfg.services[name]
-        problem = await self.admit(name, sender, args)
+        # A paid request may only be retrieving its completed answer. Verify
+        # the proof and replay state before deciding; a fresh execution still
+        # reserves its daily budget atomically in _run.
+        problem = await self.admit(
+            name, sender, args, check_daily_limit=proof is None or not svc.price_base
+        )
         if problem is not None:
             return self._refuse(problem)
         price = svc.price_base
@@ -428,12 +443,22 @@ class ServiceDesk:
         retry_hint: str,
     ) -> ServiceOutcome:
         svc = self.cfg.services[name]
-        if credit is not None:
-            try:
-                credit = self.seller.begin(credit)
-            except PaymentRefused as exc:
-                return self._refuse(exc.reason, **audit)
-        self.seller.store.record_run(subject=name, sender=sender, now_ms=int(time.time() * 1000))
+        try:
+            if credit is not None:
+                credit = self.seller.begin(credit, max_runs_per_day=svc.max_runs_per_day)
+            else:
+                self.seller.store.record_run(
+                    subject=name,
+                    sender=sender,
+                    now_ms=int(time.time() * 1000),
+                    max_runs_per_day=svc.max_runs_per_day,
+                )
+        except PaymentRefused as exc:
+            return self._refuse(exc.reason, **audit)
+        except RunLimitReached:
+            return self._refuse(
+                "this service has reached its limit for today; try again tomorrow", **audit
+            )
         try:
             result = await self.runners[name].run(request)
         except Exception:  # a runner bug must not lose the payment

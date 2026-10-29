@@ -26,11 +26,13 @@ Remote senders may:
   - duplicate, stale, future-dated, malformed, or oversized calls are denied before the tool runs;
   - accepted request IDs are remembered for `replay_ttl_seconds + max_replay_clock_skew_seconds`, the longest time a copy could still pass the freshness check;
   - a schema-invalid call does not use up its request ID, so a corrected retry works.
+- Replay and sender-rate caches refuse new entries when full; they never evict unexpired history to admit a new sender or request. Timeout and replay settings must be finite.
 - Tool names must be plain ASCII identifiers of at most 128 characters, so a displayed name is always the authorized one. Policy names are checked when the config loads.
 - Arguments are size-capped and validated against the tool's JSON schema.
 - URL checks:
   - only `http` and `https` are allowed; `file:`, `data:`, `javascript:`, `ftp://` and hostless URLs are rejected;
   - a string counts as a URL when it starts with `scheme:/`, with `http:` or `https:` (even without slashes), or with a non-hierarchical scheme such as `data:`; ordinary text such as `Note: hello` is not a URL;
+  - malformed URLs fail with a sanitized validation error; protocol-relative private URLs and embedded `data:` or `file:` URLs are rejected;
   - URLs embedded in longer text (`see http://10.0.0.1/admin`) are checked too, as are strings that are only a local or IP host (`localhost:8080`, `169.254.169.254/latest`, `[::1]:80`, `127.1/admin`);
   - IPv4 literals are parsed the way the C library parses them, so encodings such as `0x7f.0.0.1`, `0177.0.0.1`, `127.1` and `2130706433` are recognized;
   - URLs with backslashes, whitespace, or control characters are rejected, because URL parsers disagree about them;
@@ -64,6 +66,12 @@ The `fetchai-bridge` Hermes plugin adds no hooks or middleware. Its four tools f
 - **Dependency audit exceptions.** The audit currently ignores two transitive vulnerabilities until uAgents' dependencies allow a fix:
   - `PyNaCl==1.6.0` through `uagents`/`cosmpy`: `CVE-2025-69277`.
   - `ecdsa` through `uagents-core` and `cosmpy`: `PYSEC-2026-1325`, a Minerva timing side channel in python-ecdsa signing and key generation (verification is not affected). python-ecdsa treats side channels as out of scope, so no fixed version exists. The bridge signs every response envelope with its agent key through this library. Remote timing over a network is far noisier than local timing, and the rate limits cap how many signatures a caller can trigger; an attacker who can time signing precisely on the same host is the realistic threat. Run the bridge on a host you control. Remove this exception when uAgents moves to a constant-time signing backend.
+
+On 2026-10-29, the refreshed lock and MCP 1.30.0 produced only these two known
+exceptions in an unfiltered audit (four records because the advisory feed contains
+duplicates/aliases). No new exceptions were added. MCP 1.30.0 fixes external
+`outputSchema` reference fetching by `ClientSession`, relevant to stdio clients
+([upstream advisory](https://github.com/modelcontextprotocol/python-sdk/security/advisories/GHSA-rwrf-2pqf-9j8j)).
 
 Do not remove an audit exception without confirming that `uagents`, `cosmpy`, signing, and wallet behavior still work with the fixed dependency.
 
@@ -148,7 +156,7 @@ Hermes can buy from other agents through the plugin's tools and the running brid
 | A payment for something other than what the owner approved | Approval carries a one-time code issued when the request was shown, plus the exact amount and recipient; the bridge pays only if all three still match its record, and each code pays once. |
 | Paying too much, too often, or the wrong agent | Per-payment, per-seller-per-day, and per-day limits (defaults 1, 2, 5 testnet FET) and an optional list of allowed sellers, checked in the same `BEGIN IMMEDIATE` transaction that marks the payment as being sent, so two payments, or two bridges sharing records, cannot both slip under a limit. |
 | A stranger fills the owner's records with payment requests | Requests are accepted only from agents Hermes is talking to, at most 20 open per agent, in testnet FET (`fet_direct`) to a `fetch1` wallet, with a deadline of at most an hour; anything else is refused and the seller is told. |
-| A payment is sent twice | The transaction hash is recorded before the payment leaves the machine; a payment whose outcome is unknown waits (`needs_review`), still counts against the limits, and is never resent on its own; `buyer check` settles it from the ledger. A payment the bridge was stopped in the middle of sending (Ctrl-C, a crash) is marked the same way, at once or when the bridge starts again. |
+| A payment is sent twice | The transaction hash is recorded before the payment leaves the machine; a payment whose outcome is unknown waits (`needs_review`), still counts against the limits, and is never resent on its own; `buyer check` checks the locally signed hash, confirmed height, chain, payer, recipient, amount, and memo. Missing ledger data leaves it pending with budget reserved, even across daily budget resets. A payment the bridge was stopped in the middle of sending (Ctrl-C, a crash) is marked the same way, at once or when the bridge starts again. |
 | Spending touches the income | Payments come from the buying wallet (key index 1), never from the income wallet (index 0). |
 | Mainnet funds | Buying runs on Fetch's testnet only; the config refuses anything else. |
 | Something on the machine or a web page drives the bridge's buying | The control channel listens on 127.0.0.1 only, on a random port, speaks one JSON line per request (not HTTP, so a browser cannot reach it), and requires a 256-bit token from a file only the owner can read (0600), removed on shutdown. |
@@ -167,7 +175,23 @@ Tests: `tests/test_buyer.py`, `tests/test_control.py`, `tests/test_buy_flow.py`,
 - **Messages can leak what Hermes sends.** Messages go to the agent Hermes writes to (and through Agentverse for mailbox agents). The `buy` skill tells Hermes to send only what the task needs; it is guidance, not enforcement.
 - **The prompt's details come from the seller.** The amount and recipient are checked at payment time; the seller's name, rating, and description are the seller's and Agentverse's words.
 - **Hermes 0.21.5 shows the prompt in fewer places.** On 0.21.5 the prompt works in the TUI and messaging apps; in the classic CLI it may decline without being shown, and a one-shot run from a terminal can wait for Hermes' approval timeout before declining. Nothing is paid without an accept either way. Hermes `main` declines at once when nobody can answer.
-- **The approval prompt has been tested by a person only in the planned real-world test.** CI checks that it declines when nobody can answer; answering it in Hermes' terminal and in a messaging app is part of [the real-world test](agent-economy.md#status).
+- **The approval prompt has not yet been verified with a person answering.** CI checks that it declines when nobody can answer; answering it in Hermes' terminal and in a messaging app is part of [the real-world test](agent-economy.md#status).
+
+## Additional runtime boundaries
+
+- Daily service quotas are checked atomically when work starts, including queued
+  requests and paid retries. A quota refusal preserves an existing payment credit
+  and its attempt count. An authenticated buyer can retrieve a cached paid answer
+  after the quota is reached without consuming another run; sender, replay, and
+  owner pause checks still apply.
+- The local code-review client rejects redirects, malformed or credential-bearing
+  URLs, and non-finite or nonpositive timeouts, and bounds the model response body.
+- On Windows, service children join a kill-on-close Job Object before starting
+  the target program, so descendants are cleaned up on timeout, cancellation, or
+  normal parent exit. This manages process lifetime; it does not sandbox files or
+  network access.
+- The buying control channel rejects non-string or non-ASCII tokens and malformed
+  JSON response shapes.
 
 ## Reporting vulnerabilities
 

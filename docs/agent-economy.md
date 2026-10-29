@@ -1,6 +1,6 @@
 # Agent economy (design and status)
 
-This is the design for letting Hermes take part in Fetch.ai's agent economy. Selling over MCP calls and through chat, services run by a guest Hermes, buying from other agents, and a guided setup have landed (unreleased; how to use them: the [README](../README.md), [`payments.md`](payments.md), [`asi-one.md`](asi-one.md), [`guest-hermes.md`](guest-hermes.md), [`buying.md`](buying.md)). The rest is the plan the code is being built against; the [status table](#status) says what has landed.
+This is the design for letting Hermes take part in Fetch.ai's agent economy. Selling over MCP calls and through chat, services run by a guest Hermes, buying from other agents, and a guided setup are implemented in this checkout (unreleased; how to use them: the [README](../README.md), [`payments.md`](payments.md), [`asi-one.md`](asi-one.md), [`guest-hermes.md`](guest-hermes.md), [`buying.md`](buying.md)). The rest is the plan the code is being built against; the [status table](#status) says what is implemented.
 
 ## What it will do
 
@@ -12,7 +12,7 @@ This is the design for letting Hermes take part in Fetch.ai's agent economy. Sel
 
 Fetch's Agent Payment Protocol defines the messages (`RequestPayment`, `CommitPayment`, `CompletePayment`, `CancelPayment`, `RejectPayment`) but leaves checking the payment to the seller. Fetch's own examples are labeled demo-only, and the public example seller trusts the amount the buyer claims, accepts the same transaction more than once, and converts amounts with floating point. The bridge closes each of these.
 
-## Selling over MCP calls (landed)
+## Selling over MCP calls (implemented)
 
 1. A buyer calls a priced service. All of the bridge's normal checks run first (rate limits, policy, replay protection, argument checks).
 2. Without payment, the reply is an error that starts with `payment required:` followed by JSON terms: price, recipient, network, chain id, and a reference. The reference is a signed token that carries the terms, so a flood of quote requests stores nothing.
@@ -22,17 +22,17 @@ Fetch's Agent Payment Protocol defines the messages (`RequestPayment`, `CommitPa
 
 Services run through a `command` runner: the owner's program gets the request on stdin and its output is the answer ([`payments.md`](payments.md#your-own-program)). The "bug bounty with a local AI" service is built this way: [`hermes_fetch_ai.local_review`](../src/hermes_fetch_ai/local_review.py), which ships with the bridge, sends the buyer's code only to a model server on the seller's machine and gives the model no tools. This was planned for a guest Hermes runner; a plain program is smaller and depends on no Hermes internals, so the guest runner is now for services that need Hermes' tools, such as research.
 
-## Selling through chat (ASI:One) (landed)
+## Selling through chat (ASI:One) (implemented)
 
 The bridge speaks Fetch's Agent Chat Protocol and answers with a menu of services and prices. A chosen service gets a `RequestPayment` in the shape of Fetch's own ASI:One payment example. ASI:One may not put the reference in the memo, so chat quotes also carry an order code, a unique amount surcharge that binds the payment to the quote. Long work runs in a small bounded queue, and the bridge only asks for money when it has room to do the work. A live test with a real ASI:One user is still to come ([`asi-one.md`](asi-one.md#what-is-tested)).
 
 Chat requests never reach the owner's Hermes. Each service has its own runner: a program the owner configures, or a guest Hermes (below).
 
-## Services run by a guest Hermes (landed)
+## Services run by a guest Hermes (implemented)
 
 A research service needs Hermes itself: a model and web search. For each request the bridge starts a separate Hermes in a new, throwaway home folder, writes its settings there (the model, only the service's toolsets, every other toolset switched off by name, no memory or self-review, no private network addresses, no installs), gives it only the guest's own keys file and a short environment, and deletes the folder when the run ends. The settings are written fresh for every run, so they cannot drift; at startup the bridge also refuses any `.env` that Hermes would load into guests if it sets `HERMES_...` variables. Details and tests: [`guest-hermes.md`](guest-hermes.md).
 
-## Buying (landed)
+## Buying (implemented)
 
 How to use it: [`buying.md`](buying.md).
 
@@ -55,16 +55,18 @@ All of these must hold before mainnet can be unlocked:
 
 ## Status
 
+Implemented means present in this source tree; it does not mean merged, released, or accepted by the hosted services. CI descriptions are configured coverage, not current passing-run receipts.
+
 | Part | State |
 |------|-------|
-| Scope, threat model, and test-network guard | Landed |
-| Paid services over MCP calls | Landed; tested on the real testnet |
-| Chat and ASI:One | Landed; offline tests; live ASI:One test pending |
-| Guest Hermes runners | Landed; field-tested against real Hermes in CI |
-| Buying, plugin tools, approvals | Landed; a purchase between two bridges tested on the real testnet; the prompt answered by a person pending |
-| Guided setup (`install`, `setup`, `start`, `status`) and plain-language docs | Landed; run by hand through Hermes 0.21.5 and `main`; a newcomer following the README pending |
-| Live testnet tests and canaries | Landed: opt-in tests and a manual workflow; all passed on the real testnet on 2026-10-06 |
+| Scope, threat model, and test-network guard | Implemented |
+| Paid services over MCP calls | Implemented; tested on the real testnet |
+| Chat and ASI:One | Implemented; offline tests; live ASI:One test pending |
+| Guest Hermes runners | Implemented; field-tested against real Hermes in CI |
+| Buying, plugin tools, approvals | Implemented; a purchase between two bridges tested on the real testnet; the prompt answered by a person pending |
+| Guided setup (`install`, `setup`, `start`, `status`) and plain-language docs | Implemented; run by hand through Hermes 0.21.5 and `main`; a newcomer following the README pending |
+| Live testnet tests and canaries | Implemented: opt-in tests and a manual workflow; historical report of passing on 2026-10-06; not rerun for the current revision |
 | Checked against Hermes' and Fetch.ai's documentation | Done on 2026-10-06; what it found and fixed, and what is left for the trial, is in [`validation.md`](validation.md) |
 | Real-world trial (ASI:One, the Agentverse mailbox, the prompt answered by a person) | Planned, with the owner |
 
-The threats this design addresses, and the controls that have landed, are in [`security.md`](security.md#payments).
+The threats this design addresses, and the controls implemented here, are in [`security.md`](security.md#payments).

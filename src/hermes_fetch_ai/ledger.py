@@ -185,9 +185,13 @@ class LcdLedgerReader:
         return network
 
     async def get_tx(self, tx_hash: str) -> TxRecord | None:
-        status, body = await self._get(f"/cosmos/tx/v1beta1/txs/{normalize_tx_hash(tx_hash)}")
+        expected_hash = normalize_tx_hash(tx_hash)
+        status, body = await self._get(f"/cosmos/tx/v1beta1/txs/{expected_hash}")
         if status == 200:
-            return parse_tx(body)
+            tx = parse_tx(body)
+            if tx.hash != expected_hash:
+                raise LedgerUnavailable("the ledger returned a different transaction")
+            return tx
         message = body.get("message", "") if isinstance(body, dict) else ""
         if status == 404 or "not found" in str(message).lower():
             return None

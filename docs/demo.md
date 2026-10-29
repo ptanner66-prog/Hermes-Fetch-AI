@@ -87,7 +87,7 @@ python -m pytest tests/test_field_hermes_stdio.py -q
 
 The test reads Hermes' interpreter from `HERMES_FETCH_HERMES_PYTHON`, leaves `hermes_mcp.command` unset, and hands the interpreter to the bridge as `HERMES_FETCH_AI_HERMES_PYTHON`, as the plugin does. It checks that an unknown sender sees only `skills_list`, that `skills_list` returns real skill data, and that `web_search` is denied by policy before any call reaches the server.
 
-Last run on 2026-10-06 against Hermes 0.21.5 (Python 3.11, mcp 2.0.0) and hermes-agent `main` (`bb236287`, Python 3.14.8, mcp 2.0.0): `1 passed` on both. The bridge's mcp 1.28.1 client negotiates MCP protocol `2025-11-25`, which the mcp 2.0 server accepts. Without provider credentials, the server offered `web_search`, `web_extract`, `skill_view`, `skills_list`, and `text_to_speech`.
+Historical run reported on 2026-10-06 (not repeated for the current dependency/source revision) against Hermes 0.21.5 (Python 3.11, mcp 2.0.0) and hermes-agent `main` (`bb236287`, Python 3.14.8, mcp 2.0.0): `1 passed` on both. The bridge's mcp 1.28.1 client negotiates MCP protocol `2025-11-25`, which the mcp 2.0 server accepts. Without provider credentials, the server offered `web_search`, `web_extract`, `skill_view`, `skills_list`, and `text_to_speech`.
 
 Callers must follow each tool's input schema. hermes-agent v0.16.x wrapped every tool's arguments in one required `kwargs` object (send `{"kwargs": {}}` for `skills_list`); newer releases use flat arguments (`{}` for `skills_list`, `{"query": "..."}` for `web_search`). The field test handles both. Replay-protection metadata comes on top of the tool's schema; the bridge strips it before the schema check.
 

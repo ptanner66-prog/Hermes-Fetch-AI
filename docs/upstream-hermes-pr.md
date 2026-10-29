@@ -4,7 +4,7 @@ Hermes Fetch AI stays a standalone project. Its way into Hermes is one file in N
 
 ## Where hermes-agent stands (checked 2026-10-06)
 
-- **Releases.** The latest release is 0.21.5 (tag `v2026.9.24`, Python 3.11 to 3.13). `main` (`bb236287`) has since moved to Python 3.14. Both pin `mcp==2.0.0` in the `[mcp]` extra, and both only install from a checkout.
+- **Releases.** The release recorded at that time was 0.21.5 (tag `v2026.9.24`, Python 3.11 to 3.13). `main` (`bb236287`) has since moved to Python 3.14. Both pin `mcp==2.0.0` in the `[mcp]` extra, and both only install from a checkout.
 - **Placement.** `CONTRIBUTING.md` says third-party integrations ship as standalone plugins, listed through `plugin-catalog/`. `optional-skills/` is for official skills, and community skills belong on the Skills Hub.
 - **Directory plugins.** `plugin.yaml` plus `__init__.py` with `register(ctx)`. Manifest v2 adds `python_runtime: external` (a sidecar: Hermes installs nothing) and `config_schema`, whose `secret` type is stored in Hermes' `.env`. `ctx.register_cli_command`, `ctx.register_skill`, `ctx.register_tool`, and `ctx.get_config`/`ctx.set_config` are public surfaces.
 - **Catalog admission** (`plugin-catalog/README.md`, `website/docs/developer-guide/plugins/catalog-submission.md`; 0.21.5's catalog README had 9 rules, `main` has 16): one YAML entry pinned to a full 40-character SHA. Catalog CI runs `scripts/validate_plugin_catalog.py`, clones the repo at the pin, runs `hermes plugins validate --install-deps` on the `subdir` (manifest, loading, declared versus registered capabilities, config schema, dependencies, security scan, no core overrides), and checks for self-updaters. A maintainer then reviews the pinned tree against the rules and usually writes a `Disclosure —` sentence into the entry's `description`. The optional `known_issues` strings are shown at the install prompt.
@@ -27,7 +27,7 @@ Hermes Fetch AI stays a standalone project. Its way into Hermes is one file in N
 | 11, credentials | Only the plugin's own `config_schema` secrets, `UAGENT_SEED` and `AGENTVERSE_API_KEY`. The bridge gets an allowlisted environment, so model-provider keys in Hermes' `.env` never reach it. |
 | 12, approvals and unattended runs | The tools are off until the user turns on `buyer_tools`. They refuse while YOLO mode is on, when Hermes cannot say whether it is, and in Hermes' plugin host (`plugins.isolation: host`). `fetchai_pay` asks through Hermes' confirmation prompt every time; it declines when nobody can answer. `install` and `setup` refuse without a terminal instead of waiting. `HERMES_YOLO_MODE` and `HERMES_NONINTERACTIVE` never reach the bridge or the tools server. Hermes' terminal can still run the bridge's `buyer pay` without the prompt, within the bridge's limits; the README says how to block it with `approvals.deny`. |
 | 13, disclosure | The plugin README's "What this plugin does", the entry's `Disclosure —` sentence and `known_issues`, and the PR body below. |
-| 14, truthful metadata | `requires_hermes: ">=0.21.5"`, the latest release, which CI tests; `version` matches `plugin.yaml`; `validate --install-deps` passes. |
+| 14, truthful metadata | `requires_hermes: ">=0.21.5"`, the supported release pinned in CI; `version` matches `plugin.yaml`; `validate --install-deps` passes. |
 | 15, no duplicates | There is no other Fetch.ai or uAgents entry. |
 | 16, lineage | Original plugin, not a fork. |
 
@@ -39,8 +39,10 @@ Hermes Fetch AI stays a standalone project. Its way into Hermes is one file in N
 
 ## Readiness
 
+The historical checks below are not receipts for a new revision. CI results for the final commit must be linked before submitting or releasing.
+
 - [x] Directory plugin in [`hermes-plugin/fetchai-bridge`](../hermes-plugin/fetchai-bridge) ([`hermes-plugin.md`](hermes-plugin.md)).
-- [x] CI, against Hermes 0.21.5 and a pinned `main`: `hermes plugins validate --install-deps` (`Validation passed`, security scan `safe`), `hermes plugins doctor --ci`, `hermes fetchai-bridge doctor` and `demo local`, the stdio field test, the guest Hermes field test, and the buying field test (YOLO detection, the prompt declining when nobody can answer, the `.env` writer).
+- [ ] Confirm passing CI on the final commit, against Hermes 0.21.5 and a pinned `main`: `hermes plugins validate --install-deps` (`Validation passed`, security scan `safe`), `hermes plugins doctor --ci`, `hermes fetchai-bridge doctor` and `demo local`, the stdio field test, the guest Hermes field test, and the buying field test (YOLO detection, the prompt declining when nobody can answer, the `.env` writer).
 - [x] Entry draft [`upstream/hermes-pr/plugin-catalog/fetchai-bridge.yaml`](../upstream/hermes-pr/plugin-catalog/fetchai-bridge.yaml). With a real SHA filled in it passes Hermes' `scripts/validate_plugin_catalog.py`; `tests/test_hermes_directory_plugin.py` keeps it consistent with `plugin.yaml`.
 - [ ] Merge to `main` here, with CI green on the merge commit; bump the version and push its tag (`install` installs the bridge from it).
 - [ ] Open the catalog PR ([`upstream/hermes-pr/SUBMIT.md`](../upstream/hermes-pr/SUBMIT.md)).
@@ -100,7 +102,7 @@ Hermes surfaces used: `ctx.register_cli_command` (`hermes fetchai-bridge`),
 rebinding them: `tools.approval.is_approval_bypass_active`,
 `tools.approval_prompt.request_elicitation_consent`, and
 `hermes_cli.config.save_env_value`/`get_env_value`. `python_runtime: external`: the plugin is
-stdlib-only; the bridge pins its own dependencies (uAgents, mcp 1.28.1) in a separate
+stdlib-only; the bridge pins its own dependencies (uAgents, mcp 1.30.0) in a separate
 environment.
 
 Disclosures (rule 13; the plugin README has the full list):

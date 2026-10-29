@@ -12,10 +12,12 @@ import asyncio
 import contextlib
 import os
 import signal
+import subprocess
 import sys
 import tempfile
 from collections.abc import Iterable
 from dataclasses import dataclass
+from pathlib import Path
 
 from .logging import get_logger
 
@@ -78,6 +80,16 @@ class ProgramRunner:
             prefix="hermes-fetch-ai-service-", ignore_cleanup_errors=True
         ) as workdir:
             argv, env = self.command(workdir)
+            if sys.platform == "win32":
+                if not Path(argv[0]).is_file():
+                    return ServiceResult("", ok=False, problem=f"the {self.label} could not start")
+                # The helper joins its job before launching the executable, so
+                # there is no race where a fast child escapes initial assignment.
+                # A venv's python.exe can itself be a launcher. Killing that
+                # PID would leave the real helper alive, so use the base Python
+                # for this stdlib-only helper; the service keeps its own Python.
+                helper_python = getattr(sys, "_base_executable", sys.executable)
+                argv = [helper_python, str(Path(__file__).with_name("_winjob.py")), *argv]
             try:
                 process = await asyncio.create_subprocess_exec(
                     *argv,
@@ -87,6 +99,7 @@ class ProgramRunner:
                     cwd=workdir,
                     env=env,
                     start_new_session=os.name != "nt",
+                    creationflags=subprocess.CREATE_NO_WINDOW if sys.platform == "win32" else 0,
                 )
             except OSError as exc:
                 logger.warning("%s %s could not start (%s)", self.label, argv[0], exc)
@@ -100,7 +113,7 @@ class ProgramRunner:
                 return ServiceResult("", ok=False, problem="the service took too long")
             except asyncio.CancelledError:
                 # The bridge is stopping: never leave the program running behind it.
-                self._kill(process)
+                await self._stop(process)
                 raise
             return self.answer(output, process.returncode, overflowed)
 

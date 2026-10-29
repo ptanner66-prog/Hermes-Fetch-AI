@@ -23,7 +23,7 @@ dependencies = [
   "uagents==0.25.5",
   "uagents-core==0.4.9",
   "uagents-adapter[mcp]==0.6.2",
-  "mcp==1.28.1",
+  "mcp==1.30.0",
   # Payments: wallets and signing (cosmpy), reading the ledger (httpx), and
   # checking fetch1 addresses (bech32). All three already come with uAgents.
   "cosmpy==0.12.2",
@@ -32,6 +32,7 @@ dependencies = [
   "pydantic>=2.8,<3",
   "PyYAML>=6,<7",
   "jsonschema>=4.20,<5",
+  "psutil>=7,<8",
 ]
 
 [project.urls]
@@ -50,6 +51,7 @@ dev = [
   "mypy>=2.4,<2.5",
   "types-PyYAML",
   "types-jsonschema",
+  "types-psutil",
   "build>=1.2,<2",
   "twine>=6,<7",
   "pip-audit>=2.9,<3",
@@ -66,6 +68,7 @@ hermes_fetch_ai = ["data/*.yaml"]
 
 [tool.pytest.ini_options]
 asyncio_mode = "auto"
+asyncio_default_fixture_loop_scope = "function"
 testpaths = ["tests"]
 pythonpath = ["src"]
 markers = ["network: the test may connect outside this machine (opt-in live tests only)"]

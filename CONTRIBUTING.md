@@ -16,9 +16,9 @@ Report vulnerabilities privately, as described in [`SECURITY.md`](SECURITY.md), 
 Python 3.11 or 3.12:
 
 ```bash
-uv sync --extra dev
-uv run hermes-fetch-ai doctor
-uv run hermes-fetch-ai demo local
+uv sync --locked --extra dev
+uv run --locked --extra dev hermes-fetch-ai doctor
+uv run --locked --extra dev hermes-fetch-ai demo local
 ```
 
 With pip: `python -m pip install -e ".[dev]"`.
@@ -28,17 +28,22 @@ With pip: `python -m pip install -e ".[dev]"`.
 Run this before opening a pull request; CI runs the same checks on Linux, macOS, and Windows:
 
 ```bash
-uv run ruff check .
-uv run ruff format --check .
-uv run mypy src tests
-uv run pytest -q --cov --cov-fail-under=90
-uv run hermes-fetch-ai demo local
-rm -rf dist build
-uv run python -m build
-uv run python -m twine check dist/*
-uv run python -m pip_audit --skip-editable --ignore-vuln CVE-2025-69277 --ignore-vuln PYSEC-2026-1325
+uv run --locked --extra dev ruff check .
+uv run --locked --extra dev ruff format --check .
+uv run --locked --extra dev mypy src tests
+uv run --locked --extra dev pytest -q --cov --cov-fail-under=90
+uv run --locked --extra dev hermes-fetch-ai demo local
+uv run --locked --extra dev hermes-fetch-ai demo paid
+uv run --locked --extra dev hermes-fetch-ai demo chat
+uv run --locked --extra dev hermes-fetch-ai demo buy
+uv run --locked --extra dev python -m build --outdir dist/verification
+uv run --locked --extra dev python -m twine check dist/verification/*
+uv run --locked --extra dev python tests/wheel_smoke.py dist/verification/hermes_fetch_ai-1.0.0-py3-none-any.whl
+uv run --locked --extra dev python -m pip_audit --skip-editable --ignore-vuln CVE-2025-69277 --ignore-vuln PYSEC-2026-1325
 ```
 
+- Commit `uv.lock` with dependency changes. Use `uv lock` to update it deliberately; CI installs with `--locked` and Dependabot maintains the uv graph.
+- The wheel smoke creates an isolated environment outside the source tree, checks dependency consistency and bundled config, and runs all four offline demos.
 - Coverage is branch coverage and counts the CLI and `serve` subprocesses that the tests start.
 - The package type-checks under `mypy --strict`; tests use relaxed settings (see `pyproject.toml`).
 - `ruff` and `mypy` are pinned to a minor series, so a new release cannot change the rules underneath CI. Dependabot proposes the bumps; fix any new findings in that pull request.

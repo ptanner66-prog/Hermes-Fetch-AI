@@ -79,11 +79,13 @@ def test_each_broadcast_ending_has_one_meaning(client, expected):
         s.close()
 
 
-def test_the_hash_the_ledger_reports_wins():
+def test_a_different_node_hash_keeps_the_signed_hash_for_reconciliation():
     s = sender()
     try:
         outcome = s._broadcast(Client(submitted=Submitted(tx_hash="cd" * 32)), object(), HASH)
-        assert outcome == SendOutcome("included", "CD" * 32)
+        assert outcome == SendOutcome(
+            "unknown", HASH, "the ledger reported a different transaction"
+        )
     finally:
         s.close()
 

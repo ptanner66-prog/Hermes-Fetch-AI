@@ -20,7 +20,9 @@ _SCHEME_PREFIX = re.compile(r"^([a-zA-Z][a-zA-Z0-9+.-]*):")
 # URLs that appear anywhere inside a longer string, e.g. "see http://10.0.0.1/x",
 # including web URLs written without slashes ("http:10.0.0.1/x").
 _EMBEDDED_URL = re.compile(
-    r"[a-zA-Z][a-zA-Z0-9+.-]*://[^\s\"'<>]+|\bhttps?:[^\s\"'<>/][^\s\"'<>]*", re.IGNORECASE
+    r"(?<![A-Za-z0-9+.-])(?=([a-zA-Z][a-zA-Z0-9+.-]*://[^\s\"'<>]+"
+    r"|https?:[^\s\"'<>/][^\s\"'<>]*))",
+    re.IGNORECASE,
 )
 _TRAILING_PUNCTUATION = ".,;:!?)}'\""
 # Schemes treated as URLs even without "//", such as "file:/etc/passwd" or
@@ -29,6 +31,13 @@ _URL_SCHEMES_WITHOUT_SLASHES = frozenset(
     {"data", "file", "javascript", "vbscript", "mailto", "jar", "blob", "view-source"}
     | {"http", "https"}
 )
+_EMBEDDED_SCHEME = re.compile(
+    r"(?<![A-Za-z0-9+.-])(?=((?:"
+    + "|".join(re.escape(scheme) for scheme in sorted(_URL_SCHEMES_WITHOUT_SLASHES))
+    + r"):[^\s\"'<>]+))",
+    re.IGNORECASE,
+)
+_PROTOCOL_RELATIVE_URL = re.compile(r"(?<![A-Za-z0-9:/])//[^\s\"'<>]+")
 _ALLOWED_URL_SCHEMES = {"http", "https"}
 _LOCAL_HOSTNAMES = {"localhost", "localhost.localdomain"}
 # A whole string that is only a host, optionally with a port or path
@@ -102,12 +111,18 @@ def _check_url(url: str) -> str | None:
         # Parsers disagree about these (WHATWG reads "\" as "/"), so a URL could
         # pass this check yet reach a different host.
         raise ValueError("URL must not contain backslashes, whitespace, or control characters")
-    parsed = urlparse(url)
+    try:
+        parsed = urlparse(url)
+        host = parsed.hostname
+        # Accessing port also validates malformed authority components.
+        _ = parsed.port
+    except ValueError:
+        raise ValueError("malformed URL") from None
     if parsed.scheme.lower() not in _ALLOWED_URL_SCHEMES:
         raise ValueError("unsupported URL scheme")
-    if not parsed.hostname:
+    if not host:
         raise ValueError("URL host is required")
-    return _host_needing_dns(parsed.hostname)
+    return _host_needing_dns(host)
 
 
 def _is_url_like(value: str) -> bool:
@@ -158,8 +173,13 @@ def _url_hosts(value: str) -> set[str]:
         bare = _bare_host(candidate)
         if bare is not None:
             hosts.add(_host_needing_dns(bare) or "")
+    # Lookahead allows overlaps: a redirect/query may contain another URL.
     for match in _EMBEDDED_URL.finditer(value):
-        hosts.add(_check_url(match.group(0).rstrip(_TRAILING_PUNCTUATION)) or "")
+        hosts.add(_check_url(match.group(1).rstrip(_TRAILING_PUNCTUATION)) or "")
+    for match in _EMBEDDED_SCHEME.finditer(value):
+        hosts.add(_check_url(match.group(1).rstrip(_TRAILING_PUNCTUATION)) or "")
+    for match in _PROTOCOL_RELATIVE_URL.finditer(value):
+        hosts.add(_check_url("https:" + match.group(0).rstrip(_TRAILING_PUNCTUATION)) or "")
     hosts.discard("")
     return hosts
 
@@ -169,6 +189,8 @@ def _check_resolved(host: str) -> None:
         infos = socket.getaddrinfo(host, None)
     except (socket.gaierror, UnicodeError):
         raise ValueError("URL host could not be resolved") from None
+    if not infos:
+        raise ValueError("URL host could not be resolved")
     for info in infos:
         resolved = _ip_literal(str(info[4][0]))
         if resolved is None or _is_non_global(resolved):

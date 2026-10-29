@@ -143,8 +143,13 @@ class ControlServer:
             request = json.loads(line)
         except ValueError:
             return {"ok": False, "error": "not a JSON request"}
-        if not isinstance(request, dict) or not hmac.compare_digest(
-            str(request.get("token", "")), self.token
+        if not isinstance(request, dict):
+            return {"ok": False, "error": "not allowed"}
+        token = request.get("token")
+        if (
+            not isinstance(token, str)
+            or not token.isascii()
+            or not hmac.compare_digest(token, self.token)
         ):
             return {"ok": False, "error": "not allowed"}
         op, args = request.get("op"), request.get("args") or {}
@@ -327,6 +332,8 @@ async def request(path: Path, op: str, args: dict[str, Any], *, timeout: float) 
         response = json.loads(raw)
     except ValueError:
         raise ControlError("the bridge sent an unreadable answer") from None
+    if not isinstance(response, dict) or not isinstance(response.get("ok"), bool):
+        raise ControlError("the bridge sent an unreadable answer")
     if not response.get("ok"):
         raise ControlError(str(response.get("error") or "the bridge refused"))
     return response.get("result")

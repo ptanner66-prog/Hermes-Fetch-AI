@@ -77,7 +77,8 @@ class HermesMCPConfig(BaseModel):
     mode: Literal["fake", "in_process_hermes_tools", "stdio"] = "fake"
     command: str | None = None
     args: list[str] = Field(default_factory=list)
-    timeout_seconds: float = Field(default=10.0, gt=0)
+    timeout_seconds: float = Field(default=10.0, gt=0, allow_inf_nan=False)
+    startup_timeout_seconds: float = Field(default=60.0, gt=0, le=300, allow_inf_nan=False)
 
 
 def _check_tool_names(names: list[str]) -> list[str]:
@@ -107,9 +108,9 @@ class PolicyConfig(BaseModel):
     max_global_list_tools_per_minute: int = Field(default=300, ge=0)
     max_tracked_senders: int = Field(default=4096, gt=0)
     require_replay_metadata: bool = True
-    replay_ttl_seconds: float = Field(default=300.0, gt=0)
+    replay_ttl_seconds: float = Field(default=300.0, gt=0, allow_inf_nan=False)
     max_replay_entries: int = Field(default=8192, gt=0)
-    max_replay_clock_skew_seconds: float = Field(default=60.0, ge=0)
+    max_replay_clock_skew_seconds: float = Field(default=60.0, ge=0, allow_inf_nan=False)
     trusted_shell_tools: list[str] = Field(default_factory=list)
 
     @field_validator("public_tools", "denied_tools", "trusted_shell_tools")

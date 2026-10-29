@@ -33,13 +33,16 @@ from __future__ import annotations
 import argparse
 import ipaddress
 import json
+import math
 import os
 import sys
 import urllib.request
+from typing import Any
 from urllib.parse import urlsplit
 
 DEFAULT_URL = "http://127.0.0.1:11434/v1"
 DEFAULT_MODEL = "qwen2.5-coder:7b"
+MAX_RESPONSE_BYTES = 16 * 1024 * 1024
 
 INSTRUCTIONS = """\
 You are a defensive application-security reviewer. The user sends source code,
@@ -61,7 +64,13 @@ Rules:
 
 
 def on_this_machine(url: str) -> bool:
-    parts = urlsplit(url)
+    try:
+        parts = urlsplit(url)
+        _ = parts.port
+    except ValueError:
+        return False
+    if parts.username is not None or parts.password is not None or parts.query or parts.fragment:
+        return False
     if parts.scheme not in ("http", "https"):
         return False
     host = parts.hostname or ""
@@ -73,7 +82,17 @@ def on_this_machine(url: str) -> bool:
         return False
 
 
+class _NoRedirect(urllib.request.HTTPRedirectHandler):
+    def redirect_request(
+        self, req: Any, fp: Any, code: int, msg: str, headers: Any, newurl: str
+    ) -> None:
+        # An apparently local model server must not move requests elsewhere.
+        return None
+
+
 def review(code: str, url: str, model: str, timeout: float) -> str:
+    if not on_this_machine(url):
+        raise ValueError("the model server must be on this machine")
     body = {
         "model": model,
         "messages": [
@@ -89,9 +108,12 @@ def review(code: str, url: str, model: str, timeout: float) -> str:
         headers={"Content-Type": "application/json"},
     )
     # The model server is on this machine; never send the code through a proxy.
-    opener = urllib.request.build_opener(urllib.request.ProxyHandler({}))
+    opener = urllib.request.build_opener(urllib.request.ProxyHandler({}), _NoRedirect())
     with opener.open(request, timeout=timeout) as response:
-        answer = json.load(response)
+        raw = response.read(MAX_RESPONSE_BYTES + 1)
+        if len(raw) > MAX_RESPONSE_BYTES:
+            raise ValueError("the model response is too large")
+        answer = json.loads(raw)
     return str(answer["choices"][0]["message"]["content"]).strip()
 
 
@@ -103,14 +125,24 @@ def main(argv: list[str] | None = None) -> int:
     options = parser.parse_args(argv)
     url, model = options.url, options.model
     if not on_this_machine(url):
-        print(f"the model server must be on this machine, not {url!r}", file=sys.stderr)
+        print("the model server must be on this machine, without URL credentials", file=sys.stderr)
         return 2
     try:
         timeout = float(options.timeout)
+        if not math.isfinite(timeout) or timeout <= 0:
+            raise ValueError
     except ValueError:
-        print("the timeout must be a number of seconds", file=sys.stderr)
+        print(
+            "the timeout must be a number of seconds greater than zero and finite", file=sys.stderr
+        )
         return 2
-    code = json.load(sys.stdin)["request"]
+    try:
+        code = json.load(sys.stdin)["request"]
+        if not isinstance(code, str):
+            raise TypeError
+    except (ValueError, KeyError, TypeError):
+        print("stdin must contain a JSON object with a string request", file=sys.stderr)
+        return 2
     try:
         text = review(code, url, model, timeout)
     except (OSError, ValueError, KeyError, IndexError, TypeError) as exc:

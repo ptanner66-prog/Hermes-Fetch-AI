@@ -85,8 +85,15 @@ Add `--config <your config>` if your records are not in the default folder. `pay
 | `committed` | The seller was told and is checking the payment. |
 | `completed` | The seller confirmed it. |
 | `cancelled` | The seller cancelled after you paid. Ask it for a refund. |
-| `failed` | Nothing was sent (the ledger refused it, or it never appeared). |
+| `failed` | The ledger confirmed a failed transaction, or the bridge proved it was not sent. A missing transaction alone never proves failure. |
 | `needs_review` | It is not known whether it went through. It still counts against your limits and is never resent on its own; `buyer check` settles it from the ledger. |
+
+A transaction that remains missing from the ledger stays `needs_review`, even
+past an hour or a daily budget reset; it continues to reserve budget. `buyer check`
+verifies the locally signed transaction hash, chain, confirmed height, payer,
+recipient, amount, and memo before resolving it. A node reporting another hash
+cannot replace the local one. Do not retry or release budget solely because a
+transaction lookup is empty.
 
 ## Privacy and network use
 

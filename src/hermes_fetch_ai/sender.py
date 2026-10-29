@@ -158,7 +158,7 @@ class CosmpySender:
             return SendOutcome("unknown", tx_hash, f"the broadcast may not have arrived: {exc}")
         if str(submitted.tx_hash).upper() != tx_hash:
             logger.warning("payment %s: the ledger reported another hash", tx_hash[:12])
-            tx_hash = str(submitted.tx_hash).upper()
+            return SendOutcome("unknown", tx_hash, "the ledger reported a different transaction")
         try:
             submitted.wait_to_complete(timeout=self._inclusion_wait, poll_period=2.0)
         except BroadcastError as exc:

@@ -163,7 +163,7 @@ class HermesMCPClientShim:
         return self
 
     async def _start_stdio(self) -> None:
-        timeout_seconds = self.cfg.hermes_mcp.timeout_seconds
+        timeout_seconds = self.cfg.hermes_mcp.startup_timeout_seconds
         params = stdio_parameters(self.cfg)
         self._exit_stack = stack = AsyncExitStack()
         # The child's stderr is outside the bridge's redaction boundary, so it is
@@ -177,13 +177,17 @@ class HermesMCPClientShim:
                 ClientSession(
                     read_stream,
                     write_stream,
-                    read_timeout_seconds=timedelta(seconds=timeout_seconds),
+                    read_timeout_seconds=timedelta(
+                        seconds=max(timeout_seconds, self.cfg.hermes_mcp.timeout_seconds)
+                    ),
                 )
             )
             await asyncio.wait_for(session.initialize(), timeout=timeout_seconds)
-        except Exception as exc:
+        except BaseException as exc:
             with contextlib.suppress(Exception):
                 await self.aclose()
+            if not isinstance(exc, Exception):
+                raise
             raise HermesBackendError(
                 _describe_startup_failure(exc, timeout_seconds, params)
             ) from exc
@@ -204,7 +208,9 @@ class HermesMCPClientShim:
 
     async def list_tools(self) -> list[dict[str, Any]]:
         if self.server is not None:
-            tools = await self.server.list_tools()
+            tools = await asyncio.wait_for(
+                self.server.list_tools(), timeout=self.cfg.hermes_mcp.timeout_seconds
+            )
             return [_tool_to_dict(t) for t in tools]
         if self.session is not None:
             result = await asyncio.wait_for(
@@ -217,7 +223,10 @@ class HermesMCPClientShim:
         max_bytes = self.cfg.policy.max_output_bytes
         try:
             if self.server is not None:
-                return from_fastmcp_result(await self.server.call_tool(name, args), max_bytes)
+                result = await asyncio.wait_for(
+                    self.server.call_tool(name, args), timeout=self.cfg.hermes_mcp.timeout_seconds
+                )
+                return from_fastmcp_result(result, max_bytes)
             if self.session is not None:
                 result = await asyncio.wait_for(
                     self.session.call_tool(name, args), timeout=self.cfg.hermes_mcp.timeout_seconds

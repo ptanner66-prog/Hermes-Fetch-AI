@@ -222,6 +222,8 @@ class Seller:
             )
         except QuoteError as exc:
             raise PaymentRefused(str(exc), status="mismatch") from None
+        if quote.kind != kind:
+            raise PaymentRefused("quote belongs to a different protocol", status="mismatch")
         try:
             tx_hash = normalize_tx_hash(proof.tx_hash)
         except ValueError as exc:
@@ -261,6 +263,8 @@ class Seller:
                 "payment pending: the transaction is not on the ledger yet; try again shortly",
                 status="pending",
             )
+        if tx.hash != tx_hash:
+            raise PaymentRefused("the ledger returned a different transaction", status="pending")
         problem = check_transfer(quote, proof.reference, tx, require_memo=kind == "call")
         if problem is not None:
             raise PaymentRefused(f"payment invalid: {problem}", status="invalid")
@@ -289,10 +293,13 @@ class Seller:
                 status="used",
             ) from None
 
-    def begin(self, credit: Credit) -> Credit:
+    def begin(self, credit: Credit, *, max_runs_per_day: int | None = None) -> Credit:
         try:
             return self.store.begin_run(
-                credit.reference, max_attempts=self.payments.max_attempts, now_ms=self.now_ms()
+                credit.reference,
+                max_attempts=self.payments.max_attempts,
+                now_ms=self.now_ms(),
+                max_runs_per_day=max_runs_per_day,
             )
         except CreditUnavailable as exc:
             raise PaymentRefused(exc.reason, status="used") from None

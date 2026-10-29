@@ -70,8 +70,6 @@ MAX_REPLY_CHARS = 20_000
 MAX_OPEN_QUOTES_PER_SELLER = 20
 # Longest a payment request may stay open, whatever the seller asks.
 MAX_DEADLINE_SECONDS = 3600
-# A payment that never showed up on the ledger after this long is given up on.
-GIVE_UP_AFTER_MS = 3_600_000
 # Quiet seconds after which a burst of replies counts as complete.
 SETTLE_SECONDS = 1.5
 # Most replies, and most characters of them, handed back at once; the rest
@@ -446,8 +444,10 @@ class Buyer:
             )
         if outcome.status == "unknown":
             return self._needs_review(purchase.id, outcome.problem or "the outcome is unknown")
-        if outcome.tx_hash and outcome.tx_hash != self._stored_tx(purchase.id):
-            self.store.set_purchase_tx(purchase.id, outcome.tx_hash, now_ms=self._now_ms())
+        if not outcome.tx_hash or outcome.tx_hash != self._stored_tx(purchase.id):
+            return self._needs_review(
+                purchase.id, "the sender did not confirm the recorded transaction; run check"
+            )
         paid = self.store.move_purchase(
             purchase.id, from_states=("broadcasting",), to="paid", now_ms=self._now_ms()
         )
@@ -533,27 +533,21 @@ class Buyer:
         if self._ledger is None:
             self._ledger = self._ledger_factory()
         try:
+            if await self._ledger.chain_id() != self.cfg.payments.chain_id:
+                raise PurchaseRefused(
+                    "the ledger is not the configured testnet; payment stays pending"
+                )
             tx = await self._ledger.get_tx(purchase.tx_hash)
         except LedgerUnavailable as exc:
             raise PurchaseRefused(f"the ledger cannot be reached: {exc}") from None
         now = self._now_ms()
         if tx is None:
-            if purchase.spent_ms is not None and now - purchase.spent_ms > GIVE_UP_AFTER_MS:
-                return self.store.move_purchase(
-                    purchase.id,
-                    from_states=("needs_review",),
-                    to="failed",
-                    now_ms=now,
-                    note="the payment never appeared on the ledger",
-                )
+            # Absence from one node does not prove a signed transaction cannot
+            # land later. Keep its reservation and never automatically resend.
             return purchase
-        sent = sum(
-            transfer.amount
-            for transfer in tx.transfers
-            if transfer.recipient == purchase.recipient
-            and transfer.denom == self.cfg.payments.denom
-        )
-        if tx.code != 0 or sent < purchase.amount_base:
+        if tx.hash != purchase.tx_hash or tx.height <= 0:
+            return purchase
+        if tx.code != 0:
             return self.store.move_purchase(
                 purchase.id,
                 from_states=("needs_review",),
@@ -561,6 +555,21 @@ class Buyer:
                 now_ms=now,
                 note="the payment failed on the ledger",
             )
+        if (
+            self.sender is None
+            or tx.other_messages
+            or tx.memo != (purchase.reference or "")
+            or len(tx.transfers) != 1
+        ):
+            return purchase
+        transfer = tx.transfers[0]
+        if (
+            transfer.sender != self.sender.address()
+            or transfer.recipient != purchase.recipient
+            or transfer.denom != self.cfg.payments.denom
+            or transfer.amount != purchase.amount_base
+        ):
+            return purchase
         paid = self.store.move_purchase(
             purchase.id, from_states=("needs_review",), to="paid", now_ms=now
         )

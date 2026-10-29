@@ -95,6 +95,8 @@ def test_requests_need_the_token_and_a_known_operation(running):
 
     assert ask({"token": "0" * 64, "op": "status"}) == {"ok": False, "error": "not allowed"}
     assert ask({"op": "status"})["error"] == "not allowed"
+    assert ask({"token": "not-ascii-\u2603", "op": "status"})["error"] == "not allowed"
+    assert ask({"token": [token], "op": "status"})["error"] == "not allowed"
     assert json.loads(raw(running.path, b"not json\n"))["error"] == "not a JSON request"
     assert ask({"token": token, "op": "status", "args": [1]})["error"] == "args must be an object"
     assert "unknown operation" in ask({"token": token, "op": "rm -rf"})["error"]
@@ -364,3 +366,23 @@ async def test_a_bridge_that_stopped_is_explained(tmp_path):
         path.write_text(json.dumps({"port": s.getsockname()[1], "token": "t"}))
     with pytest.raises(ControlError, match="not answering"):
         await request(path, "status", {}, timeout=2)
+
+
+@pytest.mark.parametrize("body", [b"[]\n", b"null\n", b"1\n"])
+async def test_malformed_control_answers_are_reported(tmp_path, body):
+    async def answer(reader, writer):
+        await reader.readline()
+        writer.write(body)
+        await writer.drain()
+        writer.close()
+        await writer.wait_closed()
+
+    server = await asyncio.start_server(answer, "127.0.0.1", 0)
+    path = tmp_path / "control.json"
+    path.write_text(json.dumps({"port": server.sockets[0].getsockname()[1], "token": "t"}))
+    try:
+        with pytest.raises(ControlError, match="unreadable"):
+            await request(path, "ping", {}, timeout=2)
+    finally:
+        server.close()
+        await server.wait_closed()

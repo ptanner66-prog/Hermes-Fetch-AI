@@ -29,11 +29,6 @@ class TokenBuckets:
         self.hits = {k: w for k, v in self.hits.items() if (w := self._fresh(v, now))}
         self.global_hits = {k: w for k, v in self.global_hits.items() if (w := self._fresh(v, now))}
 
-    def _evict_least_recent(self, max_tracked_senders: int) -> None:
-        while len(self.hits) >= max_tracked_senders:
-            oldest = min(self.hits, key=lambda key: self.hits[key][-1])
-            del self.hits[oldest]
-
     def consume(
         self,
         sender: str,
@@ -57,8 +52,10 @@ class TokenBuckets:
         global_window = self.global_hits.get(kind, [])
         if len(global_window) >= global_limit:
             return False, "global rate limit exceeded"
-        if key not in self.hits:
-            self._evict_least_recent(max_tracked_senders)
+        if key not in self.hits and len(self.hits) >= max_tracked_senders:
+            # Dropping a live window would let rotating identities reset it.
+            # Existing senders still work; new ones wait for a window to expire.
+            return False, "sender capacity reached"
         self.hits[key] = [*window, now]
         self.global_hits[kind] = [*global_window, now]
         return True, "allowed"
@@ -82,8 +79,9 @@ class ReplayCache:
         }
         if fingerprint in self.entries:
             return False, "replay detected"
-        while len(self.entries) >= max_entries:
-            del self.entries[min(self.entries, key=self.entries.__getitem__)]
+        if len(self.entries) >= max_entries:
+            # A live fingerprint is security state, not a disposable cache entry.
+            return False, "replay cache full"
         self.entries[fingerprint] = now
         return True, "allowed"
 

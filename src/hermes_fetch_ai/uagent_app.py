@@ -15,6 +15,7 @@ from uagents.registration import AlmanacApiRegistrationPolicy
 from uagents_adapter.mcp.protocol import CallTool, CallToolResponse, ListTools, ListToolsResponse
 
 from .audit import AuditWriter
+from .background import stop_requested
 from .buyer import Buyer, SendInSession
 from .chat_protocol import build_chat_protocols
 from .config import BridgeConfig
@@ -365,7 +366,7 @@ def run_bridge(
     async def _watch(path: Path) -> None:
         # How `stop` reaches a background bridge on Windows, which gets no signals.
         while not stop.is_set():
-            if path.exists():
+            if stop_requested(path.parent):
                 stop.set()
                 return
             await asyncio.sleep(1.0)

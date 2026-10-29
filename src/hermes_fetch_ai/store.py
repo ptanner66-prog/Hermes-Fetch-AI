@@ -165,6 +165,10 @@ class CreditUnavailable(Exception):
         self.reason = reason
 
 
+class RunLimitReached(Exception):
+    """The service has no execution budget left in the daily window."""
+
+
 @dataclass(frozen=True)
 class Credit:
     reference: str
@@ -430,8 +434,15 @@ class Store:
         assert credit is not None
         return credit
 
-    def begin_run(self, reference: str, *, max_attempts: int, now_ms: int) -> Credit:
-        """Move a paid credit to running, or raise CreditUnavailable."""
+    def begin_run(
+        self,
+        reference: str,
+        *,
+        max_attempts: int,
+        now_ms: int,
+        max_runs_per_day: int | None = None,
+    ) -> Credit:
+        """Start a paid run, optionally reserving its daily budget in the same transaction."""
         exhausted = False
         with self._transaction() as conn:
             row = conn.execute("SELECT * FROM credits WHERE reference = ?", (reference,)).fetchone()
@@ -449,6 +460,8 @@ class Store:
                 )
                 exhausted = True
             else:
+                if max_runs_per_day is not None:
+                    self._record_run(conn, row["subject"], row["sender"], now_ms, max_runs_per_day)
                 conn.execute(
                     "UPDATE credits SET status = 'running', attempts = attempts + 1,"
                     " updated_ms = ? WHERE reference = ?",
@@ -525,12 +538,12 @@ class Store:
 
     def earned_since(self, since_ms: int) -> tuple[int, int]:
         """Paid requests since ``since_ms``, and what they paid (refunds left out)."""
-        row = self._conn.execute(
-            "SELECT COUNT(*), COALESCE(SUM(CAST(amount_base AS INTEGER)), 0) FROM credits"
-            " WHERE paid_ms >= ? AND status != 'refunded'",
+        rows = self._conn.execute(
+            "SELECT amount_base FROM credits WHERE paid_ms >= ? AND status != 'refunded'",
             (since_ms,),
-        ).fetchone()
-        return int(row[0]), int(row[1])
+        ).fetchall()
+        # Base-unit amounts exceed SQLite's signed 64-bit range even at 10 FET.
+        return len(rows), sum(int(row[0]) for row in rows)
 
     def credits(self, status: str | None = None, limit: int = 100) -> list[Credit]:
         if status is None:
@@ -561,14 +574,33 @@ class Store:
 
     # -- service runs -----------------------------------------------------
 
-    def record_run(self, *, subject: str, sender: str, now_ms: int) -> None:
+    def record_run(
+        self, *, subject: str, sender: str, now_ms: int, max_runs_per_day: int | None = None
+    ) -> None:
         with self._transaction() as conn:
-            conn.execute(
-                "INSERT INTO runs (subject, sender, started_ms) VALUES (?, ?, ?)",
-                (subject, sender, now_ms),
-            )
-            # Keep a week of history; the daily cap only needs one day.
-            conn.execute("DELETE FROM runs WHERE started_ms < ?", (now_ms - 7 * 86_400_000,))
+            self._record_run(conn, subject, sender, now_ms, max_runs_per_day)
+
+    @staticmethod
+    def _record_run(
+        conn: sqlite3.Connection,
+        subject: str,
+        sender: str,
+        now_ms: int,
+        max_runs_per_day: int | None,
+    ) -> None:
+        if max_runs_per_day is not None:
+            count = conn.execute(
+                "SELECT COUNT(*) FROM runs WHERE subject = ? AND started_ms >= ?",
+                (subject, now_ms - _DAY_MS),
+            ).fetchone()[0]
+            if count >= max_runs_per_day:
+                raise RunLimitReached
+        conn.execute(
+            "INSERT INTO runs (subject, sender, started_ms) VALUES (?, ?, ?)",
+            (subject, sender, now_ms),
+        )
+        # Keep a week of history; the daily cap only needs one day.
+        conn.execute("DELETE FROM runs WHERE started_ms < ?", (now_ms - 7 * _DAY_MS,))
 
     def runs_since(self, subject: str, since_ms: int) -> int:
         row = self._conn.execute(
@@ -743,10 +775,11 @@ class Store:
         return [_purchase(row) for row in rows]
 
     def spent_since(self, since_ms: int, peer: str | None = None) -> int:
-        """atestfet that may have left the buying wallet since ``since_ms``."""
+        """Recent spending plus unresolved broadcasts, whose reservations cannot expire."""
         placeholders = ", ".join("?" for _ in SPENDING_STATES)
         query = (
-            f"SELECT amount_base FROM purchases WHERE status IN ({placeholders}) AND spent_ms >= ?"
+            f"SELECT amount_base FROM purchases WHERE status IN ({placeholders})"
+            " AND (spent_ms >= ? OR status IN ('broadcasting', 'needs_review'))"
         )
         params: list[object] = [*SPENDING_STATES, since_ms]
         if peer is not None:
@@ -852,7 +885,7 @@ class Store:
         placeholders = ", ".join("?" for _ in SPENDING_STATES)
         rows = conn.execute(
             f"SELECT peer, amount_base FROM purchases WHERE status IN ({placeholders})"
-            " AND spent_ms >= ?",
+            " AND (spent_ms >= ? OR status IN ('broadcasting', 'needs_review'))",
             (*SPENDING_STATES, now_ms - _DAY_MS),
         ).fetchall()
         spent = sum(int(row["amount_base"]) for row in rows)
@@ -883,14 +916,21 @@ class Store:
         now_ms: int,
         note: str | None = None,
     ) -> Purchase:
-        """Move a purchase from one of ``from_states`` to ``to``, or raise PurchaseRefused."""
+        """Move a purchase from one of ``from_states`` to ``to``, or raise PurchaseRefused.
+
+        A formerly unknown spend starts its daily window when it is confirmed,
+        conservatively retaining the budget for a day after reconciliation.
+        """
         assert to in PURCHASE_STATES
         placeholders = ", ".join("?" for _ in from_states)
         with self._transaction() as conn:
             cursor = conn.execute(
                 f"UPDATE purchases SET status = ?, nonce = NULL, updated_ms = ?,"
-                f" note = COALESCE(?, note) WHERE id = ? AND status IN ({placeholders})",
-                (to, now_ms, note, purchase_id, *from_states),
+                " note = COALESCE(?, note),"
+                " spent_ms = CASE WHEN status = 'needs_review' AND ? = 'paid'"
+                " THEN ? ELSE spent_ms END"
+                f" WHERE id = ? AND status IN ({placeholders})",
+                (to, now_ms, note, to, now_ms, purchase_id, *from_states),
             )
             if cursor.rowcount != 1:
                 row = conn.execute(

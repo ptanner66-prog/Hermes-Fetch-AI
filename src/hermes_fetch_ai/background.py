@@ -14,18 +14,24 @@ from __future__ import annotations
 import contextlib
 import json
 import os
-import signal
 import subprocess
 import sys
 import time
+import uuid
 from collections.abc import Callable
-from dataclasses import asdict, dataclass
+from dataclasses import asdict, dataclass, replace
 from pathlib import Path
-from typing import Any
+from typing import Any, BinaryIO
+
+import psutil
 
 RUN_FILE = "serve.json"
 STOP_FILE = "serve.stop"
 LOG_FILE = "serve.log"
+LOCK_FILE = "serve.lock"
+# Keep the operating-system lock open for the entire bridge lifetime. Crashes
+# release it automatically; the lock file itself is never deleted.
+_claims: dict[Path, BinaryIO] = {}
 # Set by `start` so `serve` can say where its output goes.
 LOG_VAR = "HERMES_FETCH_AI_SERVE_LOG"
 MAX_LOG_BYTES = 5 * 1024 * 1024
@@ -44,6 +50,7 @@ class RunInfo:
     log: str | None = None
     # Set once the agent is up (its backend, records, and control channel).
     ready: bool = False
+    created: float | None = None
 
 
 class AlreadyRunning(Exception):
@@ -61,88 +68,133 @@ def pid_alive(pid: int) -> bool:
     """True if a process with this id is running (never signals it)."""
     if pid <= 0:
         return False
-    if sys.platform == "win32":
-        import ctypes
-
-        kernel32 = ctypes.windll.kernel32
-        handle = kernel32.OpenProcess(0x1000, False, pid)  # PROCESS_QUERY_LIMITED_INFORMATION
-        if not handle:
-            return False
-        try:
-            code = ctypes.c_ulong()
-            return bool(kernel32.GetExitCodeProcess(handle, ctypes.byref(code))) and (
-                code.value == 259  # STILL_ACTIVE
-            )
-        finally:
-            kernel32.CloseHandle(handle)
     try:
-        os.kill(pid, 0)
-    except ProcessLookupError:
+        process = psutil.Process(pid)
+        return process.is_running() and process.status() != psutil.STATUS_ZOMBIE
+    except psutil.Error:
         return False
-    except PermissionError:
-        return True
-    return True
 
 
 def is_bridge(pid: int) -> bool:
-    """True if ``pid`` is a running bridge (not another process that got its id)."""
-    if not pid_alive(pid):
-        return False
-    proc = Path(f"/proc/{pid}/cmdline")
-    if proc.exists():
-        with contextlib.suppress(OSError):
-            command_line = proc.read_bytes()
-            return b"hermes_fetch_ai" in command_line or b"hermes-fetch-ai" in command_line
-    if sys.platform != "win32":
-        with contextlib.suppress(OSError, subprocess.SubprocessError):
-            command = subprocess.run(
-                ["ps", "-o", "command=", "-p", str(pid)],
-                capture_output=True,
-                text=True,
-                timeout=5,
-                check=False,
-            ).stdout
-            return "hermes_fetch_ai" in command or "hermes-fetch-ai" in command
-    return True  # Windows: the id is all there is to go on
-
-
-def read_running(state: Path) -> RunInfo | None:
-    """The bridge running with the records in ``state``, if one is (a stale file is removed)."""
-    path = state / RUN_FILE
+    """Recognize older run records that did not include process creation time."""
     try:
-        data = json.loads(path.read_text(encoding="utf-8"))
-        info = RunInfo(
+        process = psutil.Process(pid)
+        command = " ".join(process.cmdline())
+        return process.is_running() and (
+            "hermes_fetch_ai" in command or "hermes-fetch-ai" in command
+        )
+    except psutil.Error:
+        return False
+
+
+def _running_process(info: RunInfo) -> psutil.Process | None:
+    """Return the recorded process, excluding a process that reused its PID.
+
+    psutil also rechecks this identity before terminate/kill, closing the race
+    between our check and a later stop attempt.
+    """
+    try:
+        process = psutil.Process(info.pid)
+        if info.created is None:
+            if process.create_time() > info.started or not is_bridge(info.pid):
+                return None
+        elif process.create_time() != info.created:
+            return None
+        return (
+            process if process.is_running() and process.status() != psutil.STATUS_ZOMBIE else None
+        )
+    except psutil.Error:
+        return None
+
+
+def _read_run_file(state: Path) -> RunInfo | None:
+    try:
+        data = json.loads((state / RUN_FILE).read_text(encoding="utf-8"))
+        return RunInfo(
             pid=int(data["pid"]),
             started=float(data["started"]),
             config=str(data["config"]),
             log=data.get("log"),
             ready=bool(data.get("ready", False)),
+            created=float(data["created"]) if data.get("created") is not None else None,
         )
     except (OSError, ValueError, KeyError, TypeError):
         return None
-    if is_bridge(info.pid):
+
+
+def _lock(state: Path) -> BinaryIO:
+    state.mkdir(parents=True, exist_ok=True)
+    lock = os.fdopen(os.open(state / LOCK_FILE, os.O_RDWR | os.O_CREAT, 0o600), "r+b")
+    try:
+        if sys.platform == "win32":
+            import msvcrt
+
+            # Windows locks a byte range, even when the file has no data yet.
+            msvcrt.locking(lock.fileno(), msvcrt.LK_NBLCK, 1)
+        else:
+            import fcntl
+
+            fcntl.flock(lock.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
+    except BaseException:
+        lock.close()
+        raise
+    return lock
+
+
+def read_running(state: Path) -> RunInfo | None:
+    """The recorded bridge, verified against its process creation identity."""
+    info = _read_run_file(state)
+    if info is None:
+        return None
+    if _running_process(info) is not None:
         return info
-    with contextlib.suppress(OSError):
-        path.unlink()
+    # Do not delete metadata underneath a starting bridge or another owner.
+    try:
+        lock = _lock(state)
+    except OSError:
+        return None
+    try:
+        if _read_run_file(state) == info:
+            with contextlib.suppress(OSError):
+                (state / RUN_FILE).unlink()
+    finally:
+        lock.close()
     return None
 
 
 def claim(state: Path, config: Path) -> RunInfo:
-    """Record this process as the bridge running with ``state``; raises AlreadyRunning."""
-    other = read_running(state)
-    if other is not None and other.pid != os.getpid():
-        raise AlreadyRunning(other)
-    info = RunInfo(
-        pid=os.getpid(),
-        started=time.time(),
-        config=str(config),
-        log=os.environ.get(LOG_VAR) or None,
-    )
-    state.mkdir(parents=True, exist_ok=True)
-    with contextlib.suppress(OSError):
-        (state / STOP_FILE).unlink()  # a stop request meant for an earlier run
-    _write_run_file(state, info)
-    return info
+    """Own ``state`` until release or process exit, before opening any records."""
+    state = state.resolve()
+    if state in _claims:
+        raise AlreadyRunning(
+            _read_run_file(state) or RunInfo(os.getpid(), time.time(), str(config))
+        )
+    try:
+        lock = _lock(state)
+    except OSError as exc:
+        if exc.errno not in (11, 13, 35):
+            raise
+        pending = _read_run_file(state) or RunInfo(0, time.time(), str(config))
+        raise AlreadyRunning(pending) from None
+    try:
+        other = _read_run_file(state)
+        if other is not None and _running_process(other) is not None:
+            raise AlreadyRunning(other)
+        info = RunInfo(
+            pid=os.getpid(),
+            started=time.time(),
+            config=str(config),
+            log=os.environ.get(LOG_VAR) or None,
+            created=psutil.Process().create_time(),
+        )
+        with contextlib.suppress(OSError):
+            (state / STOP_FILE).unlink()
+        _write_run_file(state, info)
+        _claims[state] = lock
+        return info
+    except BaseException:
+        lock.close()
+        raise
 
 
 def _write_run_file(state: Path, info: RunInfo) -> None:
@@ -160,17 +212,43 @@ def mark_ready(state: Path) -> None:
 
 
 def release(state: Path) -> None:
-    """Forget this process as the running bridge (only if it is the one recorded)."""
-    path = state / RUN_FILE
-    with contextlib.suppress(OSError, ValueError, KeyError, TypeError):
-        if int(json.loads(path.read_text(encoding="utf-8"))["pid"]) == os.getpid():
-            path.unlink()
-    with contextlib.suppress(OSError):
-        (state / STOP_FILE).unlink()
+    """Release only the claim this process actually holds."""
+    state = state.resolve()
+    lock = _claims.pop(state, None)
+    if lock is None:
+        return
+    try:
+        info = _read_run_file(state)
+        if info is not None and info.pid == os.getpid():
+            with contextlib.suppress(OSError):
+                (state / RUN_FILE).unlink()
+        with contextlib.suppress(OSError):
+            (state / STOP_FILE).unlink()
+    finally:
+        lock.close()
+
+
+def request_stop(state: Path, info: RunInfo) -> None:
+    """Write an atomic request for this exact process, never its successor."""
+    temp = state / f".{STOP_FILE}.{uuid.uuid4().hex}"
+    try:
+        with os.fdopen(os.open(temp, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600), "w") as f:
+            json.dump({"pid": info.pid, "created": info.created}, f)
+        os.replace(temp, state / STOP_FILE)
+    finally:
+        with contextlib.suppress(FileNotFoundError):
+            temp.unlink()
 
 
 def stop_requested(state: Path) -> bool:
-    return (state / STOP_FILE).exists()
+    """Only a request for this process may stop it; legacy sentinels fail closed."""
+    try:
+        target = json.loads((state / STOP_FILE).read_text(encoding="utf-8"))
+        return bool(
+            target["pid"] == os.getpid() and target["created"] == psutil.Process().create_time()
+        )
+    except (OSError, ValueError, KeyError, TypeError, psutil.Error):
+        return False
 
 
 def _clock(epoch: float) -> str:
@@ -194,6 +272,16 @@ def tail(path: Path, lines: int) -> list[str]:
     except OSError:
         return []
     return text.splitlines()[-lines:] if lines > 0 else []
+
+
+def _spawned_process(pid: int, info: RunInfo) -> bool:
+    """Windows venv launchers can run the actual interpreter as a child."""
+    if info.pid == pid:
+        return True
+    try:
+        return any(child.pid == info.pid for child in psutil.Process(pid).children(recursive=True))
+    except psutil.Error:
+        return False
 
 
 def start(
@@ -244,10 +332,10 @@ def start(
                 out(f"  {line}")
             return 1
         running = read_running(state)
-        if running is not None and running.ready and running.pid == process.pid:
+        if running is not None and running.ready and _spawned_process(process.pid, running):
             ready_since = ready_since or time.monotonic()
             if time.monotonic() - ready_since >= settle:
-                out(f"Your agent is running (process {process.pid}).")
+                out(f"Your agent is running (process {running.pid}).")
                 out(f"Its log: {log}")
                 out("See what it is doing: hermes fetchai-bridge status")
                 return 0
@@ -260,41 +348,45 @@ def start(
 def stop(
     state: Path, *, wait: float = STOP_WAIT_SECONDS, out: Callable[[str], None] = print
 ) -> int:
-    """Ask the running bridge to stop, and wait for it; 0 once it has."""
+    """Ask the recorded process to stop; never signal a reused process id."""
     running = read_running(state)
-    if running is None:
+    process = _running_process(running) if running is not None else None
+    if running is None or process is None:
         out("Your agent is not running.")
         return 0
     if sys.platform == "win32":
-        (state / STOP_FILE).write_text("stop", encoding="utf-8")
+        request_stop(state, replace(running, created=process.create_time()))
     else:
-        with contextlib.suppress(ProcessLookupError):
-            os.kill(running.pid, signal.SIGTERM)
+        with contextlib.suppress(psutil.NoSuchProcess):
+            process.terminate()
     deadline = time.monotonic() + wait
     while time.monotonic() < deadline:
         if sys.platform != "win32":
-            # Started by this very process (`restart`): collect it once it exits.
             with contextlib.suppress(ChildProcessError, OSError):
                 os.waitpid(running.pid, os.WNOHANG)
-        if not pid_alive(running.pid):
+        try:
+            alive = process.is_running() and process.status() != psutil.STATUS_ZOMBIE
+        except psutil.NoSuchProcess:
+            alive = False
+        if not alive:
             out("Your agent stopped.")
-            with contextlib.suppress(OSError):
-                (state / STOP_FILE).unlink()
+            # release() or the next claim clears its stop request under the lock.
             return 0
         time.sleep(0.25)
     out(f"Your agent did not stop within {wait:.0f} seconds; stopping it now.")
-    with contextlib.suppress(OSError):
-        if sys.platform == "win32":
-            subprocess.run(
-                ["taskkill", "/F", "/T", "/PID", str(running.pid)],
-                capture_output=True,
-                check=False,
-                timeout=30,
-            )
-        else:
-            os.kill(running.pid, signal.SIGKILL)
-    with contextlib.suppress(OSError):
-        (state / RUN_FILE).unlink()
+    # Each Process object retains its creation time and rechecks it on kill.
+    # Never invoke taskkill with an unchecked PID that might now be unrelated.
+    with contextlib.suppress(psutil.Error):
+        children = process.children(recursive=True)
+        process.kill()
+        for child in reversed(children):
+            with contextlib.suppress(psutil.Error):
+                child.kill()
+        # Do not reap a child owned by a caller's Popen object on Unix.
+        deadline = time.monotonic() + 5
+        while _running_process(running) is not None and time.monotonic() < deadline:
+            time.sleep(0.05)
+    read_running(state)  # safely remove the old record only after the process is gone
     return 1
 
 

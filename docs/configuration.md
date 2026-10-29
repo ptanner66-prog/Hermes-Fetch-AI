@@ -30,7 +30,8 @@ The examples in [`examples/`](../examples) are complete configs: `local-direct.y
 | `mode` | `fake` | `fake` (two built-in demo tools), `stdio` (run Hermes' tools MCP server as a child process), or `in_process_hermes_tools` (import it into the bridge's process; works only with hermes-agent v0.16.x). |
 | `command` | none | For `stdio`: the program to run, normally the Python interpreter of the Hermes environment. Through `hermes fetchai-bridge`, leave it unset and the plugin supplies Hermes' interpreter. |
 | `args` | `[]` | The program's arguments. The Hermes examples use `["-m", "agent.transports.hermes_tools_mcp_server"]`, which is also the default when `command` comes from the plugin. |
-| `timeout_seconds` | `10` | Limit for server startup, for each `ListTools`/`CallTool` round trip to the server, and for a call's argument checks (which may resolve DNS). |
+| `timeout_seconds` | `10` | Limit for each `ListTools`/`CallTool` round trip and a call's argument checks (which may resolve DNS). Applies to stdio and in-process backends. |
+| `startup_timeout_seconds` | `60` | Separate limit for MCP initialization, allowing cold Hermes imports without extending tool calls. Must be positive, finite, and at most 300 seconds. |
 
 ## `policy`
 

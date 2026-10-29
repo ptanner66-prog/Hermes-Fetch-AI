@@ -14,6 +14,7 @@ from datetime import UTC, datetime
 from pathlib import Path
 
 import httpx
+import psutil
 import pytest
 
 from hermes_fetch_ai import background, cli
@@ -104,7 +105,6 @@ def test_a_second_bridge_with_the_same_records_is_refused(tmp_path, monkeypatch)
     release(state)
 
 
-@pytest.mark.skipif(sys.platform == "win32", reason="Windows has no command lines to read here")
 def test_a_reused_process_id_is_not_mistaken_for_the_bridge(tmp_path):
     state = tmp_path / "state"
     state.mkdir()
@@ -187,7 +187,6 @@ def test_a_bridge_that_cannot_start_shows_why(tmp_path, seed, unused_tcp_port, c
     assert read_running(tmp_path / "state") is None
 
 
-@pytest.mark.skipif(sys.platform == "win32", reason="stop uses a stop file on Windows")
 def test_a_bridge_that_will_not_stop_is_stopped(tmp_path):
     state = tmp_path / "state"
     state.mkdir()
@@ -246,23 +245,28 @@ def test_follow_prints_new_lines_as_they_come(tmp_path):
 def test_serve_stops_when_the_stop_file_appears(tmp_path, seed, unused_tcp_port):
     config = write_config(tmp_path, unused_tcp_port)
     state = tmp_path / "state"
-    proc = subprocess.Popen(
-        [sys.executable, "-m", "hermes_fetch_ai.cli", "serve", "--config", str(config)],
-        env=dict(os.environ),
-        stdout=subprocess.PIPE,
-        stderr=subprocess.STDOUT,
-    )
-    try:
-        deadline = time.monotonic() + 30
-        while read_running(state) is None and time.monotonic() < deadline:
-            time.sleep(0.1)
-        assert read_running(state) is not None
-        (state / STOP_FILE).write_text("stop")
-        assert proc.wait(30) == 0
-    finally:
-        if proc.poll() is None:
-            proc.kill()
-            proc.wait()
+    log_path = tmp_path / "serve-output.log"
+    with log_path.open("w", encoding="utf-8") as log:
+        proc = subprocess.Popen(
+            [sys.executable, "-m", "hermes_fetch_ai.cli", "serve", "--config", str(config)],
+            env=dict(os.environ),
+            stdout=log,
+            stderr=subprocess.STDOUT,
+        )
+        try:
+            deadline = time.monotonic() + background.START_WAIT_SECONDS
+            while read_running(state) is None and time.monotonic() < deadline:
+                assert proc.poll() is None, log_path.read_text(encoding="utf-8", errors="replace")
+                time.sleep(0.1)
+            info = read_running(state)
+            assert info is not None, log_path.read_text(encoding="utf-8", errors="replace")
+            background.request_stop(state, info)
+            assert proc.wait(background.STOP_WAIT_SECONDS) == 0, log_path.read_text(
+                encoding="utf-8", errors="replace"
+            )
+        finally:
+            if proc.poll() is None:
+                kill_test_tree(proc)
     assert not (state / RUN_FILE).exists() and not (state / STOP_FILE).exists()
 
 
@@ -406,3 +410,136 @@ async def test_the_ledger_says_when_its_newest_block_was_made():
     with pytest.raises(LedgerUnavailable, match="unexpected block response"):
         await broken.latest_block_ms()
     asyncio.get_running_loop()  # still usable
+
+
+def kill_test_tree(process):
+    """The Windows venv executable is a launcher; stop its interpreter too."""
+    try:
+        children = psutil.Process(process.pid).children(recursive=True)
+    except psutil.NoSuchProcess:
+        children = []
+    for child in reversed(children):
+        try:
+            child.kill()
+        except psutil.NoSuchProcess:
+            pass
+    process.kill()
+    process.wait(timeout=10)
+    _, alive = psutil.wait_procs(children, timeout=10)
+    assert not alive, "test interpreter children did not exit"
+
+
+@pytest.mark.parametrize("remove_metadata", [False, True])
+def test_claim_holds_a_process_lock_and_crash_releases_it(tmp_path, remove_metadata):
+    script = tmp_path / "claim.py"
+    script.write_text(
+        "from pathlib import Path\n"
+        "import sys, time\n"
+        "from hermes_fetch_ai.background import claim\n"
+        "state = Path(sys.argv[1])\n"
+        "claim(state, state / 'config.yaml')\n"
+        "(state / 'claimed').write_text('ready')\n"
+        "time.sleep(60)\n"
+    )
+    state = tmp_path / "state"
+    owner = subprocess.Popen([sys.executable, str(script), str(state)])
+    try:
+        deadline = time.monotonic() + 20
+        while not (state / "claimed").exists() and time.monotonic() < deadline:
+            assert owner.poll() is None
+            time.sleep(0.05)
+        assert (state / "claimed").exists()
+        if remove_metadata:
+            (state / RUN_FILE).unlink()
+        with pytest.raises(AlreadyRunning):
+            claim(state, tmp_path / "other.yaml")
+    finally:
+        kill_test_tree(owner)
+    # No release() ran: the operating system releases ownership on a crash.
+    info = claim(state, tmp_path / "replacement.yaml")
+    try:
+        assert info.pid == os.getpid()
+    finally:
+        release(state)
+
+
+def test_concurrent_claimants_cannot_both_start(tmp_path):
+    script = tmp_path / "race.py"
+    script.write_text(
+        "from pathlib import Path\n"
+        "import sys, time\n"
+        "from hermes_fetch_ai import background\n"
+        "root = Path(sys.argv[1]); name = sys.argv[2]\n"
+        "write = background._write_run_file\n"
+        "def slow_write(*args):\n"
+        "    time.sleep(0.25)\n"
+        "    write(*args)\n"
+        "background._write_run_file = slow_write\n"
+        "(root / (name + '.waiting')).touch()\n"
+        "while not (root / 'go').exists(): time.sleep(0.01)\n"
+        "try:\n"
+        "    background.claim(root / 'state', root / 'config.yaml')\n"
+        "    result = 'owner'\n"
+        "except background.AlreadyRunning:\n"
+        "    result = 'refused'\n"
+        "(root / (name + '.result')).write_text(result)\n"
+        "time.sleep(60)\n"
+    )
+    contenders = [
+        subprocess.Popen([sys.executable, str(script), str(tmp_path), str(n)]) for n in range(3)
+    ]
+    try:
+        deadline = time.monotonic() + 30
+        while len(list(tmp_path.glob("*.waiting"))) < 3 and time.monotonic() < deadline:
+            time.sleep(0.05)
+        assert len(list(tmp_path.glob("*.waiting"))) == 3
+        (tmp_path / "go").touch()
+        while len(list(tmp_path.glob("*.result"))) < 3 and time.monotonic() < deadline:
+            time.sleep(0.05)
+        results = [path.read_text() for path in tmp_path.glob("*.result")]
+        assert sorted(results) == ["owner", "refused", "refused"]
+    finally:
+        for process in contenders:
+            kill_test_tree(process)
+
+
+def test_stop_does_not_signal_a_reused_pid(tmp_path):
+    stranger = sleeper()
+    try:
+        # It even has the old bridge's command line, but is a new process.
+        run = {
+            "pid": stranger.pid,
+            "started": time.time() - 60,
+            "created": psutil.Process(stranger.pid).create_time() - 60,
+            "config": "old.yaml",
+        }
+        (tmp_path / RUN_FILE).write_text(json.dumps(run))
+        assert background.stop(tmp_path, wait=0) == 0
+        assert stranger.poll() is None
+        assert not (tmp_path / STOP_FILE).exists()
+    finally:
+        stranger.kill()
+        stranger.wait(timeout=10)
+
+
+@pytest.mark.parametrize("payload", ["stop", "{}", "null", "[]"])
+def test_legacy_or_malformed_stop_requests_cannot_stop_a_bridge(tmp_path, payload):
+    (tmp_path / STOP_FILE).write_text(payload)
+    assert not background.stop_requested(tmp_path)
+
+
+def test_a_stop_request_for_a_previous_process_cannot_stop_its_successor(tmp_path):
+    info = claim(tmp_path, tmp_path / "config.yaml")
+    try:
+        stale = background.RunInfo(
+            pid=info.pid,
+            started=info.started - 60,
+            created=info.created - 60,
+            config=info.config,
+        )
+        background.request_stop(tmp_path, stale)
+        assert not background.stop_requested(tmp_path)
+        background.request_stop(tmp_path, info)
+        assert background.stop_requested(tmp_path)
+    finally:
+        release(tmp_path)

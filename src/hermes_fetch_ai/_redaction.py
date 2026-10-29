@@ -9,8 +9,8 @@ REDACTED = "[REDACTED]"
 SECRET_WORDS = r"seed|secret|token|api[_-]?key|password|mailbox[_-]?key"
 _SENSITIVE_KEY = re.compile(rf"(?i)({SECRET_WORDS})")
 _SENSITIVE_KV = re.compile(
-    rf"(?i)\b({SECRET_WORDS})(\s*[:=]\s*)"
-    r"(\"[^\"]*\"|'[^']*'|[^,'\";}\]\r\n]+)"
+    rf"(?i)\b({SECRET_WORDS})([\"']?\s*[:=]\s*)"
+    r"(\"(?:\\.|[^\"\\])*\"|'(?:\\.|[^'\\])*'|[^,'\";}\]\r\n]+)"
 )
 _PATTERNS = [
     re.compile(r"Bearer\s+[A-Za-z0-9._~+/=-]+", re.IGNORECASE),
@@ -24,7 +24,13 @@ _PATTERNS = [
 
 def redact_text(s: str) -> str:
     out = str(s)
-    out = _SENSITIVE_KV.sub(lambda m: f"{m.group(1)}{m.group(2)}{REDACTED}", out)
+
+    def hide(match: re.Match[str]) -> str:
+        value = match.group(3)
+        quote = value[0] if value.startswith(('"', "'")) else ""
+        return f"{match.group(1)}{match.group(2)}{quote}{REDACTED}{quote}"
+
+    out = _SENSITIVE_KV.sub(hide, out)
     for pat in _PATTERNS:
         out = pat.sub(REDACTED, out)
     return out

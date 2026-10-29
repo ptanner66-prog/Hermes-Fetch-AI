@@ -4,11 +4,26 @@
 
 ## Why a sidecar plugin
 
-Hermes pins `mcp==2.0.0` (0.21.5 runs on Python 3.11; `main` has moved to 3.14). The bridge pins `mcp==1.28.1`, the version it is tested with, and supports Python 3.11/3.12, so the two cannot share an environment. A plugin that imported the bridge would have to install it into Hermes' environment, which is why the old `hermes_agent.plugins` entry point never worked with current Hermes.
+Hermes pins `mcp==2.0.0` (0.21.5 runs on Python 3.11; `main` has moved to 3.14). The bridge pins `mcp==1.30.0`, the version it is tested with, and supports Python 3.11/3.12, so the two cannot share an environment. A plugin that imported the bridge would have to install it into Hermes' environment, which is why the old `hermes_agent.plugins` entry point never worked with current Hermes.
 
 The plugin is therefore a stdlib-only wrapper declared with `python_runtime: external`: Hermes installs nothing for it, and the bridge stays in its own environment (installed with `uv tool` or pipx). There is no `pyproject.toml` next to `plugin.yaml`, because Hermes would install one into its own environment.
 
+## Testing an unreleased checkout
+
+From the bridge checkout, run `uv sync --locked --extra dev` with Python 3.11 or
+3.12. Install the local `hermes-plugin/fetchai-bridge` directory with Hermes'
+plugin installer, enable it, and set this plugin's `command` setting to the
+absolute path of `.venv/bin/hermes-fetch-ai` (Windows:
+`.venv/Scripts/hermes-fetch-ai.exe`). The setting is under
+`plugins.entries.fetchai-bridge.settings.command` in Hermes' configuration.
+Run `hermes fetchai-bridge doctor` and `hermes fetchai-bridge demo local`.
+This uses the current checkout; it does not require the unreleased `v1.0.0` tag.
+Keep this test Hermes home separate from your usual home.
+
 ## Install
+
+The release-install flow below requires the tag matching the plugin version to
+have been published.
 
 ```bash
 hermes plugins install ptanner66-prog/Hermes-Fetch-AI/hermes-plugin/fetchai-bridge

@@ -2,7 +2,20 @@
 
 All notable changes are documented here. The project follows [semantic versioning](https://semver.org/).
 
-## Unreleased (after 1.0.0)
+## Unreleased (1.0.0 integration)
+
+### Finishing checks and fixes
+
+- Upgrade MCP to 1.30.0 for upstream security fixes; preserve only the two existing dependency-audit exceptions.
+- Commit the universal dependency lock, use it in CI on every push and PR base, pin Actions by commit, and require full CI and CodeQL before a tagged release can publish.
+- Smoke-install built wheels outside the checkout, checking bundled config, dependency consistency, CLI, and all four offline demos.
+- Preserve unexpired replay/rate history at cache capacity; reject malformed/private protocol-relative URLs and non-finite time settings.
+- Reconcile payments against their locally signed hash and exact ledger transfer; retain unknown payments and their budget across daily resets.
+- Check daily service quota atomically when execution begins; preserve paid retry credit on refusal; total earnings with exact Python integers.
+- Bound local model responses and refuse redirects; clean up Windows service descendants through a Job Object; validate buying-control tokens and response shapes.
+- Hold an operating-system lock for each running bridge and verify process creation identity before stopping it; recognize Windows virtual-environment launcher children.
+- Give MCP startup a separate 60-second budget and apply tool deadlines to both stdio and in-process backends; clean up cancelled startup.
+- Distinguish unreleased source, configured CI, historical reports, and remaining live-service and publication gates.
 
 ### Added
 
@@ -73,7 +86,7 @@ The first release. To release, set the date here and push the `v1.0.0` tag.
 - Seeds come only from `UAGENT_SEED` and must be at least 32 characters; config files that contain credential-shaped values are rejected.
 - With `publish_manifest: false`, the bridge makes no outbound calls of its own: it skips the Almanac contract lookup and the status reports that uAgents otherwise makes for every agent.
 - Hermes' tools server runs without a shell, with an environment allowlist and its stderr discarded.
-- Dependencies pinned to tested versions, including `mcp` 1.28.1 (PYSEC-2026-3483); builds use `setuptools>=83` (PYSEC-2026-3447).
+- Dependencies pinned to tested versions, including `mcp` 1.30.0 (including CVE-2026-116686); builds use `setuptools>=83` (PYSEC-2026-3447).
 
 ### Hermes plugin
 

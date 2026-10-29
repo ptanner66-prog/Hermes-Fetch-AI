@@ -46,6 +46,13 @@ Hermes Fetch AI is an independent community project, not affiliated with or endo
 - To **sell research**: a key from [OpenRouter](https://openrouter.ai), [Anthropic](https://console.anthropic.com), or [ASI:One](https://asi1.ai) (Fetch.ai's own AI model), with a spending limit set there where you can, or a model server on your computer.
 - To **sell code reviews**: [Ollama](https://ollama.com) or another model server on your computer. Buyers' code never leaves it.
 
+## Release availability
+
+This checkout is unreleased. The five-step installer below expects a published
+`v1.0.0` tag; a source checkout and a passing local test run do not create that
+release. Until it is published, use [Try it from a clone](#try-it-from-a-clone).
+For plugin testing, use [the unreleased-checkout instructions](docs/hermes-plugin.md#testing-an-unreleased-checkout).
+
 ## Set up in 5 steps
 
 1. **Add the plugin to Hermes:**
@@ -205,32 +212,39 @@ With Python 3.11 or 3.12:
 ```bash
 git clone https://github.com/ptanner66-prog/Hermes-Fetch-AI
 cd Hermes-Fetch-AI
-python -m pip install -e ".[dev]"
-hermes-fetch-ai doctor
-hermes-fetch-ai demo local      # expect: echo result: hello
-hermes-fetch-ai demo paid       # a sale with a simulated ledger: price, payment, answer
+uv sync --locked --extra dev
+uv run --locked --extra dev hermes-fetch-ai doctor
+uv run --locked --extra dev hermes-fetch-ai demo local      # expect: echo result: hello
+uv run --locked --extra dev hermes-fetch-ai demo paid       # a sale with a simulated ledger: price, payment, answer
 ```
 
 ### Status
+
+The table describes implemented checks and retained historical reports. It is
+not evidence that CI is green for this checkout. On 2026-10-29, no workflow runs
+or status checks were available for the inspected PR #28 head. The workflows now
+cover every push and PR base, including stacked PRs; check their results on the
+final release commit. Dated 2026-10-06 manual reports below have not been repeated
+as part of this local finishing pass.
 
 | Tier | What it proves | State |
 |------|----------------|-------|
 | Local end-to-end | Client uAgent -> bridge uAgent -> MCP tool -> response, through the real uAgents dispatcher | CI on Linux, macOS, and Windows with Python 3.11/3.12 |
 | Real HTTP serve | A separate bridge process, signed HTTP envelopes, fake tools and a stdio MCP server, the example client, and graceful shutdown on SIGTERM (Linux/macOS) and CTRL_BREAK (Windows) | CI; `tests/test_serve_http_roundtrip.py` |
 | Hermes-backed | Real Hermes tools through `agent.transports.hermes_tools_mcp_server` as a stdio subprocess | CI against Hermes 0.21.5 and a pinned `main`; also passed by hand against v0.16.x ([`docs/demo.md`](docs/demo.md)) |
-| Hermes plugin | The plugin loads in real Hermes and runs the bridge; setup keeps the agent's key in Hermes' `.env` | CI against Hermes 0.21.5 and a pinned `main`: `hermes plugins validate --install-deps` and `hermes plugins doctor --ci` pass, `hermes fetchai-bridge doctor` and `demo local` work, and the key lands in Hermes' `.env`. By hand: setup, start, status, and stop through both versions |
+| Hermes plugin | The plugin loads in real Hermes and runs the bridge; setup keeps the agent's key in Hermes' `.env` | Configured CI checks against Hermes 0.21.5 and pinned `main`: plugin validation/doctor, CLI, and secret persistence. Historical manual report: setup, start, status, and stop through both versions |
 | Background running | `start`, `status`, `logs`, `stop`, `restart`, with one bridge per records folder | CI on Linux, macOS, and Windows (`tests/test_background.py`); `status` read the real testnet by hand |
 | Agentverse mailbox | A remote uAgent reaches the bridge through Agentverse | Manual and not yet verified end to end; [`docs/agentverse-mailbox.md`](docs/agentverse-mailbox.md) |
 | Paid services | A bridge process sells a service: price, a payment verified on the ledger, one run, replays refused | CI against a ledger on 127.0.0.1 (`tests/test_serve_paid.py`); by hand on Fetch's testnet, including replayed, copied, underpaid, and wrong-memo payments ([results](docs/payments.md#tested-on-the-real-testnet)) |
 | Chat and ASI:One | A chat buyer orders in plain text, pays without a memo, and gets the answer | CI between two real uAgents in one process (`tests/test_chat_flow.py`, `demo chat`); a live test with a real ASI:One user is pending ([`docs/asi-one.md`](docs/asi-one.md#what-is-tested)) |
 | Buying | Hermes finds, messages, and pays another agent, with the owner approving each payment | CI: two bridges in one process (`demo buy`); the plugin's YOLO check and payment prompt inside real Hermes 0.21.5 and `main`. By hand on Fetch's testnet: a whole purchase between two bridges ([results](docs/buying.md#what-is-tested)). The prompt answered by a person is pending |
-| Live testnet | The same paths against Fetch's real Dorado testnet, its faucet, and Agentverse | Opt-in tests (`HERMES_FETCH_LIVE_TESTNET=1`, [`tests/test_live_testnet.py`](tests/test_live_testnet.py)), also as the manual "Live testnet" workflow: the ledger reader, a payment the bridge sends, a paid call to a running bridge (a stranger, an underpayment, a wrong memo, and a replay after a restart refused), a purchase between two bridges through chat, and Agentverse search. All passed on 2026-10-06 |
+| Live testnet | The same paths against Fetch's real Dorado testnet, its faucet, and Agentverse | Opt-in tests (`HERMES_FETCH_LIVE_TESTNET=1`, [`tests/test_live_testnet.py`](tests/test_live_testnet.py)), also as the manual "Live testnet" workflow: the ledger reader, a payment the bridge sends, a paid call to a running bridge (a stranger, an underpayment, a wrong memo, and a replay after a restart refused), a purchase between two bridges through chat, and Agentverse search. Historical report: all passed on 2026-10-06; not rerun for this checkout |
 | Guest Hermes | A paid request runs in a separate, throwaway Hermes with only the service's tools | CI against Hermes 0.21.5 and a pinned `main` with a stand-in model server: only the web tools offered, a terminal call refused, a page on 127.0.0.1 not fetched (`tests/test_field_guest_hermes.py`) |
 
 ### Hermes compatibility
 
-- **Tested Hermes versions.** CI runs the plugin checks and the field tests against Hermes 0.21.5, the latest release (Python 3.11), and a pinned `main` (`bb236287`, Python 3.14). Both pin mcp 2.0.0. This package's mcp 1.28.1 client negotiates MCP protocol `2025-11-25`, which the mcp 2.0 server accepts.
-- **Separate environments by design.** Hermes pins `mcp==2.0.0`, and `main` supports only Python 3.14. This package pins `mcp==1.28.1`, the version it is tested with, and supports Python 3.11/3.12, so the two cannot share an environment today; the plugin keeps them apart.
+- **Tested Hermes versions.** CI runs the plugin checks and the field tests against Hermes 0.21.5, the pinned supported release (Python 3.11), and a pinned `main` (`bb236287`, Python 3.14). Both pin mcp 2.0.0. On 2026-10-29, the bridge's MCP 1.30.0 client passed the real field tests and native plugin checks against both isolated Hermes installations. See the [dated integration verification](docs/verification-2026-10-29.md) for results and remaining live-service gates.
+- **Separate environments by design.** Hermes pins `mcp==2.0.0`, and `main` supports only Python 3.14. This package pins `mcp==1.30.0`, the version it is tested with, and supports Python 3.11/3.12, so the two cannot share an environment today; the plugin keeps them apart.
 
 ### Documentation
 
@@ -257,7 +271,7 @@ hermes-fetch-ai demo paid       # a sale with a simulated ledger: price, payment
 ### Roadmap
 
 - [ ] Release `v1.0.0` and publish to PyPI.
-- [x] Catalog-ready Hermes plugin ([`hermes-plugin/fetchai-bridge`](hermes-plugin/fetchai-bridge)), checked against real Hermes in CI.
+- [x] Catalog-ready Hermes plugin ([`hermes-plugin/fetchai-bridge`](hermes-plugin/fetchai-bridge)), with configured checks against real Hermes.
 - [ ] Submit the `plugin-catalog` entry to hermes-agent. Draft and steps: [`docs/upstream-hermes-pr.md`](docs/upstream-hermes-pr.md).
 - [ ] Offer Hermes Agent and Fetch.ai the other contributions in [`upstream/`](upstream/README.md).
 - [x] Sell services you define to other agents for FET, with each payment verified on the ledger (testnet; unreleased).

@@ -413,11 +413,12 @@ async def test_an_unknown_outcome_waits_and_is_never_resent(tmp_path):
         assert market.buyer_store.spent_since(0) == shown.amount_base
         with pytest.raises(PurchaseRefused, match="needs_review"):
             await market.approve(shown)
-        # Not on the ledger: it stays waiting, then is given up on.
+        # Not on the ledger is not proof it cannot arrive later: keep its reservation.
         assert (await market.buyer.check(shown.id)).status == "needs_review"
         market.clock.now += 3601
-        given_up = await market.buyer.check(shown.id)
-        assert given_up.status == "failed" and "never appeared" in given_up.note
+        still_unknown = await market.buyer.check(shown.id)
+        assert still_unknown.status == "needs_review"
+        assert market.buyer_store.spent_since(0) == shown.amount_base
         assert not any(isinstance(m, CommitPayment) for m in market.to_seller)
     finally:
         market.close()

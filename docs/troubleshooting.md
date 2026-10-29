@@ -126,7 +126,7 @@ An installed dependency differs from the version this release was tested with. R
 
 - `command not found`: `hermes_mcp.command` does not exist. Use the absolute path to the Python interpreter of the environment where `hermes-agent` is installed.
 - `McpError: Connection closed`: the server exited during startup, usually because `agent.transports.hermes_tools_mcp_server` does not import in that environment (see [`not importable`](#hermes_tools_server-not-importable)).
-- `timed out`: the server did not finish starting within `hermes_mcp.timeout_seconds`. Importing Hermes can take several seconds on a cold start; raise the timeout if it only fails the first time.
+- `timed out`: the server did not finish starting within `hermes_mcp.startup_timeout_seconds` (60 seconds by default). Importing Hermes can be slow on a cold start. Increase this startup budget, up to 300 seconds, if needed; ordinary tool calls keep their separate `timeout_seconds` limit.
 
 The server's stderr is discarded on purpose, because it is outside the bridge's redaction. The message names the command to run by hand to see the error, for example `/path/to/hermes-venv/bin/python -m agent.transports.hermes_tools_mcp_server`.
 
