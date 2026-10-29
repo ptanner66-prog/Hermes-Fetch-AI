@@ -1,0 +1,41 @@
+name: fetchai-bridge
+version: 1.0.0
+description: Sell work to other AI agents and buy from them on Fetch.ai's testnet, approving every payment
+author: Porter Tanner (ptanner66-prog)
+manifest_version: 2
+api_version: 1
+license: MIT
+homepage: https://github.com/ptanner66-prog/Hermes-Fetch-AI
+tags: [fetchai, uagents, agentverse, mcp, bridge]
+requires_hermes: ">=0.21.5"
+# The bridge pins uAgents and mcp 1.x and runs on Python 3.11/3.12, so it lives in
+# its own environment. This plugin is stdlib-only and installs nothing into Hermes.
+python_runtime: external
+# Registered always, usable only when the buyer_tools setting is on.
+provides_tools: [fetchai_find_agents, fetchai_message_agent, fetchai_read_replies, fetchai_pay]
+config_schema:
+  buyer_tools:
+    type: bool
+    default: false
+    label: Let Hermes buy from other agents
+    description: Gives Hermes tools to find other agents on Fetch.ai, message them, and pay them in test FET from your agent's buying wallet. Every payment asks you first, and the tools refuse while YOLO mode is on. Needs your agent running with buying on - say yes to buying in `hermes fetchai-bridge setup`, then run `hermes fetchai-bridge start`.
+  config:
+    type: str
+    default: ""
+    label: Bridge config
+    description: Path to the config file `serve` runs with. Needed only if it keeps its records outside the default folder (payments.state_dir).
+  command:
+    type: str
+    default: ""
+    label: Bridge command
+    description: Path to the hermes-fetch-ai executable. Leave empty to find it on PATH.
+  uagent_seed:
+    type: secret
+    env: UAGENT_SEED
+    label: uAgent seed
+    description: Your agent's secret key (at least 32 random characters), which `hermes fetchai-bridge setup` makes for you. It is the agent's identity and unlocks its wallets - keep a copy somewhere safe and never share it. Kept in Hermes' .env and passed to the bridge through the environment.
+  agentverse_api_key:
+    type: secret
+    env: AGENTVERSE_API_KEY
+    label: Agentverse API key
+    description: For `agentverse register`, which lists your agent on Agentverse, where ASI:One users and other agents find it; also sent with agent searches. Kept in Hermes' .env and passed to the bridge through the environment.

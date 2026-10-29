@@ -2,34 +2,48 @@
 
 Hermes Fetch AI has three layers:
 
-1. Fetch/uAgents identity and messaging provide signed sender addresses and delivery.
-2. The bridge filters list/call messages through policy, replay protection, argument validation, redaction, audit, and output normalization.
-3. Hermes or fake MCP tools execute locally behind the shim.
+1. Fetch.ai's uAgents provide identity (signed sender addresses) and message delivery.
+2. The bridge passes every `ListTools`/`CallTool` message through rate limits, policy, replay protection, and argument checks, caps the response size, and writes a redacted audit record.
+3. Hermes' tools MCP server, or the built-in fake tools, run the tool locally behind the MCP shim.
 
 Message flow:
 
 ```text
 sender
   -> signed uAgent MCP message
-  -> bridge policy/rate-limit/replay gate
-  -> JSON-schema + URL/shell argument validation
+  -> rate limits, default-deny policy, replay protection
+  -> JSON-schema + URL/shell argument checks
   -> MCP shim
-  -> local Hermes/fake tool
-  -> result normalizer/redactor
-  -> bounded response + audit event
+  -> Hermes tools server (stdio subprocess) or fake tools
+  -> result normalizer (size cap)
+  -> response + audit record
 ```
 
 Trust boundaries:
 
-- Sender address is not enough to authorize a tool call.
-- Tool inventory is filtered and rate-limited because list responses can disclose capability information.
-- `CallTool` is replay-protected at the bridge boundary before tool invocation.
-- MCP subprocesses run with `shell=False`, a filtered environment, and stderr separated from protocol output.
-- Hosted registration is disabled in local configs.
-- Production seed material comes from the environment only.
+- A signed sender address identifies the caller but authorizes nothing by itself.
+- The tool list is filtered and rate-limited, because it discloses what the local install can do.
+- `CallTool` is replay-protected at the bridge, before any tool runs.
+- Hermes' tools server runs as a separate process with `shell=False`, a filtered environment, and stderr kept apart from the protocol stream.
+- Almanac registration is off in the example configs, and a private bridge makes no outbound calls of its own.
+- Seeds come from the environment only.
 
-The production-preferred Hermes seam is the Hermes tools MCP server launched as a hardened stdio subprocess (`examples/hermes-stdio.yaml`); the in-process builder is a demo fallback. Existing Fetch, Hermes, and MCP rails are sufficient for v1. The bridge only connects them with local policy and audit.
+## Design decisions
 
-`MCPServerAdapter.protocols` is not used as the v1 security boundary because it exposes protocol behavior before this package's policy checks. Chat is out of v1 scope to keep the surface narrow.
+1. **v1 is MCP over uAgents.** The bridge speaks Fetch's published MCP message models (`ListTools`/`CallTool` from `uagents_adapter.mcp.protocol`) over signed uAgents envelopes. It imports only the message models and spec, not `MCPServerAdapter`, whose protocols would sit in front of this package's policy checks and pull in the chat protocol.
+2. **The Hermes integration point is the tools MCP server, run as a separate process.** `python -m agent.transports.hermes_tools_mcp_server` serves Hermes' curated tool registry over stdio. Running it as a child process (`shell=False`, a static command, an environment allowlist, timeouts, stderr discarded) keeps Hermes execution out of the network-facing uAgent process. The in-process mode is a fallback for hermes-agent v0.16.x because it calls a private Hermes function.
+3. **Hermes' conversations surface is permanently out of scope.** `hermes mcp serve` exposes conversation reads, message sends, and permission approvals. Bridging those onto an agent network would let remote agents read private conversations or act as the operator.
+4. **Hermes-backed configs are default deny.** `skills_list` is the only public tool. `skill_view` (full skill content) and every other tool the server offers are denylisted by exact name, and the denylist wins over any allowlist.
+5. **Chat comes in through the same bridge agent, with its own boundary.** v1 excluded Fetch's Agent Chat Protocol because free-text requests from strangers need their own threat model. The agent-economy work adds it (decision 9): a chat request never reaches the owner's Hermes; it is answered by a service runner with a fixed, small set of tools. Fetch's A2A inbound adapter, which is also built around the chat protocol, stays out.
+6. **A private bridge stays silent.** uAgents looks up the Almanac contract on the Fetch ledger whenever an agent is created, and reports every agent as active at startup and inactive at shutdown through Agentverse's Almanac API, even when registration is disabled. With `publish_manifest: false`, the bridge uses `PrivateAgent`, which skips both, so it makes no outbound calls of its own. Tests check both the private and the published case.
+7. **The Hermes plugin is a sidecar, not an in-process integration.** Hermes pins `mcp==2.0.0`, while this package pins `mcp==1.30.0` (the version it is tested with) and supports Python 3.11/3.12, so they cannot share an environment. The `fetchai-bridge` directory plugin is stdlib-only (`python_runtime: external`): it runs the separately installed `hermes-fetch-ai` and hands it Hermes' interpreter, so `serve` starts the tools server the way Hermes does. An in-process plugin would have forced the bridge's dependencies into Hermes' environment. See [`hermes-plugin.md`](hermes-plugin.md).
+8. **Policy state belongs to a protocol instance.** Rate-limit windows and the replay cache live in a `PolicyState` that `build_protocol` creates, not in module globals, so two bridges in one process, or two tests, never share state.
+9. **Agent economy, testnet only.** Hermes sells services the owner defines (not raw tool calls) to other agents over MCP calls and to ASI:One users through the chat protocol, for FET, and buys from other agents through the plugin's tools, with the owner approving each payment in Hermes' confirmation prompt ([`buying.md`](buying.md)). A published bridge registers through the Almanac API only, so it never spends from its wallet on its own. Fetch's Agent Payment Protocol defines the messages but leaves verification to the seller, so the bridge reads each transaction from the ledger itself and binds it to a signed quote: the right recipient, denomination and amount (exact integers, never the buyer's stated figure), a memo or amount tag matching the quote, a block time inside the quote's window, and a transaction hash that can be used only once, recorded in a database that survives restarts. Every payment Hermes makes asks the owner first, YOLO mode included. Mainnet stays locked until a security review. The design and its status are in [`agent-economy.md`](agent-economy.md).
+10. **Hermes works for strangers only as a throwaway guest.** A service that needs Hermes itself (research with web search) runs `hermes chat` once per request in a new Hermes home that is deleted afterwards, with settings the bridge writes: only the service's toolsets, every other toolset switched off by name, no memory or self-review, no private network addresses, no installs. Hermes' `--safe-mode` is not used because it also drops the plugins that provide web search; `--ignore-user-config` is not used because Hermes still reads the home's settings for approvals, web backends, and the private-address switch. A fresh home per request also keeps buyers' requests off disk and from reaching later buyers. See [`guest-hermes.md`](guest-hermes.md).
 
-A2A exposure, if added later, goes through Fetch's official A2A inbound adapter in front of this same bridge agent, never a hand-rolled protocol server. See `research/PRODUCTION_DECISION.md`.
+## Failure behavior
+
+- If Hermes' tools server cannot start (bad command, crash on import, initialize timeout), `serve` exits with status 1 and `hermes backend: FAIL` instead of serving an empty tool list, so a supervisor such as systemd can restart it or alert. If the HTTP server cannot start (the port is taken), `serve` exits with status 1 and `serve: FAIL`.
+- If the backend stops responding after startup, `ListTools` and `CallTool` return `backend unavailable`, the audit log records `decision: error`, and the bridge logs the failure.
+- A backend transport error during a call returns `tool call failed`; the details go to the bridge's log.
+- Unexpected exceptions while handling `CallTool` return a generic `internal bridge error`; the traceback goes to the bridge's redacted log with the audit record's `trace_id`.

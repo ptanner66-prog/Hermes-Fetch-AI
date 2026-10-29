@@ -1,6 +1,7 @@
 import pytest
 from uagents import Agent, Protocol
 from uagents.dispatch import dispatcher
+from uagents.registration import AlmanacApiRegistrationPolicy
 from uagents_adapter.mcp.protocol import CallTool, mcp_protocol_spec
 
 from hermes_fetch_ai.audit import AuditWriter
@@ -13,10 +14,6 @@ from hermes_fetch_ai.uagent_app import build_agent, local_dispatch_request
 
 def cfg():
     return BridgeConfig(agent={"dev_random_seed": True}, policy={"public_tools": ["echo"]})
-
-
-def test_noop_registration_policy_noops():
-    assert NoopRegistrationPolicy().should_register() is False
 
 
 @pytest.mark.asyncio
@@ -37,17 +34,24 @@ def test_build_agent_wires_noop_registration_policy_when_not_publishing(monkeypa
             captured["included_protocol"] = protocol
             captured["include_publish_manifest"] = publish_manifest
 
-    monkeypatch.setattr("hermes_fetch_ai.uagent_app.Agent", FakeAgent)
+    monkeypatch.setattr("hermes_fetch_ai.uagent_app.PrivateAgent", FakeAgent)
     c = cfg()
     build_agent(c, object())
     assert isinstance(captured["registration_policy"], NoopRegistrationPolicy)
+    assert captured["mark_inactive_on_shutdown"] is False
     assert captured["network"] == "testnet"
     assert captured["enable_agent_inspector"] is False
     assert captured["publish_agent_details"] is False
     assert captured["include_publish_manifest"] is False
 
 
-def test_build_agent_keeps_ledger_registration_policy_when_publishing(monkeypatch):
+@pytest.mark.parametrize(
+    ("ledger_registration", "agent_class", "policy"),
+    [(False, "ApiRegisteredAgent", AlmanacApiRegistrationPolicy), (True, "Agent", None)],
+)
+def test_build_agent_registration_policy_when_publishing(
+    monkeypatch, ledger_registration, agent_class, policy
+):
     captured = {}
 
     class FakeAgent:
@@ -59,14 +63,46 @@ def test_build_agent_keeps_ledger_registration_policy_when_publishing(monkeypatc
         def include(self, protocol, publish_manifest=False):
             captured["include_publish_manifest"] = publish_manifest
 
-    monkeypatch.setattr("hermes_fetch_ai.uagent_app.Agent", FakeAgent)
+    monkeypatch.setattr(f"hermes_fetch_ai.uagent_app.{agent_class}", FakeAgent)
     c = cfg()
     c.agent.publish_manifest = True
+    c.agent.ledger_registration = ledger_registration
     build_agent(c, object())
-    # Hosted mode must leave registration to uAgents' default ledger-backed
-    # policy so a funded wallet can pay Almanac registration.
-    assert "registration_policy" not in captured
+    if policy is None:
+        # Opted in: uAgents' default policy, which a funded wallet pays the contract with.
+        assert "registration_policy" not in captured
+    else:
+        # The default: the Almanac API only, so the wallet is never spent on its own.
+        assert isinstance(captured["registration_policy"], policy)
     assert captured["include_publish_manifest"] is True
+
+
+async def _start_and_stop(agent):
+    try:
+        await agent.run_startup_tasks()
+        await agent._shutdown([])
+    finally:
+        dispatcher.unregister(agent.address, agent)
+
+
+@pytest.mark.asyncio
+async def test_private_bridge_never_contacts_the_almanac(almanac_calls):
+    await _start_and_stop(build_agent(cfg(), object()))
+    assert almanac_calls == []
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("ledger_registration", "calls"),
+    [(False, ["active", "inactive"]), (True, ["contract lookup", "active", "inactive"])],
+)
+async def test_published_bridge_uses_the_almanac(almanac_calls, ledger_registration, calls):
+    c = cfg()
+    c.agent.publish_manifest = True
+    c.agent.ledger_registration = ledger_registration
+    await _start_and_stop(build_agent(c, object()))
+    # The Almanac contract (on the ledger) is looked up only when the owner opts in.
+    assert almanac_calls == calls
 
 
 def test_protocol_signed_handlers_and_no_adapter_or_chat():
@@ -86,7 +122,11 @@ def test_exactly_one_bridge_protocol_shape():
 
 
 @pytest.mark.asyncio
-async def test_client_list_and_call_succeeds_via_local_dispatcher(tmp_path, monkeypatch):
+async def test_client_list_and_call_succeeds_via_local_dispatcher(
+    tmp_path, monkeypatch, almanac_calls
+):
+    # almanac_calls: the client is a plain uAgents agent, which would look up the Almanac
+    # contract on the real testnet through gRPC, which the network guard cannot see.
     dispatched = {"count": 0}
     original_dispatch = dispatcher.dispatch_msg
 

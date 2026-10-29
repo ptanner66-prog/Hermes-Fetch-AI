@@ -1,0 +1,169 @@
+--- a/fet-example/payment.py
++++ b/fet-example/payment.py
+@@ -23,6 +23,7 @@
+ )
+ 
+ from shared import create_text_chat
++from verify import fet_to_base, normalize_tx_hash, paid_to
+ 
+ _agent_wallet = None
+ 
+@@ -46,9 +47,14 @@
+     logger,
+     use_mainnet: bool = False,
+ ) -> bool:
+-    """Verify FET payment transaction on Fetch.ai network."""
++    """Verify on the Fetch.ai ledger that `transaction_id` paid this agent `expected_amount_fet`.
++
++    `expected_amount_fet` is the seller's own price, never the amount the buyer's
++    CommitPayment states.
++    """
+     try:
+         from cosmpy.aerial.client import LedgerClient, NetworkConfig
++        from cosmpy.protos.cosmos.tx.v1beta1.service_pb2 import GetTxRequest
+ 
+         use_testnet = not use_mainnet
+         testnet = os.getenv("FET_USE_TESTNET", "true").lower() == "true" if not use_mainnet else False
+@@ -59,7 +65,7 @@
+             else NetworkConfig.fetchai_mainnet()
+         )
+         ledger = LedgerClient(network_config)
+-        expected_amount_micro = int(float(expected_amount_fet) * 10**18)
++        expected_amount = fet_to_base(expected_amount_fet)
+         
+         if not recipient_agent_wallet:
+             logger.error("Recipient agent wallet is not set")
+@@ -72,38 +78,22 @@
+             f"to {expected_recipient} on {'testnet' if testnet else 'mainnet'}"
+         )
+         
+-        tx_response = ledger.query_tx(transaction_id)
+-        if not tx_response.is_successful():
++        # The whole transaction, with its messages: query_tx() merges the events of each
++        # type, so with several transfers in one transaction it shows only the last.
++        response = ledger.txs.GetTx(GetTxRequest(hash=transaction_id))
++        if response.tx_response.code != 0:
+             logger.error(f"Transaction {transaction_id} was not successful")
+             return False
+-            
+-        recipient_found = False
+-        amount_found = False
+-        sender_found = False
++
+         denom = "atestfet" if testnet else "afet"
+-        
+-        for event_type, event_attrs in tx_response.events.items():
+-            if event_type == "transfer":
+-                if event_attrs.get("recipient") == expected_recipient:
+-                    recipient_found = True
+-                    if event_attrs.get("sender") == sender_fet_address:
+-                        sender_found = True
+-                    amount_str = event_attrs.get("amount", "")
+-                    if amount_str and amount_str.endswith(denom):
+-                        try:
+-                            amount_value = int(amount_str.replace(denom, ""))
+-                            if amount_value >= expected_amount_micro:
+-                                amount_found = True
+-                        except Exception:
+-                            pass
+-                            
+-        if recipient_found and amount_found and sender_found:
++        paid = paid_to(response.tx, expected_recipient, sender_fet_address, denom)
++        if paid >= expected_amount:
+             logger.info(f"Payment verified: {transaction_id}")
+             return True
+-            
++
+         logger.error(
+-            f"Payment verification failed - recipient: {recipient_found}, "
+-            f"amount: {amount_found}, sender: {sender_found}"
++            f"Payment verification failed - paid {paid}{denom} from {sender_fet_address}, "
++            f"price {expected_amount}{denom}"
+         )
+         return False
+     except Exception as e:
+@@ -205,18 +195,27 @@
+                 buyer_fet_wallet = msg.metadata.get("buyer_fet_wallet") or msg.metadata.get(
+                     "buyer_fet_address"
+                 )
++            tx_hash = normalize_tx_hash(msg.transaction_id)
++            used_key = f"fet_tx_used:{tx_hash}"
+             if not buyer_fet_wallet:
+                 ctx.logger.error("Missing buyer_fet_wallet in CommitPayment.metadata")
++            elif ctx.storage.get(used_key):
++                ctx.logger.error(f"Transaction {tx_hash} has already paid for a request")
+             else:
+                 use_testnet = os.getenv("FET_USE_TESTNET", "true").lower() == "true"
+                 payment_verified = verify_fet_payment_to_agent(
+-                    transaction_id=msg.transaction_id,
+-                    expected_amount_fet=str(msg.funds.amount),
++                    transaction_id=tx_hash,
++                    # The price this agent asked for in RequestPayment, not the amount
++                    # the buyer says it paid.
++                    expected_amount_fet=os.getenv("FIXED_FET_AMOUNT", "0.1"),
+                     sender_fet_address=buyer_fet_wallet,
+                     recipient_agent_wallet=_agent_wallet,
+                     logger=ctx.logger,
+                     use_mainnet=not use_testnet,
+                 )
++                if payment_verified:
++                    # Recorded before anything else runs, so one transaction pays once.
++                    ctx.storage.set(used_key, f"{sender}:{ctx.session}")
+         except Exception as e:
+             ctx.logger.error(f"FET verify error: {e}")
+     else:
+--- /dev/null
++++ b/fet-example/verify.py
+@@ -0,0 +1,52 @@
++"""Checks for a FET payment, read from the ledger rather than taken from the buyer.
++
++A buyer's CommitPayment says what it paid. Before delivering, check the
++transaction itself: it succeeded, its bank sends move at least the seller's own
++price, in the right denomination, from the buyer's wallet to the seller's, and
++it has not paid for an earlier request (see handle_commit_payment).
++"""
++
++from decimal import Decimal, InvalidOperation
++
++FET_DECIMALS = 18  # 1 FET = 10**18 afet (atestfet on the testnet)
++MSG_SEND = "/cosmos.bank.v1beta1.MsgSend"
++
++
++def fet_to_base(amount: str) -> int:
++    """An amount in FET, such as "0.1", in afet, exactly. float("1.1") * 10**18 is off by 128."""
++    try:
++        value = Decimal(str(amount))
++    except InvalidOperation:
++        raise ValueError(f"not an amount: {amount!r}") from None
++    if not value.is_finite() or value <= 0:
++        raise ValueError(f"not a FET amount: {amount!r}")
++    base = value.scaleb(FET_DECIMALS)
++    if base != base.to_integral_value():
++        raise ValueError(f"more than {FET_DECIMALS} decimals: {amount!r}")
++    return int(base)
++
++
++def normalize_tx_hash(transaction_id: str) -> str:
++    """A transaction hash as the ledger writes it: 64 hex digits, upper case."""
++    tx_hash = transaction_id.strip().upper().removeprefix("0X")
++    if len(tx_hash) != 64 or any(c not in "0123456789ABCDEF" for c in tx_hash):
++        raise ValueError(f"not a transaction hash: {transaction_id!r}")
++    return tx_hash
++
++
++def paid_to(tx, recipient: str, sender: str, denom: str) -> int:
++    """How much of `denom` the transaction's bank sends move from `sender` to `recipient`.
++
++    `tx` is the transaction itself (GetTxResponse.tx), not query_tx()'s summary,
++    which merges the events of each type and so shows only one of several transfers.
++    """
++    from cosmpy.protos.cosmos.bank.v1beta1.tx_pb2 import MsgSend
++
++    total = 0
++    for message in tx.body.messages:
++        if message.type_url != MSG_SEND:
++            continue
++        send = MsgSend.FromString(message.value)
++        if send.from_address == sender and send.to_address == recipient:
++            total += sum(int(coin.amount) for coin in send.amount if coin.denom == denom)
++    return total

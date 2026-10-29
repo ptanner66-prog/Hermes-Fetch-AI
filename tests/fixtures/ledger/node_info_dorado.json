@@ -1,0 +1,12 @@
+{
+  "application_version": {
+    "app_name": "<appd>",
+    "name": "fetch",
+    "version": "v0.15.0"
+  },
+  "default_node_info": {
+    "moniker": "rest0",
+    "network": "dorado-1",
+    "version": "0.38.19"
+  }
+}

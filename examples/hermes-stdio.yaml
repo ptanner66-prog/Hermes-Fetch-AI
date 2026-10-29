@@ -1,9 +1,11 @@
-# Production-preferred Hermes-backed config (see research/PRODUCTION_DECISION.md).
-# Launches the Hermes tools MCP server as an isolated stdio subprocess.
-# Set `command` to the python interpreter of the environment where hermes-agent
-# is installed. Field-tested against hermes-agent v0.16.x (docs/demo.md).
-# Note: the Hermes server wraps tool arguments in one required `kwargs` object,
-# so callers send args={"kwargs": {...}} per the served inputSchema.
+# Production-preferred Hermes-backed config (see docs/architecture.md).
+# Starts Hermes' tools MCP server as a separate stdio subprocess.
+# Field-tested against hermes-agent v0.16.x, 0.21.5, and main bb236287;
+# see docs/demo.md.
+# The bridge identity comes from UAGENT_SEED (at least 32 characters); this
+# config refuses to start without it so the agent address stays stable.
+# Callers must follow the served inputSchema: hermes-agent v0.16.x wrapped tool
+# arguments in one required `kwargs` object; newer releases serve flat arguments.
 version: 1
 agent:
   name: hermes_fetch_hermes_stdio
@@ -12,17 +14,22 @@ agent:
   mode: endpoint
   publish_manifest: false
   enable_agent_inspector: false
-  dev_random_seed: true
+  dev_random_seed: false
 hermes_mcp:
   mode: stdio
-  command: python
+  # Through `hermes fetchai-bridge serve`, leave `command` unset: the Hermes
+  # plugin passes Hermes' own interpreter and import path. When running
+  # `hermes-fetch-ai serve` directly, set it to the Python interpreter of the
+  # Hermes environment:
+  # command: /path/to/hermes/venv/bin/python
   args: ["-m", "agent.transports.hermes_tools_mcp_server"]
   timeout_seconds: 20
 policy:
   public_tools:
     - skills_list
-  # Explicit denylist of every other tool exposed by hermes-agent v0.16.0
-  # (denylist wins even if a sender allowlist is added later).
+  # Every other tool the Hermes tools server can serve (EXPOSED_TOOLS in
+  # hermes-agent 0.21.5 and main bb236287), plus terminal and file tools in case
+  # a future server adds them. The denylist wins even over a sender allowlist.
   denied_tools:
     - skill_view
     - web_search
@@ -42,6 +49,9 @@ policy:
     - text_to_speech
     - kanban_complete
     - kanban_block
+    - kanban_schedule
+    - kanban_request_review
+    - kanban_request_changes
     - kanban_comment
     - kanban_heartbeat
     - kanban_show
@@ -49,7 +59,8 @@ policy:
     - kanban_create
     - kanban_unblock
     - kanban_link
-logging:
-  redaction: true
+    - terminal
+    - patch
+    - write_file
 chat:
   enable_chat: false

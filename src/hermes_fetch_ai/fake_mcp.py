@@ -1,10 +1,10 @@
 from __future__ import annotations
 
-from typing import Any
+from typing import Any, ClassVar
 
 
 class FakeFastMCP:
-    tools = {
+    tools: ClassVar[dict[str, dict[str, Any]]] = {
         "echo": {
             "name": "echo",
             "description": "Return the supplied text.",
@@ -36,5 +36,5 @@ class FakeFastMCP:
         raise ValueError(f"unknown tool: {name}")
 
 
-def _build_fake_server() -> FakeFastMCP:
+def build_fake_server() -> FakeFastMCP:
     return FakeFastMCP()

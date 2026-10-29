@@ -1,0 +1,47 @@
+name: Live testnet
+
+# The opt-in tests against Fetch's Dorado testnet, its faucet, and agentverse.ai
+# (tests/test_live_testnet.py). Run by hand only: Actions, "Live testnet",
+# "Run workflow". They spend about 0.06 test FET (free, worth nothing) from the
+# faucet, or from the wallet of the optional HERMES_FETCH_PAYER_SEED secret.
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: live-testnet
+  cancel-in-progress: false
+
+jobs:
+  live:
+    name: live testnet
+    runs-on: ubuntu-latest
+    # Optional secrets live in this environment, so only this job can read them.
+    environment: testnet
+    timeout-minutes: 30
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+
+      - name: Set up Python
+        uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6
+        with:
+          python-version: "3.12"
+
+      - name: Set up uv
+        uses: astral-sh/setup-uv@94527f2e458b27549849d47d273a16bec83a01e9 # v7
+        with:
+          version: "0.11.21"
+
+      - name: Install
+        run: |
+          uv sync --locked --extra dev --python 3.12
+
+      - name: Live testnet tests
+        env:
+          HERMES_FETCH_LIVE_TESTNET: "1"
+          HERMES_FETCH_PAYER_SEED: ${{ secrets.HERMES_FETCH_PAYER_SEED }}
+          HERMES_FETCH_LIVE_AGENTVERSE_API_KEY: ${{ secrets.HERMES_FETCH_LIVE_AGENTVERSE_API_KEY }}
+        run: uv run --locked --extra dev python -m pytest tests/test_live_testnet.py -v -rs

@@ -1,69 +1,76 @@
 # Contributing
 
-Thank you for improving Hermes Fetch AI. This project is intentionally small: a standalone Hermes plugin that exposes an allowlisted subset of Hermes tools to Fetch.ai uAgents with conservative security defaults.
+Thank you for improving Hermes Fetch AI. The project is deliberately small: a standalone bridge, with a thin Hermes plugin, that lets Fetch.ai uAgents call an allowlisted subset of Hermes tools with conservative security defaults.
 
 ## Ground rules
 
-- Keep Hermes core unchanged unless Hermes maintainers explicitly request a core PR.
-- Keep the bridge default-deny.
-- Do not add public tools to examples casually.
-- Do not commit seeds, tokens, mailbox keys, API keys, private endpoints, or connection strings.
-- Redact sensitive values as `[REDACTED]` in issues, tests, docs, and logs.
-- Prefer small PRs with tests and verification evidence.
+- Keep the bridge default-deny, and do not make tools public in the examples without a reason.
+- Keep Hermes core unchanged; the bridge talks to Hermes only through its tools MCP server.
+- Never commit seeds, tokens, mailbox keys, API keys, private endpoints, or connection strings. Write `[REDACTED]` in issues, tests, docs, and logs.
+- Prefer small pull requests with tests and the output of the local gate.
+
+Report vulnerabilities privately, as described in [`SECURITY.md`](SECURITY.md), not in a public issue.
 
 ## Development setup
 
-```bash
-uv sync --extra dev
-uv run python -m hermes_fetch_ai.cli doctor
-uv run python -m hermes_fetch_ai.cli demo local
-```
-
-## Required local gate
-
-Run the full gate before opening a PR:
+Python 3.11 or 3.12:
 
 ```bash
-uv run python -m hermes_fetch_ai.cli doctor
-uv run python -m hermes_fetch_ai.cli doctor --contamination-scan
-uv run ruff check .
-uv run mypy src tests
-uv run pytest -q
-uv run python -m hermes_fetch_ai.cli demo local
-rm -rf dist build
-uv run python -m build
-uv run python -m twine check dist/*
-uv run python -m pip_audit --skip-editable --ignore-vuln CVE-2025-69277
+uv sync --locked --extra dev
+uv run --locked --extra dev hermes-fetch-ai doctor
+uv run --locked --extra dev hermes-fetch-ai demo local
 ```
 
-The `PyNaCl` ignore is a tracked upstream dependency exception. Do not add new ignores without documenting the reason in `docs/security.md`.
+With pip: `python -m pip install -e ".[dev]"`.
 
-## Testing expectations
+## Local gate
 
-- Use TDD for security and policy behavior: failing regression first, implementation second, targeted tests third.
-- Tests must be hermetic by default. No live Agentverse, Almanac, ASI, or real Hermes install in default CI.
-- Use gated tests for live Hermes checks (`HERMES_FETCH_FIELD_TEST=1`).
-- Prefer behavior assertions over implementation snapshots.
+Run this before opening a pull request; CI runs the same checks on Linux, macOS, and Windows:
 
-## Replay metadata
+```bash
+uv run --locked --extra dev ruff check .
+uv run --locked --extra dev ruff format --check .
+uv run --locked --extra dev mypy src tests
+uv run --locked --extra dev pytest -q --cov --cov-fail-under=90
+uv run --locked --extra dev hermes-fetch-ai demo local
+uv run --locked --extra dev hermes-fetch-ai demo paid
+uv run --locked --extra dev hermes-fetch-ai demo chat
+uv run --locked --extra dev hermes-fetch-ai demo buy
+uv run --locked --extra dev python -m build --outdir dist/verification
+uv run --locked --extra dev python -m twine check dist/verification/*
+uv run --locked --extra dev python tests/wheel_smoke.py dist/verification/hermes_fetch_ai-1.0.0-py3-none-any.whl
+uv run --locked --extra dev python -m pip_audit --skip-editable --ignore-vuln CVE-2025-69277 --ignore-vuln PYSEC-2026-1325
+```
 
-`CallTool` requires `_hermes_fetch_ai` replay metadata by default. Tests and examples should use `hermes_fetch_ai.direct_protocol.replay_args(...)` unless they are explicitly testing malformed/missing metadata.
+- Commit `uv.lock` with dependency changes. Use `uv lock` to update it deliberately; CI installs with `--locked` and Dependabot maintains the uv graph.
+- The wheel smoke creates an isolated environment outside the source tree, checks dependency consistency and bundled config, and runs all four offline demos.
+- Coverage is branch coverage and counts the CLI and `serve` subprocesses that the tests start.
+- The package type-checks under `mypy --strict`; tests use relaxed settings (see `pyproject.toml`).
+- `ruff` and `mypy` are pinned to a minor series, so a new release cannot change the rules underneath CI. Dependabot proposes the bumps; fix any new findings in that pull request.
+- The two `pip_audit` ignores are documented in [`docs/security.md`](docs/security.md#residual-risks). Do not add one without documenting it there.
 
-## Pull request checklist
+Changes to `hermes-plugin/fetchai-bridge` must keep it stdlib-only. If you have a Hermes install, also run `hermes plugins validate hermes-plugin/fetchai-bridge --install-deps`. CI runs that, `hermes plugins doctor --ci`, the plugin's CLI, and the field test against Hermes 0.21.5 and a pinned `main`.
 
-- [ ] I ran the required local gate.
-- [ ] I added or updated tests.
-- [ ] I updated docs for behavior/config changes.
-- [ ] I did not commit secrets or real seed material.
-- [ ] I considered Windows and Unix behavior.
-- [ ] I described residual risk and dependency exceptions.
+## Tests
 
-## Commit style
+- For security and policy changes, write the failing test first.
+- The default test run is hermetic: no Agentverse, Almanac, or Hermes install, and it passes with networking disabled (only loopback). The `almanac_calls` fixture in `tests/conftest.py` records Almanac contacts, so tests can check that a private bridge makes none.
+- Tests against a real Hermes install are opt-in (`HERMES_FETCH_FIELD_TEST=1`); [`docs/demo.md`](docs/demo.md#field-test-against-a-real-hermes-agent-install) shows how to run them.
+- Tests against Fetch's real testnet are opt-in too: `HERMES_FETCH_LIVE_TESTNET=1 pytest tests/test_live_testnet.py`. They read Dorado's ledger, get test FET from Fetch's faucet into a wallet made for the run (or use the buying wallet of `HERMES_FETCH_PAYER_SEED`), pay a `serve` bridge and a chat seller for real, and search Agentverse (with `HERMES_FETCH_LIVE_AGENTVERSE_API_KEY` if set). A run spends about 0.06 test FET and takes a few minutes. On GitHub, the "Live testnet" workflow runs them by hand only; its optional secrets go in the repository's `testnet` environment.
+- `tests/test_protocol_canaries.py` pins Fetch's protocol digests and the message fields the bridge and ASI:One use, and checks that the Agentverse listing names exactly the protocols the agent speaks. A uAgents upgrade that changes them fails there first.
+- A test may connect only to this machine; the guard in `tests/conftest.py` fails any other connection, also through a proxy, unless the test is marked `network`. gRPC opens its own sockets, which the guard cannot see, so tests that build plain uAgents agents use the `almanac_calls` fixture.
+- `tests/test_contamination.py` keeps the public tree on topic.
+- Test behavior, not implementation details.
+- Calls in tests and examples carry replay-protection metadata from `hermes_fetch_ai.direct_protocol.replay_args(...)`, unless the test is about missing or malformed metadata.
 
-Use Conventional Commits where practical, for example:
+## Pull requests
+
+Fill in the pull request template. Update the docs and `CHANGELOG.md` when behavior or configuration changes, and say what residual risk a change leaves.
+
+Commit messages follow [Conventional Commits](https://www.conventionalcommits.org/):
 
 ```text
 fix(policy): reject replayed tool calls
-feat(plugin): expose fetchai command group
-chore(ci): add CodeQL workflow
+feat(plugin): pass Hermes' interpreter to the bridge
+ci: add CodeQL workflow
 ```

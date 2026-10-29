@@ -1,0 +1,5 @@
+{
+  "code": 5,
+  "message": "rpc error: code = NotFound desc = tx not found: 0000000000000000000000000000000000000000000000000000000000000000: key not found",
+  "details": []
+}

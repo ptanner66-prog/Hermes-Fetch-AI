@@ -1,3 +1,4 @@
+import asyncio
 import os
 import sys
 from contextlib import asynccontextmanager
@@ -5,8 +6,13 @@ from types import SimpleNamespace
 
 import pytest
 
-from hermes_fetch_ai.config import BridgeConfig
-from hermes_fetch_ai.mcp_shim import HermesMCPClientShim, filtered_env
+from hermes_fetch_ai.config import HERMES_PYTHON_VAR, HERMES_PYTHONPATH_VAR, BridgeConfig
+from hermes_fetch_ai.mcp_shim import (
+    HermesBackendError,
+    HermesMCPClientShim,
+    filtered_env,
+    stdio_parameters,
+)
 
 
 def cfg(**kw):
@@ -106,22 +112,22 @@ def test_windows_env_allowlist_includes_expected_when_present(monkeypatch):
 
 
 @pytest.mark.asyncio
-async def test_timeout_returns_structured_error():
+async def test_startup_timeout_raises_backend_error():
     c = cfg(
         hermes_mcp={
             "mode": "stdio",
             "command": sys.executable,
             "args": ["-c", "import time; time.sleep(5)"],
-            "timeout_seconds": 0.1,
+            "startup_timeout_seconds": 0.1,
         }
     )
-    async with HermesMCPClientShim(c) as shim:
-        out = await shim.call_tool("echo", {"text": "x"})
-    assert out.is_error and out.text == "timeout"
+    with pytest.raises(HermesBackendError, match="(?i)timed out"):
+        async with HermesMCPClientShim(c):
+            pass
 
 
 @pytest.mark.asyncio
-async def test_broken_subprocess_no_stderr_secret_leak():
+async def test_broken_subprocess_fails_fast_without_stderr_secret_leak(capfd):
     marker = "s" + "k-secret"
     c = cfg(
         hermes_mcp={
@@ -131,9 +137,227 @@ async def test_broken_subprocess_no_stderr_secret_leak():
                 "-c",
                 f"import sys; print({marker!r}, file=sys.stderr); sys.exit(2)",
             ],
-            "timeout_seconds": 0.1,
+            "timeout_seconds": 5,
         }
     )
+    with pytest.raises(HermesBackendError) as exc:
+        async with HermesMCPClientShim(c):
+            pass
+    captured = capfd.readouterr()
+    assert marker not in str(exc.value)
+    assert marker not in captured.out + captured.err
+
+
+@pytest.mark.asyncio
+async def test_missing_command_raises_backend_error():
+    c = cfg(hermes_mcp={"mode": "stdio", "command": "/nonexistent/hermes-python"})
+    with pytest.raises(HermesBackendError, match="command not found"):
+        async with HermesMCPClientShim(c):
+            pass
+
+
+@pytest.mark.asyncio
+async def test_in_process_mode_without_hermes_raises_backend_error():
+    with pytest.raises(HermesBackendError, match="not importable"):
+        async with HermesMCPClientShim(cfg(hermes_mcp={"mode": "in_process_hermes_tools"})):
+            pass
+
+
+@pytest.mark.asyncio
+async def test_call_timeout_returns_structured_error(monkeypatch):
+    @asynccontextmanager
+    async def fake_stdio_client(params, errlog):
+        yield "read-stream", "write-stream"
+
+    class HangingSession:
+        def __init__(self, *args, **kwargs):
+            pass
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *exc):
+            return None
+
+        async def initialize(self):
+            return None
+
+        async def call_tool(self, name, args):
+            await asyncio.sleep(30)
+
+    monkeypatch.setattr("hermes_fetch_ai.mcp_shim.stdio_client", fake_stdio_client)
+    monkeypatch.setattr("hermes_fetch_ai.mcp_shim.ClientSession", HangingSession)
+    c = cfg(hermes_mcp={"mode": "stdio", "command": "cmd", "timeout_seconds": 0.1})
     async with HermesMCPClientShim(c) as shim:
         out = await shim.call_tool("echo", {"text": "x"})
-    assert marker not in out.text
+    assert out.is_error and out.text == "timeout"
+
+
+@pytest.mark.asyncio
+async def test_backend_exceptions_reach_callers_as_a_fixed_message():
+    async with HermesMCPClientShim(cfg(hermes_mcp={"mode": "fake"})) as shim:
+        # The fake server raises ValueError("unknown tool: <name>").
+        out = await shim.call_tool("/internal/path", {})
+    assert out.is_error and out.text == "tool call failed"
+
+
+@pytest.mark.asyncio
+async def test_unstarted_shim_does_not_pretend_to_have_no_tools():
+    with pytest.raises(RuntimeError, match="not started"):
+        await HermesMCPClientShim(cfg(hermes_mcp={"mode": "fake"})).list_tools()
+
+
+def test_explicit_stdio_command_wins_over_the_plugin_handover(monkeypatch):
+    monkeypatch.setenv(HERMES_PYTHON_VAR, "/hermes/venv/bin/python")
+    monkeypatch.setenv(HERMES_PYTHONPATH_VAR, "/hermes/checkout")
+    params = stdio_parameters(
+        cfg(hermes_mcp={"mode": "stdio", "command": "cmd", "args": ["--serve"]})
+    )
+    assert (params.command, params.args) == ("cmd", ["--serve"])
+    assert params.env is not None and "PYTHONPATH" not in params.env
+    assert params.env["HERMES_QUIET"] == "1" and params.env["HERMES_REDACT_SECRETS"] == "true"
+
+
+def test_unset_stdio_command_uses_the_hermes_that_launched_the_bridge(monkeypatch):
+    monkeypatch.setenv(HERMES_PYTHON_VAR, "/hermes/venv/bin/python")
+    monkeypatch.setenv(HERMES_PYTHONPATH_VAR, "/hermes/checkout")
+    params = stdio_parameters(cfg(hermes_mcp={"mode": "stdio"}))
+    assert params.command == "/hermes/venv/bin/python"
+    assert params.args == ["-m", "agent.transports.hermes_tools_mcp_server"]
+    assert params.env is not None and params.env["PYTHONPATH"] == "/hermes/checkout"
+
+
+@pytest.mark.asyncio
+async def test_stdio_server_starts_through_the_plugin_handover(monkeypatch):
+    monkeypatch.setenv(HERMES_PYTHON_VAR, sys.executable)
+    c = cfg(hermes_mcp={"mode": "stdio", "args": ["tests/fakes/fake_mcp_subprocess.py"]})
+    async with HermesMCPClientShim(c) as shim:
+        assert (await shim.call_tool("echo", {"text": "ok"})).text == "ok"
+
+
+@pytest.mark.asyncio
+async def test_startup_failure_names_the_handed_over_command(monkeypatch):
+    monkeypatch.setenv(HERMES_PYTHON_VAR, "/nonexistent/hermes/bin/python")
+    monkeypatch.setenv(HERMES_PYTHONPATH_VAR, "/nonexistent/hermes/checkout")
+    c = cfg(hermes_mcp={"mode": "stdio"})
+    with pytest.raises(HermesBackendError) as exc:
+        async with HermesMCPClientShim(c):
+            pass
+    message = str(exc.value)
+    assert "command not found" in message
+    assert (
+        "run `/nonexistent/hermes/bin/python -m agent.transports.hermes_tools_mcp_server`"
+        " and Hermes' PYTHONPATH by hand" in message
+    )
+
+
+@pytest.mark.asyncio
+async def test_startup_failure_leaves_custom_args_out_of_the_message():
+    c = cfg(hermes_mcp={"mode": "stdio", "command": "/nonexistent/python", "args": ["--opt", "x"]})
+    with pytest.raises(HermesBackendError) as exc:
+        async with HermesMCPClientShim(c):
+            pass
+    message = str(exc.value)
+    assert "run `/nonexistent/python` with the configured args by hand" in message
+    assert "--opt" not in message
+
+
+@pytest.mark.asyncio
+async def test_in_process_calls_obey_the_same_deadline_as_stdio():
+    class SlowServer:
+        async def list_tools(self):
+            await asyncio.sleep(0.15)
+            return []
+
+        async def call_tool(self, name, args):
+            await asyncio.sleep(0.15)
+            return "late result"
+
+    shim = HermesMCPClientShim(cfg(hermes_mcp={"mode": "fake", "timeout_seconds": 0.01}))
+    shim.server = SlowServer()
+    with pytest.raises(TimeoutError):
+        await shim.list_tools()
+    result = await shim.call_tool("echo", {})
+    assert result.is_error and result.text == "timeout"
+
+
+@pytest.mark.asyncio
+async def test_cancelled_startup_closes_transport_and_session(monkeypatch):
+    closed = []
+    entered = asyncio.Event()
+
+    @asynccontextmanager
+    async def transport(*args, **kwargs):
+        try:
+            yield None, None
+        finally:
+            closed.append("transport")
+
+    class WaitingSession:
+        def __init__(self, *args, **kwargs):
+            pass
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *args):
+            closed.append("session")
+
+        async def initialize(self):
+            entered.set()
+            await asyncio.Event().wait()
+
+    monkeypatch.setattr("hermes_fetch_ai.mcp_shim.stdio_client", transport)
+    monkeypatch.setattr("hermes_fetch_ai.mcp_shim.ClientSession", WaitingSession)
+    shim = HermesMCPClientShim(cfg(hermes_mcp={"mode": "stdio", "command": "test"}))
+    start = asyncio.create_task(shim.start())
+    await entered.wait()
+    start.cancel()
+    with pytest.raises(asyncio.CancelledError):
+        await start
+    assert closed == ["session", "transport"]
+    assert shim._exit_stack is None and shim.session is None
+
+
+@pytest.mark.asyncio
+async def test_slow_initialization_does_not_lengthen_tool_deadlines(monkeypatch):
+    @asynccontextmanager
+    async def transport(*args, **kwargs):
+        yield None, None
+
+    class Session:
+        def __init__(self, *args, **kwargs):
+            pass
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *args):
+            pass
+
+        async def initialize(self):
+            await asyncio.sleep(0.05)
+
+        async def call_tool(self, name, args):
+            await asyncio.sleep(0.05)
+            return {"content": [{"type": "text", "text": "late"}]}
+
+    monkeypatch.setattr("hermes_fetch_ai.mcp_shim.stdio_client", transport)
+    monkeypatch.setattr("hermes_fetch_ai.mcp_shim.ClientSession", Session)
+    config = cfg(
+        hermes_mcp={
+            "mode": "stdio",
+            "command": "test",
+            "startup_timeout_seconds": 1,
+            "timeout_seconds": 0.01,
+        }
+    )
+    async with HermesMCPClientShim(config) as shim:
+        result = await shim.call_tool("echo", {})
+        assert result.is_error and result.text == "timeout"
+
+
+@pytest.mark.parametrize("timeout", [0, -1, float("inf"), float("nan"), 301])
+def test_startup_deadline_is_finite_positive_and_bounded(timeout):
+    with pytest.raises(ValueError):
+        cfg(hermes_mcp={"startup_timeout_seconds": timeout})

@@ -2,39 +2,24 @@
 
 ## Supported versions
 
-This repository is pre-1.1 and hardening-focused. Security fixes target `main` and the latest tagged release once releases begin.
-
-| Version | Supported |
-| --- | --- |
-| `main` | Yes |
-| Latest release | Yes |
-| Older commits/tags | Best effort only |
+No release has been tagged yet. Until `v1.0.0` ships, fixes land on `main` only; after that, the latest release and `main` are supported.
 
 ## Reporting a vulnerability
 
-Please do not open a public issue for a vulnerability report.
+Report privately at <https://github.com/ptanner66-prog/Hermes-Fetch-AI/security/advisories/new>. Do not open a public issue.
 
-Use GitHub Security Advisories if available, or contact the repository owner privately with:
+Please include:
 
-- affected commit/version;
-- safe reproduction steps;
-- expected impact;
-- whether the issue requires secrets, hosted Agentverse state, or a local Hermes install;
-- logs with all secrets replaced by `[REDACTED]`.
+- the affected commit or version;
+- steps to reproduce, safe to run;
+- the expected impact;
+- whether it needs secrets, hosted Agentverse state, or a local Hermes install;
+- logs, with every secret replaced by `[REDACTED]`.
 
 Never send real seeds, tokens, mailbox keys, API keys, private endpoints, or connection strings.
 
-Expected maintainer response:
+The project has one maintainer. Expect an acknowledgement within a few days, a fix on a private branch (or a documented mitigation if no code change can help), and a published advisory once the fix is available.
 
-1. Acknowledge within 72 hours.
-2. Confirm severity and affected versions.
-3. Patch on a private branch or publish a mitigation if no code change is possible.
-4. Release and disclose after the fix is available.
+## Security model
 
-## Security model summary
-
-Hermes Fetch AI is default-deny. It exposes a policy-filtered subset of Hermes tools to signed uAgent messages and applies replay protection, global/per-sender rate limiting, schema validation, URL/shell-input guards, bounded output, redacted audit, and environment-only production seed loading.
-
-The bridge targets the Hermes tools MCP server only. The Hermes conversations/messaging MCP surface is out of scope and must not be exposed through this bridge.
-
-See `docs/security.md` for the full threat model and residual dependency exceptions.
+The bridge is default-deny. It exposes a policy-filtered subset of Hermes tools to signed uAgent messages, with replay protection, rate limits, schema and URL/shell argument checks, size-capped output, a redacted audit log, and seeds read only from the environment. It uses Hermes' tools MCP server only, never the conversations and messaging surface. The threat model, controls, and residual risks are in [`docs/security.md`](docs/security.md).

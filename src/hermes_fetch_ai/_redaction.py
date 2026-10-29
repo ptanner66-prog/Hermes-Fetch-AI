@@ -5,12 +5,15 @@ import re
 from typing import Any
 
 REDACTED = "[REDACTED]"
+# Words that mark a secret, shared by log redaction and the config secret scanner.
+SECRET_WORDS = r"seed|secret|token|api[_-]?key|password|mailbox[_-]?key"
+_SENSITIVE_KEY = re.compile(rf"(?i)({SECRET_WORDS})")
 _SENSITIVE_KV = re.compile(
-    r"(?i)\b(seed|secret|token|api[_-]?key|password)(\s*[:=]\s*)"
-    r"(\"[^\"]*\"|'[^']*'|[^,'\";}\]\r\n]+)"
+    rf"(?i)\b({SECRET_WORDS})([\"']?\s*[:=]\s*)"
+    r"(\"(?:\\.|[^\"\\])*\"|'(?:\\.|[^'\\])*'|[^,'\";}\]\r\n]+)"
 )
 _PATTERNS = [
-    re.compile(r"Bearer\s+[A-Za-z0-9._~+/=-]+", re.I),
+    re.compile(r"Bearer\s+[A-Za-z0-9._~+/=-]+", re.IGNORECASE),
     re.compile(r"\b[sp]k-[A-Za-z0-9_-]{12,}\b"),
     re.compile(r"\beyJ[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\b"),
     re.compile(r"\b0x[a-fA-F0-9]{32,}\b"),
@@ -21,7 +24,13 @@ _PATTERNS = [
 
 def redact_text(s: str) -> str:
     out = str(s)
-    out = _SENSITIVE_KV.sub(lambda m: f"{m.group(1)}{m.group(2)}{REDACTED}", out)
+
+    def hide(match: re.Match[str]) -> str:
+        value = match.group(3)
+        quote = value[0] if value.startswith(('"', "'")) else ""
+        return f"{match.group(1)}{match.group(2)}{quote}{REDACTED}{quote}"
+
+    out = _SENSITIVE_KV.sub(hide, out)
     for pat in _PATTERNS:
         out = pat.sub(REDACTED, out)
     return out
@@ -31,7 +40,7 @@ def redact_dict(d: Any) -> Any:
     if isinstance(d, dict):
         result = {}
         for k, v in d.items():
-            if re.search(r"(?i)(seed|secret|token|api[_-]?key|password)", str(k)):
+            if _SENSITIVE_KEY.search(str(k)):
                 result[k] = REDACTED
             else:
                 result[k] = redact_dict(v)

@@ -2,17 +2,41 @@
 
 ## Process model
 
-One bridge per process. `serve` owns a dedicated event loop, starts the MCP backend (stdio subprocess preferred), runs the uAgent server, and shuts down gracefully on SIGINT/SIGTERM/SIGBREAK (exit code 0; the MCP child receives a clean EOF). The two-process HTTP round trip, signed message exchange, and graceful shutdown path are covered by `tests/test_serve_http_roundtrip.py`.
+One bridge per process. `serve` owns an event loop, starts the MCP backend (a stdio subprocess for real Hermes tools), runs the uAgent HTTP server, and on SIGINT or SIGTERM (CTRL_BREAK on Windows) shuts down and exits 0, closing the MCP child's stdin. `tests/test_serve_http_roundtrip.py` runs this in a separate process, in fake mode and in stdio mode, and sends SIGTERM (CTRL_BREAK on Windows).
+
+`serve` exits with status 1 and a one-line reason when it cannot start, so `Restart=on-failure` below retries it:
+
+- `hermes backend: FAIL: ...` when Hermes' tools server cannot start. The child's stderr is discarded because it is outside the bridge's redaction boundary; the message names the command to run by hand to see the error.
+- `serve: FAIL: ...` when the HTTP server cannot start, for example because `agent.port` is taken.
+
+If the backend dies after startup, callers get `backend unavailable` and the audit log records `decision: error`; restart the service to recover.
+
+## Running in the background
+
+`start` runs `serve` in the background and returns once the agent is up, `stop` stops it, `restart` does both, and `status` and `logs` show how it is doing. These are what `hermes fetchai-bridge start` and the others run; like every command, they use the config `setup` wrote unless given `--config`.
+
+- **The records folder.** Everything lives in `payments.state_dir` (by default `~/.local/state/hermes-fetch-ai`, or `%LOCALAPPDATA%\HermesFetchAI` on Windows): `serve.log`, the background agent's output (readable only by you, and set aside as `serve.log.1` by a `start` once it passes 5 MB); `serve.json`, the run file; `control.json` when buying is on; and a folder per agent address with the payment records.
+- **Starting.** `start` runs `serve` in a session of its own (a detached process on Windows), so it keeps running when the terminal closes. It waits up to a minute for the agent to say it is up (Hermes' tools server, the records, and the control channel) and to stay up two more seconds. If the agent exits instead, `start` prints the end of its log and exits 1; if it is still starting after a minute, `start` says so and exits 0.
+- **One bridge per records folder.** `serve`, however it was started (by `start`, by hand, or by a service manager), writes `serve.json` (its process id, start time, config, log, and whether it is up) and removes it when it stops. A second `serve` with the same records folder refuses to start while the first runs (`serve: FAIL: another bridge is already running with these records`): the two would share the control channel's file, and each would take the other's work in progress for interrupted work. To run two agents on one machine, give each its own `payments.state_dir`. A run file left by a crash, or one naming a process id that another program now has, is ignored and removed.
+- **Stopping.** `stop` sends SIGTERM (on Windows, where a background process gets no console signals, it creates `serve.stop`, which `serve` checks for every second) and waits up to 40 seconds; `serve` gives work in progress 20 of them. A bridge that has not stopped by then is stopped by force (SIGKILL, or `taskkill /F /T` on Windows), and `stop` exits 1.
+- **Interrupted work.** When `serve` starts, once it holds the records folder, it returns paid requests that were running when the bridge last stopped to `paid`, so each runs again when its buyer asks again, and marks payments it was in the middle of sending `needs_review` (settle each with `buyer check <id>`). It logs both. Commands that open the records while the bridge runs (`status`, `seller credits`, `seller pause`) change neither.
+- **Health.** `status` reads the run file, the records, and, unless given `--offline`, the testnet: the wallets' balances and how long ago the newest block was made. It never contacts the running bridge. It exits 0 when the agent runs and 3 when it does not, so a script or a monitor can use it.
+
+`start` keeps the agent running until it is stopped or the computer restarts. For an agent that stays online across restarts and comes back after a crash, run `serve` under a service manager instead, as below. `status` still works, because `serve` writes the run file however it runs; its output then goes to the manager's log (`journalctl -u hermes-fetch-ai`), not `serve.log`.
 
 ## Secrets
 
-- `UAGENT_SEED` comes from the environment only. The config loader rejects production YAML seed values; mailbox/hosted mode fails closed without the seed; logs and audit redact seed-shaped strings.
-- Use a dedicated agent seed. Fund the derived `fetch1...` wallet with only what Almanac registration needs.
-- Do not put seeds, mailbox keys, API tokens, private endpoints, or connection strings in examples, audit logs, issues, PRs, or screenshots.
+- `UAGENT_SEED` comes from the environment only. Config files with seed or mailbox-key values are rejected, mailbox mode refuses to start without the seed, and logs and audit records redact seed-shaped strings.
+- The seed must be at least 32 characters, because the agent's signing key is derived from it. `hermes fetchai-bridge setup` makes one and keeps it in Hermes' `.env`; for a service, generate one with `python -c "import secrets; print(secrets.token_hex(32))"`.
+- Production configs set `agent.dev_random_seed: false` (as `examples/hermes-stdio.yaml` does). With `true`, `UAGENT_SEED` is ignored and the bridge gets a new address on every start; `doctor` and `serve` print `seed: WARN` in that case.
+- Use a dedicated agent seed, not a wallet that holds real funds. The seed also derives the agent's `fetch1...` wallet, which Almanac registration (`publish_manifest: true`) can spend from.
+- Keep seeds, mailbox keys, API tokens, private endpoints, and connection strings out of configs, audit logs, issues, pull requests, and screenshots.
+- With buying on, `serve` writes `control.json` (the control channel's port and token, mode 0600) to `payments.state_dir`, and removes it on shutdown. Treat it like a key: anyone who can read it can ask the bridge to pay, within its limits. Keep only small amounts in the buying wallet.
+- A guest Hermes ([`guest-hermes.md`](guest-hermes.md)) reads its model key from its own keys file (`doctor` names it), mode 0600. Give each guest a key of its own with a spending limit at the provider, so a busy service cannot spend beyond it and the key can be cancelled alone.
 
-## Replay/idempotency contract
+## Replay-protection contract
 
-`CallTool` requires bridge metadata by default under reserved args key `_hermes_fetch_ai`:
+`CallTool` requires this metadata by default, under the reserved argument key `_hermes_fetch_ai`:
 
 ```json
 {
@@ -23,17 +47,7 @@ One bridge per process. `serve` owns a dedicated event loop, starts the MCP back
 }
 ```
 
-Clients should generate a fresh request ID per attempted tool call. The bridge strips this metadata before schema validation and before invoking Hermes. Duplicate request IDs for the same sender, stale timestamps, future timestamps beyond configured skew, malformed metadata, and oversized calls are denied before tool invocation.
-
-Relevant policy knobs:
-
-```yaml
-policy:
-  require_replay_metadata: true
-  replay_ttl_seconds: 300
-  max_replay_entries: 8192
-  max_replay_clock_skew_seconds: 60
-```
+Clients generate a fresh request ID (8 to 128 characters from `A-Z a-z 0-9 _ . : -`) for every call. The bridge strips the metadata before schema validation and before calling Hermes. A stale or future timestamp, malformed metadata, and oversized calls are denied before the tool runs. The bridge remembers a sender's request ID once the call has passed every check and is handed to the tool, so reusing it gets `replay detected`, even if the tool failed; a call denied earlier does not use up its ID. `hermes_fetch_ai.direct_protocol.replay_args()` builds the metadata for Python clients, as [`examples/call_bridge.py`](../examples/call_bridge.py) shows. The settings are in [`configuration.md`](configuration.md#policy).
 
 ## systemd unit (example)
 
@@ -46,11 +60,14 @@ Wants=network-online.target
 [Service]
 Type=exec
 User=hermes-bridge
-EnvironmentFile=/etc/hermes-fetch-ai/env      # UAGENT_SEED=... (mode 0600)
+# /etc/hermes-fetch-ai/env holds UAGENT_SEED=... (owner root, mode 0600).
+EnvironmentFile=/etc/hermes-fetch-ai/env
+Environment=HERMES_HOME=/var/lib/hermes-fetch-ai/hermes
 ExecStart=/opt/hermes-fetch-ai/venv/bin/hermes-fetch-ai serve --config /etc/hermes-fetch-ai/bridge.yaml
 Restart=on-failure
 RestartSec=5
 NoNewPrivileges=true
+PrivateTmp=true
 ProtectSystem=strict
 ReadWritePaths=/var/lib/hermes-fetch-ai
 
@@ -58,46 +75,57 @@ ReadWritePaths=/var/lib/hermes-fetch-ai
 WantedBy=multi-user.target
 ```
 
-Point `logging.audit_path` at `/var/lib/hermes-fetch-ai/audit.jsonl` and rotate it with logrotate (`copytruncate`); the writer appends line-delimited JSON and tolerates truncation between writes.
+systemd only treats whole lines starting with `#` as comments, so keep comments off the `EnvironmentFile=` line. In `bridge.yaml`, set `hermes_mcp.command` to the Hermes environment's Python (a supervised `serve` does not get the Hermes plugin's interpreter hand-over) and point `logging.audit_path` at `/var/lib/hermes-fetch-ai/audit.jsonl`. The audit writer rotates the file itself at 25 MB, keeping `audit.jsonl.1` to `audit.jsonl.5`; if you also use logrotate, use `copytruncate`.
 
-## Network egress
+## Payment records
 
-- Local/endpoint mode with `publish_manifest: false`: no mandatory egress for local tests. uAgents may probe the configured network at startup; failures are logged and non-fatal in local mode.
-- Hosted mode (mailbox/manifest): allow egress to Agentverse and the configured Fetch network (Almanac REST/gRPC, mailbox HTTPS).
+A bridge that sells services ([`payments.md`](payments.md)) keeps its payment records in `payments.sqlite3`, in a folder per agent address under `payments.state_dir` (for the unit above, set `state_dir: /var/lib/hermes-fetch-ai`). The bridge makes that folder readable only by its user.
+
+- **Back it up with the seed.** The database remembers which payments were already used. Losing it lets a buyer present a payment again until its quote's redeem window closes (by default up to 24 hours after the quote expires), and loses the list of payments to refund.
+- **Copy it safely.** `hermes-fetch-ai seller backup --to <new file> --config <file>` writes a consistent copy, readable only by you, even while the bridge runs. Copying the file directly can miss recent payments, which SQLite keeps in a separate write-ahead log for a while.
+- **One database per agent.** Each agent address gets its own folder under `state_dir`. Only one bridge runs per `state_dir` at a time ([above](#running-in-the-background)); owner commands share the database safely while it runs, because SQLite serializes them.
+- **Versions.** The database records its schema version, and a bridge refuses a database written by a newer version rather than misreading it.
+
+Watch `seller credits` for `failed` payments and extra payments, which need refunds.
+
+## Network
+
+- The bridge listens on all interfaces (`0.0.0.0`) on `agent.port`; uAgents has no bind-address setting. Firewall the port so only the callers you expect can reach it.
+- With `publish_manifest: false`, the bridge makes no outbound calls of its own: no Almanac registration, contract lookup, or status reports (`tests/test_uagent_direct_protocol.py` checks this). Replying to a remote agent can need egress to Agentverse's Almanac API or the Fetch ledger, to look up that agent's endpoint.
+- Mailbox mode and `publish_manifest: true` need egress to Agentverse and the configured Fetch network (Almanac REST and gRPC, mailbox HTTPS).
+- Selling services needs egress to `payments.ledger_url` (`https://rest-dorado.fetch.ai` by default), only when a paid call arrives.
+- Selling through ASI:One in mailbox mode needs egress to Agentverse (`agentverse.ai`): the mailbox, the Almanac API, and manifests. `agentverse register` also calls Agentverse's API with your API key.
+- Buying needs egress to `payments.ledger_url` (to send payments and check them), to Agentverse (`agentverse.ai`) for `buyer find`, to the agents Hermes writes to (or Agentverse, for mailbox agents), and, for `wallet --fund`, to Fetch's testnet faucet.
+- A guest Hermes needs egress to its model provider and, with the `web` toolset, to the web search services Hermes uses and the public pages it reads. Behind a proxy, list `HTTPS_PROXY` (and `HTTP_PROXY`, `NO_PROXY`) in the runner's `pass_env`; note that with a proxy, Hermes no longer resolves host names itself before refusing private addresses.
+
+## Who can reach the bridge
+
+- With `publish_manifest: false`, the bridge is not registered in the Almanac, so remote agents cannot discover it; only clients configured with its endpoint can call it. It still listens on `0.0.0.0:<port>`, so any host that can reach the port can call its public tools.
+- Public discovery needs either `publish_manifest: true` with a reachable `agent.endpoint` (registration may need a funded wallet) or mailbox mode ([`agentverse-mailbox.md`](agentverse-mailbox.md)). Neither path is covered by CI yet; prove it on testnet first.
 
 ## Going to mainnet (checklist)
 
 1. Prove the deployment on `network: testnet` first.
-2. Set `agent.network` explicitly; never reuse a testnet seed casually.
-3. Fund the derived `fetch1...` address only for Almanac registration needs.
-4. Keep `policy.public_tools` empty or minimal (`skills_list` at most for Hermes-backed demos); denylist wins.
-5. Confirm `hermes_mcp.command` points at the Hermes environment's Python and that `HERMES_HOME` is set for the service user.
-6. Confirm callers attach replay metadata and treat replay denials as final, not retriable with the same request ID.
-7. Run the full local gate and the gated field test before promoting a new config.
+2. Set `agent.network` explicitly, and use a separate seed for mainnet.
+3. Fund the derived `fetch1...` address only with what Almanac registration needs.
+4. Keep `policy.public_tools` empty or minimal; the denylist wins.
+5. Check that `hermes_mcp.command` points at the Hermes environment's Python and that `HERMES_HOME` is set for the service user.
+6. Make sure callers attach replay-protection metadata and treat a replay denial as final.
+7. Run the local gate and the field test ([`demo.md`](demo.md)) before promoting a new config.
 
 ## Monitoring
 
-The audit JSONL is the operational signal: decisions, reasons, durations, sizes, truncation, send status, and redacted sender fingerprints. Alert on:
+The JSONL audit log is the operational signal: decisions, reasons, durations, sizes, truncation, send status, and shortened sender addresses. Alert on:
 
-- sustained `denied` spikes;
-- `reason: replay detected` spikes;
-- stale/future replay metadata spikes;
+- sustained spikes in `denied`;
+- spikes in `replay detected` or stale/future replay metadata;
+- `backend unavailable` errors;
 - `send_status: failure`;
-- repeated `args exceed max_args_bytes` or URL/shell validation failures.
+- repeated `args exceed max_args_bytes`, URL, or shell-character rejections;
+- when selling: records with `payment: invalid` or `payment: mismatch` (someone probing the payment checks), `payment: pending` that never clears (the ledger endpoint is down), `decision: error` from a service (its program is failing), and frequent `this service is busy` refusals (raise `max_running` or `max_waiting` if the machine can take more).
 
-`hermes-fetch-ai --version` and `hermes-fetch-ai doctor` are safe health probes. Use `hermes fetchai doctor` only after the active Hermes installation has enabled and wired the plugin CLI.
-
-## GitHub/release governance for this repo
-
-Before public release, configure repository settings so the workflow files are enforceable rather than advisory:
-
-- protect `main` or create a ruleset requiring PRs;
-- require the CI matrix jobs, dependency audit, package build/wheel-smoke, and CodeQL checks;
-- require at least one review and stale-review dismissal;
-- restrict direct pushes and force-pushes;
-- require signed tags or a release ruleset for `v*`;
-- enable GitHub Security Advisories and Dependabot security updates.
+`hermes-fetch-ai doctor --config /etc/hermes-fetch-ai/bridge.yaml` checks the config and the dependency pins; it does not contact a running bridge. For health, watch the process and the audit log, or run `hermes-fetch-ai status --config /etc/hermes-fetch-ai/bridge.yaml` (exit status 3 when the agent is not running; it also warns when the testnet has made no block for two minutes).
 
 ## Upgrades
 
-Dependencies are intentionally constrained. Bump pins in a dedicated change with CI green, build verification, dependency audit, serve smoke, and a field-test re-run (`docs/demo.md`). The current dependency-audit exception for `PyNaCl==1.6.0` is tracked in `docs/security.md` and should be removed only after compatible upstream Fetch/uAgents constraints are available.
+Dependencies are pinned on purpose. Bump them in a dedicated change, with CI green and the field test re-run ([`demo.md`](demo.md)). `doctor` reads the tested pins from the installed package's metadata and warns if the running environment has drifted from them. The dependency-audit exceptions (`PyNaCl==1.6.0` and `ecdsa`) are tracked in [`security.md`](security.md#residual-risks).

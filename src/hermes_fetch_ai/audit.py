@@ -6,7 +6,7 @@ import time
 from pathlib import Path
 from typing import Any
 
-from ._redaction import redact_text, short_sender
+from ._redaction import redact_dict, short_sender
 
 MAX_AUDIT_BYTES = 25 * 1024 * 1024
 KEEP_FILES = 5
@@ -26,6 +26,14 @@ AUDIT_FIELDS = {
     "error_class",
     "mode",
     "send_status",
+    # Paid services: short forms only, the full values live in the payment store.
+    "payment",
+    "credit",
+    "amount_base",
+    "tx_short",
+    "payer_short",
+    # Buying: the purchase's id; amounts and hashes use the fields above.
+    "purchase",
 }
 
 
@@ -37,14 +45,11 @@ class AuditWriter:
     def _rotate(self) -> None:
         if not self.path.exists() or self.path.stat().st_size < MAX_AUDIT_BYTES:
             return
+        # audit.jsonl.4 -> .5 (replacing the oldest), ..., audit.jsonl -> .1
         for idx in range(KEEP_FILES - 1, 0, -1):
             src = self.path.with_suffix(self.path.suffix + f".{idx}")
-            dst = self.path.with_suffix(self.path.suffix + f".{idx + 1}")
             if src.exists():
-                if idx + 1 > KEEP_FILES:
-                    src.unlink(missing_ok=True)
-                else:
-                    src.replace(dst)
+                src.replace(self.path.with_suffix(self.path.suffix + f".{idx + 1}"))
         self.path.replace(self.path.with_suffix(self.path.suffix + ".1"))
 
     def write(self, **event: Any) -> None:
@@ -55,7 +60,9 @@ class AuditWriter:
             safe["sender_short"] = short_sender(str(event["sender"]))
         elif "sender_short" in safe:
             safe["sender_short"] = short_sender(str(safe["sender_short"]))
-        line = redact_text(json.dumps(safe, sort_keys=True, default=str, ensure_ascii=False))
+        # Redact each value, then serialize, so caller-controlled text (a tool
+        # name, say) can never break the JSON line.
+        line = json.dumps(redact_dict(safe), sort_keys=True, default=str, ensure_ascii=False)
         with self.path.open("a", encoding="utf-8") as f:
             f.write(line + "\n")
 
@@ -66,9 +73,23 @@ class AuditWriter:
             return sum(1 for _ in f)
 
 
-def default_audit_path() -> Path:
+def default_state_dir() -> Path:
+    """Where the bridge keeps its state (audit log, payment records) by default."""
     if os.name == "nt":
         base = os.environ.get("LOCALAPPDATA") or str(Path.home() / "AppData" / "Local")
-        return Path(base) / "HermesFetchAI" / "audit.jsonl"
+        return Path(base) / "HermesFetchAI"
     base = os.environ.get("XDG_STATE_HOME") or str(Path.home() / ".local" / "state")
-    return Path(base) / "hermes-fetch-ai" / "audit.jsonl"
+    return Path(base) / "hermes-fetch-ai"
+
+
+def managed_config_path() -> Path:
+    """The config `setup` writes; commands use it when they are given no --config."""
+    if os.name == "nt":
+        base = os.environ.get("APPDATA") or str(Path.home() / "AppData" / "Roaming")
+        return Path(base) / "HermesFetchAI" / "bridge.yaml"
+    base = os.environ.get("XDG_CONFIG_HOME") or str(Path.home() / ".config")
+    return Path(base) / "hermes-fetch-ai" / "bridge.yaml"
+
+
+def default_audit_path() -> Path:
+    return default_state_dir() / "audit.jsonl"

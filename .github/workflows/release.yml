@@ -8,28 +8,39 @@ permissions:
   contents: write
   id-token: write
   attestations: write
+  security-events: write
 
 concurrency:
   group: release-${{ github.ref }}
   cancel-in-progress: false
 
 jobs:
+  verify:
+    uses: ./.github/workflows/ci.yml
+    permissions:
+      contents: read
+
+  security-scan:
+    uses: ./.github/workflows/codeql.yml
+    permissions:
+      contents: read
+      security-events: write
+
   build-and-release:
     name: build and release
+    needs: [verify, security-scan]
     runs-on: ubuntu-latest
     environment: release
     steps:
       - name: Checkout
-        uses: actions/checkout@v7
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         with:
           fetch-depth: 0
 
       - name: Set up Python
-        uses: actions/setup-python@v6
+        uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6
         with:
           python-version: "3.12"
-          cache: pip
-          cache-dependency-path: pyproject.toml
 
       - name: Validate tag matches pyproject version
         run: |
@@ -45,53 +56,56 @@ jobs:
               raise SystemExit(f"release tag {tag!r} does not match pyproject version {expected!r}")
           PY
 
+      - name: Set up uv
+        uses: astral-sh/setup-uv@94527f2e458b27549849d47d273a16bec83a01e9 # v7
+        with:
+          version: "0.11.21"
+
       - name: Install package with dev extras
         run: |
-          python -m pip install -U pip
-          python -m pip install -e ".[dev]"
+          uv sync --locked --extra dev --python 3.12
 
       - name: Verify before release
         run: |
-          python -m hermes_fetch_ai.cli doctor
-          python -m hermes_fetch_ai.cli doctor --contamination-scan
-          python -m ruff check .
-          python -m mypy src tests
-          python -m pytest -q
-          python -m hermes_fetch_ai.cli demo local
+          uv run --locked --extra dev python -m hermes_fetch_ai.cli doctor
+          uv run --locked --extra dev python -m ruff check .
+          uv run --locked --extra dev python -m ruff format --check .
+          uv run --locked --extra dev python -m mypy src tests
+          uv run --locked --extra dev python -m pytest -q --cov --cov-fail-under=90
+          uv run --locked --extra dev python -m hermes_fetch_ai.cli demo local
+          uv run --locked --extra dev python -m hermes_fetch_ai.cli demo paid
+          uv run --locked --extra dev python -m hermes_fetch_ai.cli demo chat
+          uv run --locked --extra dev python -m hermes_fetch_ai.cli demo buy
 
       - name: Dependency audit
         run: |
-          # Temporary upstream exception: uagents -> cosmpy currently pins PyNaCl==1.6.0.
-          # Remove this ignore as soon as cosmpy/uagents permits PyNaCl>=1.6.2.
-          python -m pip_audit --skip-editable --ignore-vuln CVE-2025-69277
+          # Upstream exceptions, documented in docs/security.md:
+          # - CVE-2025-69277: uagents -> cosmpy pins PyNaCl==1.6.0; remove once PyNaCl>=1.6.2 is allowed.
+          # - PYSEC-2026-1325: ecdsa (via uagents-core/cosmpy) Minerva timing side channel; no fix exists.
+          uv run --locked --extra dev python -m pip_audit --skip-editable --ignore-vuln CVE-2025-69277 --ignore-vuln PYSEC-2026-1325
 
       - name: Build sdist and wheel
-        run: python -m build
+        run: uv run --locked --extra dev python -m build
 
       - name: Validate package metadata
-        run: python -m twine check dist/*
+        run: uv run --locked --extra dev python -m twine check dist/*
 
-      - name: Install built wheel in clean environment
-        shell: bash
-        run: |
-          python -m venv /tmp/hfa-release-smoke
-          source /tmp/hfa-release-smoke/bin/activate
-          python -m pip install -U pip
-          python -m pip install dist/*.whl
-          hermes-fetch-ai doctor
-          python - <<'PY'
-          import importlib.metadata
-          eps = importlib.metadata.entry_points().select(group='hermes_agent.plugins')
-          assert any(ep.name == 'fetchai' for ep in eps)
-          PY
+      - name: Install built wheel outside the source checkout
+        run: uv run --locked --extra dev python tests/wheel_smoke.py dist/*.whl
 
       - name: Attest build provenance
-        uses: actions/attest-build-provenance@v4
+        uses: actions/attest-build-provenance@8beda2b7ed98355c0e97c0a63bec38ae472e66c4 # v4
         with:
           subject-path: "dist/*"
 
       - name: Create GitHub release with artifacts
-        uses: softprops/action-gh-release@v3
+        uses: softprops/action-gh-release@5113cdc90fd4d541c801c55356214017bf5ae34b # v3
         with:
           files: dist/*
           generate_release_notes: true
+
+      # Opt-in: set the repository variable PUBLISH_TO_PYPI=true after configuring a
+      # PyPI trusted publisher for this repo, workflow release.yml, environment release.
+      - name: Publish to PyPI (trusted publishing)
+        if: vars.PUBLISH_TO_PYPI == 'true'
+        uses: pypa/gh-action-pypi-publish@7245906fb61fa33a13554f9d5fb856fe61758086 # release/v1
