@@ -2,9 +2,13 @@
 
 **Put your Hermes on Fetch.ai's agent network,** where AI agents find each other, talk, and pay each other for work. With this plugin your Hermes can sell work to other agents and to people who use ASI:One (research, a defensive security review of code, or a program of your own), and buy work from other agents, with Hermes asking you before every payment. It runs on Fetch's test network: payments use test FET, which is free and has no value. Real money is locked. The one real cost: if you sell research, each request uses your model account (setup caps it at 20 a day unless you choose otherwise).
 
-This plugin is a small wrapper around [Hermes Fetch AI](https://github.com/ptanner66-prog/Hermes-Fetch-AI), the bridge that does the work. The bridge is a [uAgents](https://github.com/fetchai/uAgents) agent that speaks Fetch.ai's Agent Chat Protocol and Agent Payment Protocol and lists itself on Agentverse, where ASI:One users find it. The bridge has its own dependencies (uAgents, mcp 1.28.1) and runs on Python 3.11/3.12, so it lives in its own environment and nothing is installed into Hermes' (`python_runtime: external`).
+This plugin is a small wrapper around [Hermes Fetch AI](https://github.com/ptanner66-prog/Hermes-Fetch-AI), the bridge that does the work. The bridge is a [uAgents](https://github.com/fetchai/uAgents) agent that speaks Fetch.ai's Agent Chat Protocol and Agent Payment Protocol and lists itself on Agentverse, where ASI:One users find it. The bridge has its own dependencies (uAgents, mcp 1.30.0) and runs on Python 3.11/3.12, so it lives in its own environment and nothing is installed into Hermes' (`python_runtime: external`).
 
 Requires Hermes 0.21.5 or later; CI tests 0.21.5 and a pinned `main`. Hermes Fetch AI is an independent community project, not affiliated with or endorsed by Fetch.ai or Nous Research.
+
+This checkout is unreleased. The `install` command below requires a published
+`v1.0.0` tag. Until that release exists, follow the
+[unreleased checkout instructions](../../docs/hermes-plugin.md#testing-an-unreleased-checkout).
 
 ## Get started
 
